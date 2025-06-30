@@ -1,0 +1,9 @@
+insert A 1 5 20
+insert B 1 21 50
+insert C 3 10 30
+insert D 2 40 45
+insert E 3 0 7
+children A
+insert F 2 1 9
+
+insert G 3 3 4
