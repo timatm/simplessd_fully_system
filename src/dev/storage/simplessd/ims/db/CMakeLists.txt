@@ -16,7 +16,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # add_compile_options(-Wall -Wextra -Wpedantic -static)
-add_compile_options(-Wall -Wpedantic -static)
+add_compile_options(-Wall -static)
 # ────── 3. 偵測 aligned_alloc ──────
 include(CheckSymbolExists)
 check_symbol_exists(aligned_alloc "stdlib.h" HAVE_ALIGNED_ALLOC)

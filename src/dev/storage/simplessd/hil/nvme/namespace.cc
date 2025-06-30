@@ -734,30 +734,6 @@ void Namespace::datasetManagement(SQEntryWrapper &req, RequestFunction &func) {
 }
 
 // Custom command implementation
-void Namespace:: init_IMS(SQEntryWrapper &req, RequestFunction &func) {
-  (void)func;
-  debugprint(LOG_IMS,
-             "NVM     | initialize IMS data structure");
-  bool err = false;
-
-  CQEntryWrapper resp(req);
-  // uint64_t slba = ((uint64_t)req.entry.dword11 << 32) | req.entry.dword10;
-  // uint16_t nlb = (req.entry.dword12 & 0xFFFF) + 1;
-  err = ims.init_IMS();
-  if (err) {
-    debugprint(LOG_IMS,
-             "NVM     | initialize IMS fail");
-    resp.makeStatus(false, false, TYPE_COMMAND_SPECIFIC_STATUS,
-                    STATUS_IMS_INIT_FAILD);
-  }
-  else{
-    debugprint(LOG_IMS,
-             "NVM     | initialize IMS success");
-    resp.makeStatus(false, false, TYPE_GENERIC_COMMAND_STATUS,
-                    STATUS_IMS_INIT_SUCCESS);
-  }
-  func(resp);
-}
 
 void Namespace::write_sstable(SQEntryWrapper &req, RequestFunction &func) {
   bool err = false;
@@ -885,34 +861,6 @@ void Namespace::write_sstable(SQEntryWrapper &req, RequestFunction &func) {
   }
 }
 
-void Namespace::monitor_IMS(SQEntryWrapper &req, RequestFunction &func){
-  (void)func;
-  debugprint(LOG_IMS,
-             "NVM     | monitor IMS data structure");
-
-  // bool err = false;
-
-  CQEntryWrapper resp(req);
-  uint32_t Dword2 = req.entry.dword11;
-  switch(Dword2){
-    case DUMP_LBNPOOL_INFO:
-      lbnPoolManager.print();
-      break;
-    // case DUMP_MAPPING_INFO:
-    //   mappingManager.dump_mapping();
-    // break;
-    default:
-      debugprint(LOG_IMS,
-             "NVM     | ERROR mointor IMS does't have this subcommand: %d",Dword2);
-      resp.makeStatus(false, false, TYPE_COMMAND_SPECIFIC_STATUS,
-                    STATUS_IMS_INIT_FAILD);       
-      break;
-  }
-  resp.makeStatus(false, false, TYPE_COMMAND_SPECIFIC_STATUS,
-                    STATUS_IMS_INIT_FAILD);
-  func(resp);
-}
-
 
 void Namespace::init_IMS(SQEntryWrapper &req, RequestFunction &func) {
   bool err = false;
@@ -930,9 +878,12 @@ void Namespace::init_IMS(SQEntryWrapper &req, RequestFunction &func) {
              "NVM     | Init_IMS start");
   err = ims.init_IMS();
   if(err == OPERATION_SUCCESS) {
+    debugprint(LOG_IMS,
+             "NVM     | Init_IMS success");
     resp.makeStatus(false, false, TYPE_GENERIC_COMMAND_STATUS,
                     STATUS_IMS_INIT_SUCCESS);
-  } else {
+  } else {debugprint(LOG_IMS,
+             "NVM     | Init_IMS failed");
     resp.makeStatus(false, false, TYPE_GENERIC_COMMAND_STATUS,
                     STATUS_IMS_INIT_FAILED);
     

@@ -140,13 +140,8 @@ class Namespace {
   void search_key(SQEntryWrapper &, RequestFunction &);
   void init_IMS(SQEntryWrapper &, RequestFunction &);
   void close_IMS(SQEntryWrapper &, RequestFunction &);
-<<<<<<< Updated upstream
-
-  void monitor_IMS(SQEntryWrapper &, RequestFunction &);
-=======
   void monitor_IMS(SQEntryWrapper &, RequestFunction &);
 
->>>>>>> Stashed changes
  public:
   Namespace(Subsystem *, ConfigData &);
   ~Namespace();
@@ -162,10 +157,6 @@ class Namespace {
   void format(uint64_t);
 };
 
-enum {
-  DUMP_LBNPOOL_INFO,
-  DUMP_MAPPING_INFO
-};
 
 }  // namespace NVMe
 

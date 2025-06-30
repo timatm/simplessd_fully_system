@@ -167,12 +167,8 @@ typedef enum {
   OPCODE_WRITE_SSTABLE = 0x80,
   OPCODE_READ_SSTABLE,
   OPCODE_SEARCH_KEY,
-<<<<<<< Updated upstream
-  OPCODE_INIT_IMS,
-=======
   OPCODE_IMS_INIT,
   OPCODE_MONITOR_IMS ,
->>>>>>> Stashed changes
   
   // OpenChannel SSD 1.2
   OPCODE_PHYSICAL_BLOCK_ERASE = 0x90,
@@ -318,17 +314,10 @@ typedef enum {
 
   /** custom command Errors **/
   STATUS_LBN_INVALID = 0x90,
-<<<<<<< Updated upstream
-  STATUS_IMS_INIT_FAILD,
-  STATUS_IMS_INIT_SUCCESS,
-  STATUS_IMS_MONITOR_FAILD,
-  STATUS_IMS_MONITOR_SUCCESS
-=======
   STATUS_IMS_INIT_FAILED,
   STATUS_IMS_INIT_SUCCESS,
   STATUS_MONITOR_ERROR,
   STATUS_MONITOR_SUCCESS
->>>>>>> Stashed changes
 } ERROR_CODE;
 
 typedef enum {

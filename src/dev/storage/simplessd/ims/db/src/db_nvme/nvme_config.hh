@@ -160,5 +160,5 @@ typedef enum _NMC_STATUS_CODES
 /*                              public interfaces                             */
 /* -------------------------------------------------------------------------- */
 
-// #define PAGE_SIZE 16384
+#define PAGE_SIZE 16384
 #endif /* __NMC_HOST_PLUGIN_NVME_NMC_H__ */

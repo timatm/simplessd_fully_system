@@ -58,10 +58,9 @@ int pass_io_command(nmc_config_t *config,int fd){
 
 int ims_init(nmc_config_t* config,int fd){
     int err = 0;
-    init_nmc_config(config);
     config->OPCODE = OPCODE_INIT_IMS;
     config->PSDT      = 0;
-    config->PRP1      = (uintptr_t)nullptr;
+    // config->PRP1      = (uintptr_t)nullptr;
     err = pass_io_command(config,fd);
     if(err == 0){
         pr("Init IMS success");
