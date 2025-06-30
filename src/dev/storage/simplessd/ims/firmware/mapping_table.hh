@@ -24,7 +24,7 @@ public:
 
     void remove_mapping(const std::string& filename);
     
-    void dump_mapping(mappingTablePerPage *page);
+    void dump_mapping();
 
     int flush_mapping_table();
     

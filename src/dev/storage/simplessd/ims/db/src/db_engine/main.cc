@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
+#include "main.hh"
 
 int main() {
     printf("nvme_interface_test\n");
@@ -19,15 +20,10 @@ int main() {
         perror("open nvme device");
         return 1;
     }
-
-    err = ims_init(config, fd);
-    if (err == 0) {
-        printf("write success\n");
-    } else {
-        printf("write failed\n");
-        printf("error code: %d\n", err);
-    }
-
+    config->fd = fd;
+    err = ims_init(config);
+    config->monitor_type = DUMP_LBNPOOL_INFO;
+    err = monitor_IMS(config);
     close(fd);
     return 0;
 }

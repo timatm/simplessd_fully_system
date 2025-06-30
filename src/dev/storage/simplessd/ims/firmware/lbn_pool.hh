@@ -37,7 +37,7 @@ public:
     uint64_t allocate_valueLog_block();
 
     uint64_t select_lbn(int type,hostInfo info);
-    void print();
+    void dump_LBNPool();
     uint64_t worst_policy();
     uint64_t RRpolicy();
     uint64_t level2CH(hostInfo info);

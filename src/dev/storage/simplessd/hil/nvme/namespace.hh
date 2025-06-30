@@ -42,9 +42,9 @@ namespace NVMe {
 
 class Subsystem;
 
-enum{
-  DUMP_MAPPING_INFO,
-  DUMP_LBNPOOL_INFO,
+enum class MonitorType : uint32_t {
+  DUMP_MAPPING_INFO = 0,
+  DUMP_LBNPOOL_INFO = 1,
 };
 typedef union _DatasetManagementRange {
   uint8_t data[0x10];

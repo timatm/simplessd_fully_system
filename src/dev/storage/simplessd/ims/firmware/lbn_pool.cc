@@ -186,7 +186,7 @@ uint64_t LBNPool::allocate_valueLog_block(){
     return INVALIDLBN;
 }
 // 附加：debug print
-void LBNPool::print() {
+void LBNPool::dump_LBNPool() {
     pr_info("===== LBN Pool =====");
     pr_info("=== Used LBN List ===");
     for (auto lbn : usedLBNList)

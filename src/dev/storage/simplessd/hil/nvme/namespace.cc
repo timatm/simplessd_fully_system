@@ -881,7 +881,7 @@ void Namespace::init_IMS(SQEntryWrapper &req, RequestFunction &func) {
     debugprint(LOG_IMS,
              "NVM     | Init_IMS success");
     resp.makeStatus(false, false, TYPE_GENERIC_COMMAND_STATUS,
-                    STATUS_IMS_INIT_SUCCESS);
+                    STATUS_SUCCESS);
   } else {debugprint(LOG_IMS,
              "NVM     | Init_IMS failed");
     resp.makeStatus(false, false, TYPE_GENERIC_COMMAND_STATUS,
@@ -893,27 +893,32 @@ void Namespace::init_IMS(SQEntryWrapper &req, RequestFunction &func) {
 }
 
 void Namespace::monitor_IMS(SQEntryWrapper &req, RequestFunction &func) {
-  uint32_t monitor_type = req.entry.dword13;
+  MonitorType type = static_cast<MonitorType>(req.entry.dword13);
   CQEntryWrapper resp(req);
 
   debugprint(LOG_IMS,
              "NVM     | Monitor IMS start");
-  switch(monitor_type) {
-    case DUMP_LBNPOOL_INFO:
-      lbnPoolManager.print();
+  switch(type) {
+
+    case MonitorType::DUMP_MAPPING_INFO:
+      mappingManager.dump_mapping();
+      resp.makeStatus(false, false, TYPE_GENERIC_COMMAND_STATUS,
+                    STATUS_SUCCESS);
       break;
-    // case DUMP_MAPPING_INFO:
-    //   err = ims.getStatus();
-    //   break;
+
+    case MonitorType::DUMP_LBNPOOL_INFO:
+      lbnPoolManager.dump_LBNPool();
+      resp.makeStatus(false, false, TYPE_GENERIC_COMMAND_STATUS,
+                    STATUS_SUCCESS);
+      break;
+
     default:
       debugprint(LOG_IMS,
-             "NVM     | monitor IMS | error type : %d",monitor_type);
-      resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
-                      STATUS_MONITOR_ERROR);
+             "NVM     | monitor IMS | error type : %d",type);
+      resp.makeStatus(false, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                      STATUS_MONITOR_FAILD);
+      break;
   }
-  resp.makeStatus(false, false, TYPE_GENERIC_COMMAND_STATUS,
-                    STATUS_MONITOR_SUCCESS);
-  
   func(resp);
 }
 }  // namespace NVMe

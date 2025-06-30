@@ -9,12 +9,9 @@ typedef struct
     // host info
     struct
     {
-        int argc;
-        char **argv;
-
         bool dry;
         char *data_file;
-
+        int fd;
         uint8_t flags;
         uint16_t rsvd;
         uint32_t result;
@@ -24,8 +21,7 @@ typedef struct
         uint32_t data_len;
         char *metadata;
         uint32_t metadata_len;
-
-        uint16_t iCh, iWay, iDie, iBlk, iPage;
+        uint8_t monitor_type;
     };
 
     // device (NVMe) info
@@ -119,43 +115,28 @@ typedef struct
 /*                             NMC related configs                            */
 /* -------------------------------------------------------------------------- */
 
-typedef enum _NMC_FILE_TYPES
-{
-    NMC_FILE_TYPE_NONE       = 0,
-    NMC_FILE_TYPE_MODEL_UNET = 1,
-    NMC_FILE_TYPE_IMAGE_TIFF = 2,
-} NMC_FILE_TYPES;
-
-typedef enum _NMC_STATUS_CODES
-{
-    NMC_SC_SUCCESS                             = 0x0700,
-    NMC_SC_MAPPING_DISABLED                    = 0x0701,
-    NMC_SC_MAPPING_REOPENED                    = 0x0702,
-    NMC_SC_MAPPING_RECLOSED                    = 0x0703,
-    NMC_SC_MAPPING_FILENAME_TOO_LONG           = 0x0704,
-    NMC_SC_MAPPING_FILENAME_UNSUPPORTED        = 0x0705,
-    SC_VENDOR_NMC_MAPPING_REGISTER_INIT_FAILED = 0x0706,
-} NMC_STATUS_CODES;
-
-#define NMC_FILENAME_MAX_BYTES 256
-
-//       NMC  X X Packet X
-//         \   \ \   \  /   Wr Rd
-// bit: 7 | 6  5  4  3  2 | 1  0 |  hex  | description
-//      1 | 1  0  0  0  0 | 0  1 |  C1h  | create mapping table for new file
-//      1 | 1  0  0  0  0 | 1  0 |  C2h  | close mapping table
-//      1 | 1  0  0  0  0 | 1  1 |  C3h  | inference the specified file
-//      1 | 1  0  0  1  0 | 0  1 |  C9h  | write nmc packet
-
-#define IO_NVM_NMC_ALLOC        0xC1 // create mapping table for new file
-#define IO_NVM_NMC_FLUSH        0xC2 // close mapping table
-#define IO_NVM_NMC_INFERENCE    0xC3 // inference the specified file
-#define IO_NVM_NMC_WRITE        0xC9 // write packet (distribute to all FCs)
 #define OPCODE_WRITE_SSTABLE    0x80
 #define OPCODE_READ_SSTABLE     0x81
 #define OPCODE_SEARCH_KEY       0x82
 #define OPCODE_INIT_IMS         0x83
+#define OPCODE_MONITOR_IMS      0x84
 
+typedef enum{
+  DUMP_MAPPING_INFO,
+  DUMP_LBNPOOL_INFO,
+} MONITOR_TYPE;
+
+
+typedef enum{
+    STATUS_OPERATION_SUCCESS,
+    STATUS_LBN_INVALID = 0x90,
+    STATUS_IMS_INIT_FAILED,
+    STATUS_MONITOR_FAILD,
+    STATUS_WRITE_SSTABLE_FAILD
+} STATUS_CODE;
+
+#define COMMAND_SUCCESS     0
+#define COMMAND_FAILD       1
 /* -------------------------------------------------------------------------- */
 /*                              public interfaces                             */
 /* -------------------------------------------------------------------------- */

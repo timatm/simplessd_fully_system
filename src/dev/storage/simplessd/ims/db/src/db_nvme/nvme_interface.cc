@@ -10,7 +10,7 @@ extern "C" {
 #include <limits.h>
 
 
-int pass_io_command(nmc_config_t *config,int fd){
+int pass_io_command(nmc_config_t *config){
     int err;
     config->meta_addr = (uintptr_t)NULL;
     config->PSDT      = 0;  /* use PRP */
@@ -21,8 +21,7 @@ int pass_io_command(nmc_config_t *config,int fd){
     pr("data_len = %u", config->data_len);
     pr("metadata = %p", config->metadata);
     pr("metadata_len = %u", config->metadata_len);
-    pr("fd = %d", fd);
-    pr("fd             : %d", fd);
+    pr("fd             : %d", config->fd);
     pr("OPCODE         : 0x%x", config->OPCODE);
     pr("flags          : 0x%x", config->flags);
     pr("rsvd           : 0x%x", config->rsvd);
@@ -42,7 +41,7 @@ int pass_io_command(nmc_config_t *config,int fd){
     pr("timeout_ms     : %d", config->timeout_ms);
     pr("&result        : %p", config->result);
     pr("===========================");
-    err = nvme_io_passthru(fd, config->OPCODE, config->flags, config->rsvd, config->NSID,
+    err = nvme_io_passthru(config->fd, config->OPCODE, config->flags, config->rsvd, config->NSID,
     config->cdw02, config->cdw03, config->cdw10, config->cdw11, config->cdw12,
     config->cdw13, config->cdw14, config->cdw15, config->data_len, config->data,
     config->metadata_len, config->metadata, config->timeout_ms, &config->result);
@@ -56,41 +55,73 @@ int pass_io_command(nmc_config_t *config,int fd){
     return err;
 }
 
-int ims_init(nmc_config_t* config,int fd){
+int ims_init(nmc_config_t* config){
     int err = 0;
     config->OPCODE = OPCODE_INIT_IMS;
     config->PSDT      = 0;
     // config->PRP1      = (uintptr_t)nullptr;
-    err = pass_io_command(config,fd);
-    if(err == 0){
+    err = pass_io_command(config);
+    if(err == STATUS_OPERATION_SUCCESS){
         pr("Init IMS success");
+        err = COMMAND_SUCCESS;
     }
     else{
         pr("Init IMS failed");
         pr("error code: 0x%x", err);
+        err = COMMAND_FAILD;
     }
     return err;
 }
 
+int monitor_IMS(nmc_config_t *config){
+    int err;
+    config->OPCODE    = OPCODE_MONITOR_IMS;
+    config->PSDT      = 0;
+    switch(config->monitor_type){
+        case DUMP_MAPPING_INFO:
+            config->cdw13 = DUMP_MAPPING_INFO;
+            break;
+        case DUMP_LBNPOOL_INFO:
+            config->cdw13 = DUMP_LBNPOOL_INFO;
+            break;
+        default:
+            pr("Monitor does't have this subcommand :%d",config->monitor_type);
+            return COMMAND_FAILD;
+            break;
+    }
+    err = pass_io_command(config);
+    if(err == STATUS_OPERATION_SUCCESS){
+        pr("Init IMS success");
+        err = COMMAND_SUCCESS;
+    }
+    else{
+        pr("Init IMS failed");
+        pr("error code: 0x%x", err);
+        err = COMMAND_FAILD;
+    }
+    return err;
+}
 
-int ims_nvme_write(nmc_config_t* config,int fd){
+int ims_nvme_write(nmc_config_t* config){
     int err;
     config->OPCODE    = OPCODE_WRITE_SSTABLE;
     config->PRP1      = (uintptr_t)config->data;
     pr("start nvme write");
-    err = pass_io_command(config,fd);
-    if(err == 0){
+    err = pass_io_command(config);
+    if(err == STATUS_OPERATION_SUCCESS){
         pr("nvme write success");
+        err = COMMAND_SUCCESS;
     }
     else{
         pr("nvme write failed");
         pr("error code: %d", err);
+        err = COMMAND_FAILD;
     }
     return err;
 }
 
 
-int ims_nvme_read(nmc_config_t *config,int fd){
+int ims_nvme_read(nmc_config_t *config){
     int err;
     config->data_len = PAGE_SIZE;
     config->data     = (char*)aligned_alloc(getpagesize(), config->data_len);
@@ -102,7 +133,7 @@ int ims_nvme_read(nmc_config_t *config,int fd){
     if (config->dry)
     {
         printf("dev          : ");
-        print_fd_target(fd);
+        print_fd_target(config->fd);
         pr("opcode       : 0x%02x", config->OPCODE);
         pr("nsid         : 0x%02x", config->NSID);
         pr("cdw2         : 0x%08x", config->cdw02);
@@ -120,7 +151,7 @@ int ims_nvme_read(nmc_config_t *config,int fd){
         pr("cdw14        : 0x%08x", config->cdw14);
         pr("cdw15        : 0x%08x", config->cdw15);
     }
-    err = nvme_io_passthru(fd, config->OPCODE, config->flags, config->rsvd, config->NSID,
+    err = nvme_io_passthru(config->fd, config->OPCODE, config->flags, config->rsvd, config->NSID,
     config->cdw02, config->cdw03, config->cdw10, config->cdw11, config->cdw12,
     config->cdw13, config->cdw14, config->cdw15, config->data_len, config->data,
     config->metadata_len, config->metadata, config->timeout_ms, &config->result);
@@ -137,8 +168,6 @@ int ims_nvme_read(nmc_config_t *config,int fd){
 
 void init_nmc_config(nmc_config_t *config){
     config->OPCODE = 0;
-    config->argc = 0;
-    config->argv = NULL;
     config->dry = 0;
     config->data_file = NULL;
     config->flags = 0;

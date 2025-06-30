@@ -10,7 +10,12 @@ fi
 DISK_DIRECTORY_PATH="../cp2m5/disks"
 FILE_PATH="../src/dev/storage/simplessd/ims/db/build"
 DB_PATH="../src/dev/storage/simplessd/ims/db"
-
+if [ -d "$DB_PATH" ]; then
+    echo "Try to rebuild DB engine to check the DB engine is up to date"
+    (cd "$DB_PATH" && make clean && make)
+else
+    echo "DB path is error ,the DB engine maybe is not newest"
+fi
 
 if [ ! -d "$DISK_DIRECTORY_PATH" ]; then
     echo "Cannot find disk directory path"
@@ -26,12 +31,7 @@ DISK_IMG="${DISK_DIRECTORY_PATH}/disk.img"
 SRC_FILE="${FILE_PATH}/mydb_engine"
 MOUNT_POINT="/mnt"
 
-if [ -d "$DB_PATH" ]; then
-    echo "Try to rebuild DB engine to check the DB engine is up to date"
-    (cd "$DB_PATH" && make clean && make)
-else
-    echo "DB path is error ,the DB engine maybe is not newest"
-fi
+
 
 
 if [ ! -f "$SRC_FILE" ]; then

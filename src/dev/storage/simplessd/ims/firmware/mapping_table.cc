@@ -77,13 +77,12 @@ void Mapping::remove_mapping(const std::string& filename) {
 }
 
 
-void Mapping::dump_mapping(mappingTablePerPage *page) {
+void Mapping::dump_mapping() {
     pr_info("Dumping mapping table to page...");
     pr_info("===== Mapping Table Page =====");
     size_t count = 0;
-    for (size_t i = 0; i < page->entry_num; i++) {
-        mappingEntry *entry = &page->entry[i];
-        pr_info("Entry %zu: FileName: %s -> LBN: %lu", count, entry->fileName, entry->lbn);
+    for(auto [filename,lbn]:mappingTable){
+        pr_info("filename: %s  -> LBN(%lu)",filename,lbn);
     }
     pr_info("================================");
 }
