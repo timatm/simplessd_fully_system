@@ -21,7 +21,6 @@ typedef struct
         uint32_t data_len;
         char *metadata;
         uint32_t metadata_len;
-        uint8_t monitor_type;
     };
 
     // device (NVMe) info
@@ -141,5 +140,9 @@ typedef enum{
 /*                              public interfaces                             */
 /* -------------------------------------------------------------------------- */
 
+
+
 #define PAGE_SIZE 16384
+#define PAGE_NUM 128
+#define BLOCK_SIZE (PAGE_SIZE * PAGE_NUM) 
 #endif /* __NMC_HOST_PLUGIN_NVME_NMC_H__ */

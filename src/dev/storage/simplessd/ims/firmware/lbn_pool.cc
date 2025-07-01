@@ -188,19 +188,48 @@ uint64_t LBNPool::allocate_valueLog_block(){
 // 附加：debug print
 void LBNPool::dump_LBNPool() {
     pr_info("===== LBN Pool =====");
+
     pr_info("=== Used LBN List ===");
-    for (auto lbn : usedLBNList)
-        pr_info("%lu ", lbn);
-    pr_info("\n");
+    for (size_t ch = 0; ch < CHANNEL_NUM; ++ch) {
+        std::ostringstream oss;
+        pr_info("Channel[%d]:",ch);
+
+        int cnt = 0;
+        for (auto lbn : usedLBNList[ch]) {
+            oss << lbn << " ";
+            if (++cnt % 16 == 0) {
+                pr_info("%s", oss.str().c_str());
+                oss.str("");  // 清空
+                oss.clear();
+            }
+        }
+        if (cnt % 16 != 0) {
+            pr_info("%s", oss.str().c_str());
+        }
+    }
+
     pr_info("=== Free LBN List ===");
     for (size_t ch = 0; ch < CHANNEL_NUM; ++ch) {
-        pr_info("Channel %lu: ", ch);
-        for (auto lbn : freeLBNList[ch])
-            pr_info("%lu ", lbn);
-        pr_info("\n");
+        std::ostringstream oss;
+        pr_info("Channel[%d]:",ch);
+
+        int cnt = 0;
+        for (auto lbn : freeLBNList[ch]) {
+            oss << lbn << " ";
+            if (++cnt % 16 == 0) {
+                pr_info("%s", oss.str().c_str());
+                oss.str("");
+                oss.clear();
+            }
+        }
+        if (cnt % 16 != 0) {
+            pr_info("%s", oss.str().c_str());
+        }
     }
+
     pr_info("======================\n");
 }
+
 
 uint64_t LBNPool::worst_policy(){
     uint64_t lbn = INVALIDLBN;

@@ -758,7 +758,7 @@ void Namespace::write_sstable(SQEntryWrapper &req, RequestFunction &func) {
   uint8_t *buffer  = new uint8_t[2]; // dummy buffer not real data
   hostInfo request(filename,level,min,max);
   request.lbn = INVALIDLBN;
-  ims.write_sstable(request,buffer);
+  err = ims.write_sstable(request,buffer);
   
   // uint64_t slba = ((uint64_t)req.entry.dword11 << 32) | req.entry.dword10;
   // uint16_t nlb = (req.entry.dword12 & 0xFFFF) + 1;
@@ -768,7 +768,7 @@ void Namespace::write_sstable(SQEntryWrapper &req, RequestFunction &func) {
     resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
                     STATUS_NAMESPACE_NOT_ATTACHED);
   }
-  if(request.lbn == INVALIDLBN) {
+  if(err == OPERATION_FAILURE){
     debugprint(LOG_IMS,
              "NVM     | write_sstable | allocate LBN is invalid");
     err = true;
@@ -780,9 +780,6 @@ void Namespace::write_sstable(SQEntryWrapper &req, RequestFunction &func) {
   //   warn("nvme_namespace: host tried to write 0 blocks");
   // }
   pr_info("TEST !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-  debugprint(LOG_IMS,
-             "NVM     | write_sstable | SQ %u:%u | CID %u | NSID %-5d",
-             req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
   debugprint(LOG_IMS,
              "NVM     | write_sstable | Filename %s | Level %d | MinRange %d | MaxRange %d | LBN %ld",
              request.filename, request.levelInfo, request.rangeMin, request.rangeMax, request.lbn);

@@ -6,25 +6,32 @@
 #include <string.h>
 #include "main.hh"
 
+
 int main() {
     printf("nvme_interface_test\n");
-
-    nmc_config_t config_obj;
-    nmc_config_t *config = &config_obj;
-    init_nmc_config(config); 
-
     int err = 0;
-    const char *dev_path = "/dev/nvme0n1";
-    int fd = open(dev_path, O_RDWR);
-    if (fd < 0) {
-        perror("open nvme device");
+    err = init_device(); 
+    if (err == COMMAND_FAILD) {
+        printf("Failed to initialize device\n");
         return 1;
     }
-    config->fd = fd;
-    err = ims_init(config);
-    config->monitor_type = DUMP_LBNPOOL_INFO;
-    err = monitor_IMS(config);
-    close(fd);
+    err = ims_init();
+    if (err == COMMAND_FAILD) {
+        printf("Failed to initialize IMS\n");
+        return 1;
+    }
+    err = monitor_IMS(DUMP_LBNPOOL_INFO);
+    if (err == COMMAND_FAILD) {
+        printf("Failed to Monitor IMS\n");
+        return 1;
+    }
+    char *buffer = (char *)malloc(sizeof(uint8_t) * BLOCK_SIZE);
+    memset(buffer, 0xAB, BLOCK_SIZE);
+    err = ims_nvme_write(buffer);
+    if (err == COMMAND_FAILD) {
+        printf("Failed to Write SStable\n");
+        return 1;
+    }
     return 0;
 }
 

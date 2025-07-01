@@ -38,7 +38,7 @@ compile_flags.txt
 .vscode/
 *code-workspace
 
-
+*cfg
 /src/dev/storage/simplessd/ims/db/build
 /src/dev/storage/simplessd/ims/db/libnvme
 disk.bin
