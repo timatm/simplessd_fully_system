@@ -480,7 +480,7 @@ void Subsystem::writeIMS(Namespace *ns, uint64_t slpn, uint64_t nlpn,
   req->range.nlp = nlpn;
   req->offset = 0;
   req->length = nlpn * logicalPageSize;
-
+  debugprint(LOG_IMS,"logicalPageSize: %u",logicalPageSize);
   execute(CPU::NVME__SUBSYSTEM, CPU::CONVERT_UNIT, doWrite, req);
 }
 

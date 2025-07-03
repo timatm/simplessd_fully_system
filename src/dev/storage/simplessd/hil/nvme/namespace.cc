@@ -742,23 +742,22 @@ void Namespace::write_sstable(SQEntryWrapper &req, RequestFunction &func) {
 
   // Parse IMS command
   char buf[25] = {0};
-  uint32_t dwords[6] = {
-        req.entry.dword10,
-        req.entry.dword11,
-        req.entry.dword12,
-        req.entry.dword13,
-        req.entry.dword14,
-        req.entry.dword15
+  uint32_t dwords[5] = {
+    req.entry.dword11,
+    req.entry.dword12,
+    req.entry.dword13,
+    req.entry.dword14,
+    req.entry.dword15
   };
   memcpy(buf, dwords, sizeof(dwords));
   std::string filename(buf);
-  uint32_t level = 0;
-  uint32_t min =  0;
-  uint32_t max = 0;
+  uint32_t level = req.entry.dword10;
+  uint32_t min =  req.entry.reserved1;
+  uint32_t max = req.entry.reserved2;
   uint8_t *buffer  = new uint8_t[2]; // dummy buffer not real data
   hostInfo request(filename,level,min,max);
   request.lbn = INVALIDLBN;
-  err = ims.write_sstable(request,buffer);
+  err = ims.write_sstable(&request,buffer);
   
   // uint64_t slba = ((uint64_t)req.entry.dword11 << 32) | req.entry.dword10;
   // uint16_t nlb = (req.entry.dword12 & 0xFFFF) + 1;
@@ -781,8 +780,8 @@ void Namespace::write_sstable(SQEntryWrapper &req, RequestFunction &func) {
   // }
   pr_info("TEST !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
   debugprint(LOG_IMS,
-             "NVM     | write_sstable | Filename %s | Level %d | MinRange %d | MaxRange %d | LBN %ld",
-             request.filename, request.levelInfo, request.rangeMin, request.rangeMax, request.lbn);
+             "NVM     | write_sstable | Filename %s | Level %d | Range [%d ~ %d] | LBN %ld",
+             request.filename.c_str(), request.levelInfo, request.rangeMin, request.rangeMax, request.lbn);
   if (!err) {
     DMAFunction doread = [this](uint64_t tick, void *context) {
       DMAFunction dmaDone = [this](uint64_t tick, void *context) {

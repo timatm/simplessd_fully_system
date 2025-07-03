@@ -47,7 +47,7 @@
 #define LBN2LPN(lbn) (lbn * IMS_PAGE_NUM) 
 
 #define OPERATION_SUCCESS 0
-#define OPERATION_FAILURE -1
+#define OPERATION_FAILURE 1
 
 #define ENABLE_DISK 0
 

@@ -36,12 +36,12 @@ public:
     void remove_valueLogList(uint64_t lbn);
     uint64_t allocate_valueLog_block();
 
-    uint64_t select_lbn(int type,hostInfo info);
+    uint64_t select_lbn(int type,hostInfo *info);
     void dump_LBNPool();
     uint64_t worst_policy();
     uint64_t RRpolicy();
-    uint64_t level2CH(hostInfo info);
-    uint64_t my_policy(hostInfo info);
+    uint64_t level2CH(hostInfo *info);
+    uint64_t my_policy(hostInfo *info);
     void clear();
     enum{
         WROSTCASE = 0,

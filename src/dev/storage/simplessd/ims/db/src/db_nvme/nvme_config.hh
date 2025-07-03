@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-
+#include <string>
 typedef struct
 {
     // host info
@@ -110,6 +110,17 @@ typedef struct
     };
 } nmc_config_t;
 
+struct sstable_info{
+    std::string filename;
+    uint32_t level;
+    uint32_t min;
+    uint32_t max;
+    sstable_info(std::string name,uint32_t l,uint32_t min,uint32_t max):
+        filename(std::move(name)),
+        level(l),
+        min(min),
+        max(max){}
+};
 /* -------------------------------------------------------------------------- */
 /*                             NMC related configs                            */
 /* -------------------------------------------------------------------------- */
@@ -142,7 +153,7 @@ typedef enum{
 
 
 
-#define PAGE_SIZE 16384
-#define PAGE_NUM 128
-#define BLOCK_SIZE (PAGE_SIZE * PAGE_NUM) 
+#define DB_PAGE_SIZE 16384
+#define DB_PAGE_NUM 128
+#define DB_BLOCK_SIZE (DB_PAGE_SIZE * DB_PAGE_NUM) 
 #endif /* __NMC_HOST_PLUGIN_NVME_NMC_H__ */

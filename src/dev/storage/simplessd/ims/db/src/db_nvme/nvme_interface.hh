@@ -2,8 +2,8 @@
 
 int pass_io_command(nmc_config_t *config);
 
-int ims_nvme_write(char *buffer);
-int ims_nvme_read(char *buffer);
+int nvme_write_sstable(sstable_info ,char *buffer);
+int nvme_read_sstable(char *buffer);
 int ims_init();
 int monitor_IMS(int monitor_type);
 

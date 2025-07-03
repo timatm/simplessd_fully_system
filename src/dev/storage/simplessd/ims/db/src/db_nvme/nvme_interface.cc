@@ -9,6 +9,10 @@ extern "C" {
 #include <unistd.h>
 #include <limits.h>
 
+#include <cstring> 
+#include <string>
+#include <array>
+#include <cstdint>
 int nvme_fd = -1;
 
 int pass_io_command(nmc_config_t *config){
@@ -22,13 +26,13 @@ int pass_io_command(nmc_config_t *config){
     pr("data_len = %u", config->data_len);
     pr("metadata = %p", config->metadata);
     pr("metadata_len = %u", config->metadata_len);
-    pr("fd             : %d", config->fd);
+    pr("fd             : %d", nvme_fd);
     pr("OPCODE         : 0x%x", config->OPCODE);
     pr("flags          : 0x%x", config->flags);
     pr("rsvd           : 0x%x", config->rsvd);
     pr("NSID           : 0x%x", config->NSID);
-    pr("cdw02          : 0x%x", config->cdw02);
-    pr("cdw03          : 0x%x", config->cdw03);
+    pr("cdw02          : %u", config->cdw02);
+    pr("cdw03          : %u", config->cdw03);
     pr("cdw10          : 0x%x", config->cdw10);
     pr("cdw11          : 0x%x", config->cdw11);
     pr("cdw12          : 0x%x", config->cdw12);
@@ -42,6 +46,9 @@ int pass_io_command(nmc_config_t *config){
     pr("timeout_ms     : %d", config->timeout_ms);
     pr("&result        : %p", config->result);
     pr("===========================");
+    if(config->dry){
+        return err;
+    }
     err = nvme_io_passthru(nvme_fd, config->OPCODE, config->flags, config->rsvd, config->NSID,
     config->cdw02, config->cdw03, config->cdw10, config->cdw11, config->cdw12,
     config->cdw13, config->cdw14, config->cdw15, config->data_len, config->data,
@@ -56,6 +63,19 @@ int pass_io_command(nmc_config_t *config){
     return err;
 }
 
+void fill_filename_to_dwords(const std::string& filename, uint32_t* dwords_out) {
+    std::array<uint8_t, 20> raw = {0}; 
+    std::memcpy(raw.data(), filename.data(), std::min(filename.size(), raw.size()));
+
+    for (int i = 0; i < 5; ++i) {
+        dwords_out[i] = 
+            (static_cast<uint32_t>(raw[i*4 + 3]) << 24 ) |
+            (static_cast<uint32_t>(raw[i*4 + 2]) << 16 ) |
+            (static_cast<uint32_t>(raw[i*4 + 1]) << 8  ) |
+            (static_cast<uint32_t>(raw[i*4 + 0]) << 0  ) ;
+    }
+}
+
 int ims_init(){
     int err = 0;
     nmc_config_t config_obj;
@@ -66,7 +86,6 @@ int ims_init(){
     // config->PRP1      = (uintptr_t)nullptr;
     err = pass_io_command(config);
     if(err == STATUS_OPERATION_SUCCESS){
-        pr("Init IMS success");
         err = COMMAND_SUCCESS;
     }
     else{
@@ -98,7 +117,6 @@ int monitor_IMS(int monitor_type){
     }
     err = pass_io_command(config);
     if(err == STATUS_OPERATION_SUCCESS){
-        pr("Monitor IMS success");
         err = COMMAND_SUCCESS;
     }
     else{
@@ -109,15 +127,31 @@ int monitor_IMS(int monitor_type){
     return err;
 }
 
-int ims_nvme_write(char *buffer){
+int nvme_write_sstable(sstable_info info,char *buffer){
     int err;
     nmc_config_t config_obj;
     nmc_config_t *config = &config_obj;
     init_nmc_config(config); 
-    config->data_len = BLOCK_SIZE;
-    config->OPCODE    = OPCODE_WRITE_SSTABLE;
-    config->PRP1      = (uintptr_t)buffer;
+
+    // config->dry = true;
+    config->OPCODE = OPCODE_WRITE_SSTABLE;
+    config->data = buffer;
+    config->data_len = DB_BLOCK_SIZE;
+    config->cdw02 = info.min;
+    config->cdw03 = info.max;
+    config->cdw10 = info.level;
+    uint32_t filename_dwords[5] = {0};
+    fill_filename_to_dwords(info.filename,filename_dwords);
+    config->cdw11 = filename_dwords[0];
+    config->cdw12 = filename_dwords[1];
+    config->cdw13 = filename_dwords[2];
+    config->cdw14 = filename_dwords[3];
+    config->cdw15 = filename_dwords[4];
     pr("start nvme write");
+    pr("=============== SStable INFO ===============");
+    pr("Filename: %s to uint 0x%x 0x%x 0x%x 0x%x 0x%x",info.filename.c_str(),config->cdw11,config->cdw12,config->cdw13,config->cdw14,config->cdw15);
+    pr("Level:%u  | Range[%u ~ %u]",config->cdw10,config->cdw02,config->cdw03);
+    pr("=============================================");
     err = pass_io_command(config);
     if(err == STATUS_OPERATION_SUCCESS){
         pr("nvme write success");
@@ -132,9 +166,9 @@ int ims_nvme_write(char *buffer){
 }
 
 
-int ims_nvme_read(nmc_config_t *config){
+int nvme_read_sstable(nmc_config_t *config){
     int err;
-    config->data_len = PAGE_SIZE;
+    config->data_len = DB_BLOCK_SIZE;
     config->data     = (char*)aligned_alloc(getpagesize(), config->data_len);
     assert_return(config->data, errno, "failed to allocate data buffer...");
     config->OPCODE    = OPCODE_READ_SSTABLE;

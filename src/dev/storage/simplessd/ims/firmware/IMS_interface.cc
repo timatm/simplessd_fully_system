@@ -19,13 +19,13 @@ super_page *sp_ptr_old  = new super_page(MAGIC,1,2);
 super_page *sp_ptr_new = new super_page(MAGIC,1,2);
 
 
-int IMS_interface::write_sstable(hostInfo request,uint8_t *buffer){
-    int err = OPERATION_FAILURE;
-    std::string filename = request.filename;
-    int level = request.levelInfo;
-    int rangeMin = request.rangeMin;
-    int rangeMax = request.rangeMax;
-    pr_info("Write request for file: %s, level: %d, range: [%d, %d]", filename.c_str(), level, rangeMin, rangeMax);
+int IMS_interface::write_sstable(hostInfo *request,uint8_t *buffer){
+    int err = OPERATION_SUCCESS;
+    std::string filename = request->filename;
+    int level = request->levelInfo;
+    int rangeMin = request->rangeMin;
+    int rangeMax = request->rangeMax;
+    pr_info("Write request for Filename: %s | Level: %d | Range: [%d, %d]", filename.c_str(), level, rangeMin, rangeMax);
     // Check if the file already exists in the mapping table
     if (mappingManager.mappingTable.count(filename)) {
         pr_info("ERROR: Mapping already exists, refusing to overwrite file: %s", filename.c_str());
@@ -42,14 +42,16 @@ int IMS_interface::write_sstable(hostInfo request,uint8_t *buffer){
     if (lbn == INVALIDLBN) {
         tree.remove_node(node);
         pr_info("Failed to allocate LBN for file: %s", filename.c_str());
-        return OPERATION_FAILURE;
+        err = OPERATION_FAILURE;
     }
     if(!node){
         pr_info("Find node is error,filename: %s ", filename.c_str());
-        return OPERATION_FAILURE;
+        err = OPERATION_FAILURE;
     }
     pr_info("Allocated LBN %lu for file: %s", lbn, filename.c_str());
-    err = persistenceManager.flushSStable(lbn, (uint8_t *)buffer, BLOCK_SIZE);
+    if(ENABLE_DISK){
+        err = persistenceManager.flushSStable(lbn, (uint8_t *)buffer, BLOCK_SIZE);
+    }
 
     // The SStable flush to SSD is success,record the SStable store in which channel and update mappingtable
     if(err == OPERATION_SUCCESS){
@@ -62,7 +64,7 @@ int IMS_interface::write_sstable(hostInfo request,uint8_t *buffer){
         pr_info("Failed to write block to LBN %lu for file: %s", lbn, filename.c_str());
         return OPERATION_FAILURE;
     }
-    request.lbn = lbn;
+    request->lbn = lbn;
     return OPERATION_SUCCESS;
 }
 

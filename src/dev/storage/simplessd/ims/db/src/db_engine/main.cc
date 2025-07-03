@@ -25,13 +25,19 @@ int main() {
         printf("Failed to Monitor IMS\n");
         return 1;
     }
-    char *buffer = (char *)malloc(sizeof(uint8_t) * BLOCK_SIZE);
-    memset(buffer, 0xAB, BLOCK_SIZE);
-    err = ims_nvme_write(buffer);
+    void* raw_ptr = nullptr;
+    if (posix_memalign(&raw_ptr, 4096, DB_BLOCK_SIZE)) {
+        perror("posix_memalign failed");
+        exit(1);
+    }
+    memset(raw_ptr, 0xAB, DB_BLOCK_SIZE);
+    sstable_info info("0001",1,2,20);
+    err = nvme_write_sstable(info,(char*)raw_ptr);
     if (err == COMMAND_FAILD) {
         printf("Failed to Write SStable\n");
         return 1;
     }
+    close_device();
     return 0;
 }
 
