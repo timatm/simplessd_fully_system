@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <string>
 // [SSD setting start]
 
 #define CHANNEL_NUM 4
@@ -45,6 +46,7 @@
 #define LBN2CH(LBA)     ( (LBA >> (PACKAGE_BITS + DIE_BITS + PLANE_BITS + BLOCK_BITS)) % CHANNEL_NUM )
 
 #define LBN2LPN(lbn) (lbn * IMS_PAGE_NUM) 
+#define LPN2LBN(lpn) (lpn / IMS_PAGE_NUM)
 
 #define OPERATION_SUCCESS 0
 #define OPERATION_FAILURE 1

@@ -49,6 +49,7 @@ typedef enum {
 
 typedef enum {
   PAGE_MAPPING,
+  BLOCK_MAPPING
 } MAPPING;
 
 typedef enum {

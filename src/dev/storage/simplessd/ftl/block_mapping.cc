@@ -24,7 +24,7 @@
 #include "ftl/block_mapping.hh"
 #include "util/algorithm.hh"
 #include "util/bitset.hh"
-
+#include "ims/firmware/def.hh"
 namespace SimpleSSD {
 
 namespace FTL {
@@ -673,7 +673,9 @@ void blockMapping::readInternal(Request &req, uint64_t &tick) {
 void blockMapping::writeInternal(Request &req, uint64_t &tick, bool sendToPAL) {
   PAL::Request palRequest(req);
   std::unordered_map<uint32_t, Block>::iterator block;
-  auto mappingList = table.find(req.lpn);
+  uint32_t pbn = LPN2LBN(req.lpn);
+  uint64_t ppn = req.lpn;
+  auto mappingList = table.find(ppn);
   uint64_t beginAt;
   uint64_t finishedAt = tick;
   bool readBeforeWrite = false;
@@ -696,7 +698,7 @@ void blockMapping::writeInternal(Request &req, uint64_t &tick, bool sendToPAL) {
   else {
     // Create empty mapping
     auto ret = table.emplace(
-        req.lpn,
+        ppn,
         std::vector<std::pair<uint32_t, uint32_t>>(
             bitsetSize, {param.totalPhysicalBlocks, param.pagesInBlock}));
 
@@ -708,7 +710,7 @@ void blockMapping::writeInternal(Request &req, uint64_t &tick, bool sendToPAL) {
   }
 
   // Write data to free block
-  block = blocks.find(getLastFreeBlock(req.ioFlag));
+  block = blocks.find(pbn);
 
   if (block == blocks.end()) {
     panic("No such block");

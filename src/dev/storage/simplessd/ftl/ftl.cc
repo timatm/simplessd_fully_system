@@ -20,7 +20,7 @@
 #include "ftl/ftl.hh"
 
 #include "ftl/page_mapping.hh"
-
+#include "ftl/block_mapping.hh"
 namespace SimpleSSD {
 
 namespace FTL {
@@ -43,6 +43,10 @@ FTL::FTL(ConfigReader &c, DRAM::AbstractDRAM *d) : conf(c), pDRAM(d) {
   switch (conf.readInt(CONFIG_FTL, FTL_MAPPING_MODE)) {
     case PAGE_MAPPING:
       pFTL = new PageMapping(conf, param, pPAL, pDRAM);
+      break;
+    case BLOCK_MAPPING:
+      debugprint(LOG_FTL, "This system's FTL is block mapping");
+      pFTL = new blockMapping(conf, param, pPAL, pDRAM);
       break;
   }
 
