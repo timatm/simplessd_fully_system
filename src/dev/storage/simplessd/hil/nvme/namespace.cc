@@ -791,8 +791,8 @@ void Namespace::write_sstable(SQEntryWrapper &req, RequestFunction &func) {
 
         if (pContext->beginAt == 2) {
           debugprint(
-              LOG_HIL_NVME,
-              "NVM     | WRITE | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
+              LOG_IMS,
+              "NVM     | write_sstable | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
               "%" PRIX64 " + %d | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
               pContext->resp.cqID, pContext->resp.entry.dword2.sqID,
               pContext->resp.sqUID, pContext->resp.entry.dword3.commandID, nsid,
