@@ -37,7 +37,7 @@ class Disk {
   uint32_t sectorSize;
 
   std::fstream disk;
-
+  friend class IMS_interface;
  public:
   Disk();
   Disk(const Disk &) = delete;

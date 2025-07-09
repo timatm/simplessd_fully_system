@@ -42,17 +42,19 @@ if (NOT EXISTS "${PROJECT_SOURCE_DIR}/lib/mcpat/mcpat.h")
 Check you initialized submodules.")
 endif ()
 
-# Add subproject
-add_subdirectory(${PROJECT_SOURCE_DIR}/lib/mcpat)
-add_subdirectory(${PROJECT_SOURCE_DIR}/ims/firmware)
 # Set include directories
 include_directories(
+  ${PROJECT_SOURCE_DIR}/src/dev/storage/simplessd
   ${PROJECT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/lib/mcpat
   ${PROJECT_SOURCE_DIR}/lib/mcpat/cacti
   ${PROJECT_SOURCE_DIR}/lib/inih
   ${DRAMPOWER_SOURCE_DIR}
 )
+# Add subproject
+add_subdirectory(${PROJECT_SOURCE_DIR}/lib/mcpat)
+add_subdirectory(${PROJECT_SOURCE_DIR}/ims/firmware)
+
 
 # Platform specific settings
 if (MSVC)

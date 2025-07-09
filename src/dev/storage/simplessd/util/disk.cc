@@ -333,6 +333,7 @@ uint16_t Disk::erase(uint64_t, uint16_t nlblk) {
 // }
 
 uint16_t Disk::readPage(uint64_t lpn, uint8_t *buffer) {
+    uint16_t ret = 0;
     if (!disk.is_open()) {
         throw std::runtime_error("Disk not opened.");
     }
@@ -350,12 +351,16 @@ uint16_t Disk::readPage(uint64_t lpn, uint8_t *buffer) {
     if (!disk.good()) {
         throw std::runtime_error("Read error or EOF.");
     }
-
-    return 1;  // 讀取成功 1 page
+    ret++;
+    if(ret != 1){
+      return OPERATION_FAILURE;
+    }
+    return OPERATION_SUCCESS;
 }
 
 
 uint16_t Disk::writePage(uint64_t lpn,uint8_t *buffer) {
+  uint16_t ret = 0;
     if (!disk.is_open()) {
         throw std::runtime_error("Disk not opened.");
     }
@@ -379,8 +384,11 @@ uint16_t Disk::writePage(uint64_t lpn,uint8_t *buffer) {
     if (!disk.good()) {
         throw std::runtime_error("Flush failed.");
     }
-
-    return 1;  // 寫入了一個 page
+    ret++;
+    if(ret != 1){
+      return OPERATION_FAILURE;
+    }
+    return OPERATION_SUCCESS;
 }
 
 
@@ -388,23 +396,23 @@ uint16_t Disk::writeBlock(uint64_t lbn, uint8_t *buffer) {
     if (!disk.is_open()) {
         throw std::runtime_error("Disk not opened.");
     }
-
     uint16_t ret = 0;
     uint64_t baseLpn = LBN2LPN(lbn);
 
     for (int i = 0; i < IMS_PAGE_NUM; i++) {
         uint64_t lpn = baseLpn + i;
         uint8_t *page_ptr = buffer + i * IMS_PAGE_SIZE;
-
-        uint16_t written = writePage(lpn, page_ptr);
-        if (written == 0) {
+        uint16_t err = writePage(lpn, page_ptr);
+        if (err == OPERATION_FAILURE) {
             pr_info("[ERROR] write block failed at page: %d LPN: %lu", i, lpn);
             break;
         }
-        ret += written;
+        ret += 1;
     }
-
-    return ret;
+    if(ret != IMS_PAGE_NUM){
+      return OPERATION_FAILURE;
+    }
+    return OPERATION_SUCCESS;
 }
 
 
@@ -420,15 +428,18 @@ uint16_t Disk::readBlock(uint64_t lbn, uint8_t *buffer) {
         uint64_t lpn = baseLpn + i;
         uint8_t *page_ptr = buffer + i * IMS_PAGE_SIZE;
 
-        uint16_t read_result = readPage(lpn, page_ptr);
-        if (read_result == 0) {
+        uint16_t err = readPage(lpn, page_ptr);
+        if (err == OPERATION_FAILURE) {
             pr_info("[ERROR] read block failed at page: %d LPN: %lu", i, lpn);
             break;
         }
-        ret += read_result;
+        ret += 1;
     }
 
-    return ret;
+    if(ret != IMS_PAGE_NUM){
+      return OPERATION_FAILURE;
+    }
+    return OPERATION_SUCCESS;
 }
 
 

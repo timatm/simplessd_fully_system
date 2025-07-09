@@ -51,6 +51,9 @@
 #define OPERATION_SUCCESS 0
 #define OPERATION_FAILURE 1
 
+
+// Enable : 1
+// Disable: 0
 #define ENABLE_DISK 0
 
 #define INVALIDLBN 0xFFFFFFFFFFFFFFFF
@@ -69,6 +72,10 @@
 #define MAX_FILENAME_LENGTH 56 // SStable file name length
 #define MAGIC 0x900118FFFEEFFFEE
 
+
+#define INVALID_KEYRANGE 0xFFFFFFFF
+#define INVALID_LEVEL -1
+#define INVALID_CHANNEL -1
 struct hostInfo
 {
     uint64_t lbn;
@@ -84,7 +91,10 @@ struct hostInfo
         rangeMin(min),
         rangeMax(max) {}
     hostInfo(std::string name, int level, int min, int max) :
-        hostInfo(std::move(name), level, -1, min, max) {}
+        hostInfo(std::move(name), level, INVALID_CHANNEL, min, max) {}
+    hostInfo(std::string name) :
+        hostInfo(std::move(name), INVALID_LEVEL , INVALID_CHANNEL, INVALID_KEYRANGE , INVALID_KEYRANGE) {}
+    
 };
 
 struct valueLogInfo{

@@ -18,6 +18,7 @@ int Mapping::init_mapping_table(uint64_t mappingPageLBN,uint64_t page_num){
         return err;
     }
     uint64_t lpn = LBN2LPN(mappingPageLBN);
+    pr_info("Initializing mapping table from LPN: %lu with page num: %lu", lpn, page_num);
     for(int page = 0;page < page_num;page++){
         err = persistenceManager.readMappingTable(lpn, buffer, size);
         if(err != OPERATION_SUCCESS){
@@ -29,11 +30,13 @@ int Mapping::init_mapping_table(uint64_t mappingPageLBN,uint64_t page_num){
         if(mappingTablePtr->entry_num > MAPPING_TABLE_ENTRIES){
             pr_info("Mapping table entry num is error: %d",mappingTablePtr->entry_num);
         }
+        pr_info("Mapping table[%d] entry num :%d",page,mappingTablePtr->entry_num);
         for (int i = 0; i < mappingTablePtr->entry_num; i++) {
             mappingEntry *entry = &mappingTablePtr->entry[i];
-
             // Recover mapping table and SStable tree info
             if (entry->lbn != INVALIDLBN) {
+                pr_info("Recover mapping entry: filename: %s, lbn: %lu, level: %d, channel: %d, range: [%d, %d]",
+                        entry->fileName, entry->lbn, entry->level, entry->channel, entry->minRange, entry->maxRange);
                 mappingTable[std::string(entry->fileName)] = entry->lbn;
                 std::shared_ptr<TreeNode> node = std::make_shared<TreeNode>(entry->fileName,entry->level, entry->channel, entry->minRange, entry->maxRange);
                 tree.insert_node(node);
@@ -82,7 +85,7 @@ void Mapping::dump_mapping() {
     pr_info("===== Mapping Table Page =====");
     size_t count = 0;
     for(auto [filename,lbn]:mappingTable){
-        pr_info("filename: %s  -> LBN(%lu)",filename,lbn);
+        pr_info("filename: %s  -> LBN(%lu)",filename.c_str(),lbn);
     }
     pr_info("================================");
 }

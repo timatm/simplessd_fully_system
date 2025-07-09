@@ -8,10 +8,12 @@
 #include <array>
 #include "def.hh"
 #include "disk.hh"
+#include "util/disk.hh"
+
 class Persistence {
 
 public:
-    Disk disk;
+    SimpleSSD::Disk* pDisk;
     int flushMappingTable(std::unordered_map<std::string, uint64_t>&);
     int readMappingTable(uint64_t lbn,uint8_t *buffer,size_t size);
     int flushSStable(uint64_t lbn,uint8_t *buffer,size_t size);

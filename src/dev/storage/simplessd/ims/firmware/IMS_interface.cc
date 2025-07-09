@@ -38,6 +38,7 @@ int IMS_interface::write_sstable(hostInfo *request,uint8_t *buffer){
 
     // select_lbn() has been inserted the node ,so if operation isn't success ,the node need to remove from tree
     uint64_t lbn = lbnPoolManager.select_lbn(DISPATCH_POLICY,request);
+    request->lbn = lbn;
     auto node = tree.find_node(filename,level,rangeMin,rangeMax);
     if (lbn == INVALIDLBN) {
         tree.remove_node(node);
@@ -64,12 +65,12 @@ int IMS_interface::write_sstable(hostInfo *request,uint8_t *buffer){
         pr_info("Failed to write block to LBN %lu for file: %s", lbn, filename.c_str());
         return OPERATION_FAILURE;
     }
-    request->lbn = lbn;
     return OPERATION_SUCCESS;
 }
 
-int IMS_interface::read_sstable(hostInfo request, uint8_t *buffer) {
-    std::string filename = request.filename;
+int IMS_interface::read_sstable(hostInfo *request, uint8_t *buffer) {
+    int err = OPERATION_SUCCESS;
+    std::string filename = request->filename;
     if (mappingManager.mappingTable.count(filename) == 0) {
         pr_info("ERROR: File %s not found in mapping table", filename.c_str());
         return OPERATION_FAILURE;
@@ -78,16 +79,24 @@ int IMS_interface::read_sstable(hostInfo request, uint8_t *buffer) {
         pr_info("ERROR: Null buffer provided to read file: %s", filename.c_str());
         return OPERATION_FAILURE;
     }
-    uint64_t lbn = mappingManager.mappingTable[filename];
-    int err =  persistenceManager.readSStable(lbn, (uint8_t *)buffer, BLOCK_SIZE);
-
-    if (err == OPERATION_SUCCESS) {
-        pr_info("Read data from LBN %lu for file: %s successfully", lbn, filename.c_str());
-    } else {
-        pr_info("Failed to read block from LBN %lu for file: %s", lbn, filename.c_str());
+    auto it = mappingManager.mappingTable.find(filename);
+    if(it == mappingManager.mappingTable.end()){
+        pr_info("ERROR: File %s not found in mapping table", filename.c_str());
+        request->lbn = INVALIDLBN;
         return OPERATION_FAILURE;
     }
-    return OPERATION_SUCCESS;
+    request->lbn = it->second;
+    if(ENABLE_DISK){
+        err =  persistenceManager.readSStable(request->lbn, (uint8_t *)buffer, BLOCK_SIZE);
+    }    
+
+    if (err == OPERATION_SUCCESS) {
+        pr_info("Read data from LBN %lu for file: %s successfully", request->lbn, filename.c_str());
+    } else {
+        pr_info("Failed to read block from LBN %lu for file: %s", request->lbn, filename.c_str());
+        return OPERATION_FAILURE;
+    }
+    return err;
 }
 
 int IMS_interface::search_key(int key) {
@@ -112,16 +121,28 @@ int IMS_interface::allocate_block(hostInfo request){
     return OPERATION_SUCCESS;
 }
 
+int IMS_interface::rebuild_super_page() {
+    pr_info("Try to initialize IMS interface with new super page");
+    sp_ptr_old->magic = MAGIC;
+    sp_ptr_old->mapping_page_num = 0;
+    sp_ptr_old->log_page_num = 0;
+    sp_ptr_old->currentLogLBN = INVALIDLBN;
+    sp_ptr_old->nextLogLBN = INVALIDLBN;
+    sp_ptr_old->logOffset = 0;
+    sp_ptr_old->usedLBN_num = 0;
+    lbnPoolManager.lastUsedChannel = INVALIDCH;
+
+    return OPERATION_SUCCESS;
+}
 int IMS_interface::init_IMS(){
     int err = OPERATION_FAILURE;
     pr_info("Initialize IMS interface");
-    persistenceManager.disk.open("disk.bin");
     uint8_t *buffer = (uint8_t *)malloc(IMS_PAGE_SIZE);
     if(!buffer){
         pr_info("Buffer malloc failed");
         return OPERATION_FAILURE;
     }
-    err = persistenceManager.disk.read(0, buffer);
+    err = persistenceManager.pDisk->readPage(0, buffer);
     if(err == OPERATION_FAILURE){
         free(buffer);
         pr_info("Read super page failed");
@@ -135,28 +156,32 @@ int IMS_interface::init_IMS(){
     }
     if(sp->magic != MAGIC){
         pr_info("Magic number mismatch,this disk maybe is new or not IMS disk");
-        pr_info("try to initialize IMS interface with new super page");
-        sp_ptr_old->magic = MAGIC;
-        sp_ptr_old->mapping_page_num = 0;
-        sp_ptr_old->log_page_num = 0;
-        sp_ptr_old->currentLogLBN = INVALIDLBN;
-        sp_ptr_old->nextLogLBN = INVALIDLBN;
-        sp_ptr_old->logOffset = 0;
-        sp_ptr_old->usedLBN_num = 0;
-        lbnPoolManager.lastUsedChannel = INVALIDCH;
+        rebuild_super_page();
     }
     else{
         pr_info("Super page magic number is correct, initializing IMS interface");
         sp_ptr_old->magic = sp->magic;
-        // sp_ptr_old->mapping_store = sp->mapping_store;
+        sp_ptr_old->mapping_store = sp->mapping_store;
         sp_ptr_old->mapping_page_num = sp->mapping_page_num;
-        // sp_ptr_old->log_store = sp->log_store;
+        sp_ptr_old->log_store = sp->log_store;
         sp_ptr_old->log_page_num = sp->log_page_num;
         sp_ptr_old->currentLogLBN = sp->currentLogLBN;
         sp_ptr_old->nextLogLBN = sp->nextLogLBN;
         sp_ptr_old->logOffset = sp->logOffset;
         sp_ptr_old->usedLBN_num = sp->usedLBN_num;
         lbnPoolManager.lastUsedChannel = sp->lastUsedChannel;
+        pr_info("================Super Page Info================");
+        pr_info("Magic: %llu", sp_ptr_old->magic);
+        pr_info("Mapping Store LBN: %llu", sp_ptr_old->mapping_store);
+        pr_info("Mapping Page Num: %llu", sp_ptr_old->mapping_page_num);
+        pr_info("Log Store LBN: %llu", sp_ptr_old->log_store);
+        pr_info("Log Page Num: %llu", sp_ptr_old->log_page_num);
+        pr_info("Current Log LBN: %llu", sp_ptr_old->currentLogLBN);
+        pr_info("Next Log LBN: %llu", sp_ptr_old->nextLogLBN);
+        pr_info("Log Offset: %llu", sp_ptr_old->logOffset);
+        pr_info("Used LBN Num: %llu", sp_ptr_old->usedLBN_num);
+        pr_info("Last Used Channel: %d", sp_ptr_old->lastUsedChannel);
+        pr_info("===============================================");
         err = mappingManager.init_mapping_table(sp_ptr_old->mapping_store,sp_ptr_old->mapping_page_num);
         if(err != OPERATION_SUCCESS){
             pr_info("Initialize mapping table failed");
@@ -174,7 +199,9 @@ int IMS_interface::init_IMS(){
     if(err != OPERATION_SUCCESS){
         pr_info("Initialize LBN pool failed");
         free(buffer);
-        return OPERATION_FAILURE;
+        rebuild_super_page();
+        err = lbnPoolManager.init_lbn_pool(sp_ptr_old->usedLBN_num);
+        // return OPERATION_FAILURE;
     }
     // Avoid using specific LBN (super block ,mapping block ,log block)
     lbnPoolManager.remove_freeLBNList(sp_ptr_old->mapping_store);
@@ -187,6 +214,7 @@ int IMS_interface::init_IMS(){
     free(buffer);
     return OPERATION_SUCCESS;
 }
+
 int IMS_interface::close_IMS(){
     int err = OPERATION_FAILURE;
     pr_info("Close IMS interface");
@@ -231,7 +259,7 @@ int IMS_interface::close_IMS(){
     }
     sp->usedLBN_num = total_used_lbn;
 
-    err = persistenceManager.disk.write(0, buffer);
+    err = persistenceManager.pDisk->writePage(0, buffer);
     if(err != OPERATION_SUCCESS){
         pr_info("Writing super page to disk failed");
         free(buffer);
@@ -239,8 +267,6 @@ int IMS_interface::close_IMS(){
     }
     
     free(buffer);
-
-    persistenceManager.disk.close();
     tree.clear();
     lbnPoolManager.clear();
     mappingManager.clear();

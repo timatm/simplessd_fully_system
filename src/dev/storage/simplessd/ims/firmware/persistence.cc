@@ -7,7 +7,7 @@
 #include "mapping_table.hh"
 #include "print.hh"
 #include "tree.hh"
-int Persistence::readMappingTable(uint64_t lbn,uint8_t *buffer,size_t size) {
+int Persistence::readMappingTable(uint64_t lpn,uint8_t *buffer,size_t size) {
     int err;
     if (buffer == nullptr) {
         std::cerr << "[ERROR] Memory allocation failed.\n";
@@ -17,7 +17,7 @@ int Persistence::readMappingTable(uint64_t lbn,uint8_t *buffer,size_t size) {
         pr_debug("[ERROR] Memory allocation failed.");
         return OPERATION_FAILURE;
     }
-    err = disk.read(lbn, buffer);
+    err = pDisk->readPage(lpn, buffer);
     if(err){
         return OPERATION_FAILURE;
     }
@@ -31,9 +31,6 @@ int Persistence::flushMappingTable(std::unordered_map<std::string, uint64_t>& ma
     uint64_t lpn = LBN2LPN(mappingPageLBN);
     uint8_t *buffer = (uint8_t*)malloc(IMS_PAGE_SIZE);
     int err = OPERATION_FAILURE;
-    if(!ENABLE_DISK){
-        return OPERATION_SUCCESS;
-    }
     if (!buffer) {
         std::cerr << "[ERROR] Memory allocation failed.\n";
         return OPERATION_FAILURE;
@@ -49,7 +46,7 @@ int Persistence::flushMappingTable(std::unordered_map<std::string, uint64_t>& ma
     for (const auto& pair : mappingTable) {
         if (idx == MAPPING_TABLE_ENTRIES){
             page->entry_num = idx;
-            err = disk.write(lpn, buffer);
+            err = pDisk->writePage(lpn, buffer);
             if(err == OPERATION_FAILURE) {
                 free(buffer);
                 return OPERATION_FAILURE;
@@ -80,7 +77,7 @@ int Persistence::flushMappingTable(std::unordered_map<std::string, uint64_t>& ma
     if(idx > 0) {
         sp_ptr_new->mapping_page_num++;
         page->entry_num = idx;
-        err = disk.write(lpn, buffer);
+        err = pDisk->writePage(lpn, buffer);
         if(err == OPERATION_FAILURE) {
             free(buffer);
             return OPERATION_FAILURE;
@@ -104,7 +101,7 @@ int  Persistence::readSStable(uint64_t lbn,uint8_t *buffer,size_t size){
         pr_debug("[ERROR] Memory allocation failed.");
         return OPERATION_FAILURE;
     }
-    err = disk.readBlock(lbn, buffer);
+    err = pDisk->readBlock(lbn, buffer);
     if(err){
         return OPERATION_FAILURE;
     }
@@ -127,7 +124,7 @@ int Persistence::flushSStable(uint64_t lbn,uint8_t *buffer,size_t size){
         pr_debug("[ERROR] Memory allocation failed.");
         return OPERATION_FAILURE;
     }
-    err = disk.writeBlock(lbn, buffer);
+    err = pDisk->writeBlock(lbn, buffer);
     if(!err){
         return err;
     }
@@ -144,7 +141,7 @@ int Persistence::readSStablePage(uint64_t lpn,uint8_t *buffer,size_t size){
         pr_debug("[ERROR] Memory allocation failed.");
         return OPERATION_FAILURE;
     }
-    err = disk.read(lpn,buffer);
+    err = pDisk->readPage(lpn,buffer);
     if(err){
         return OPERATION_FAILURE;
     }

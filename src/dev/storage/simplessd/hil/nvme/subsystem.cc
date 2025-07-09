@@ -448,6 +448,26 @@ void Subsystem::read(Namespace *ns, uint64_t slba, uint64_t nlblk,
   execute(CPU::NVME__SUBSYSTEM, CPU::CONVERT_UNIT, doRead, req);
 }
 
+void Subsystem::readIMS(Namespace *ns, uint64_t slpn, uint64_t nlpn,
+                     DMAFunction &func, void *context) {
+  (void)ns;
+  Request *req = new Request(func, context);
+  DMAFunction doRead = [this](uint64_t, void *context) {
+    auto req = (Request *)context;
+
+    pHIL->read(*req);
+
+    delete req;
+  };
+
+  req->range.slpn = slpn;
+  req->range.nlp = nlpn;
+  req->offset = 0;
+  req->length = nlpn * logicalPageSize;
+
+  execute(CPU::NVME__SUBSYSTEM, CPU::CONVERT_UNIT, doRead, req);
+}
+
 void Subsystem::write(Namespace *ns, uint64_t slba, uint64_t nlblk,
                       DMAFunction &func, void *context) {
   Request *req = new Request(func, context);
@@ -480,7 +500,6 @@ void Subsystem::writeIMS(Namespace *ns, uint64_t slpn, uint64_t nlpn,
   req->range.nlp = nlpn;
   req->offset = 0;
   req->length = nlpn * logicalPageSize;
-  debugprint(LOG_IMS,"logicalPageSize: %u",logicalPageSize);
   execute(CPU::NVME__SUBSYSTEM, CPU::CONVERT_UNIT, doWrite, req);
 }
 

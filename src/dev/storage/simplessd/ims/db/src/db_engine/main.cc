@@ -1,10 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <iostream>
 #include "../db_nvme/../db_nvme/nvme_interface.hh"
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
 #include "main.hh"
+#include <iomanip>   
+#include <cstdint>    
 
 
 int main() {
@@ -25,18 +28,27 @@ int main() {
         printf("Failed to Monitor IMS\n");
         return 1;
     }
+    sstable_info info("0001",1,2,20);
+
     void* raw_ptr = nullptr;
     if (posix_memalign(&raw_ptr, 4096, DB_BLOCK_SIZE)) {
         perror("posix_memalign failed");
         exit(1);
     }
-    memset(raw_ptr, 0xAB, DB_BLOCK_SIZE);
-    sstable_info info("0001",1,2,20);
-    err = nvme_write_sstable(info,(char*)raw_ptr);
+    // memset(raw_ptr, 0xAB, DB_BLOCK_SIZE);
+    // err = nvme_write_sstable(info,(char*)raw_ptr);
+    // if (err == COMMAND_FAILD) {
+    //     printf("Failed to Write SStable\n");
+    // }
+    memset(raw_ptr, 0, DB_BLOCK_SIZE);
+    err = monitor_IMS(DUMP_MAPPING_INFO);
+    err = nvme_read_sstable(info.filename, (char*)raw_ptr);
     if (err == COMMAND_FAILD) {
-        printf("Failed to Write SStable\n");
+        printf("Failed to Read SStable\n");
         return 1;
     }
+    
+    err = ims_close();
     close_device();
     return 0;
 }

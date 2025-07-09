@@ -75,6 +75,7 @@ class Subsystem : public AbstractSubsystem {
   uint32_t validNamespaceCount() override;
 
   void read(Namespace *, uint64_t, uint64_t, DMAFunction &, void *);
+  void readIMS(Namespace *, uint64_t, uint64_t, DMAFunction &, void *);
   void write(Namespace *, uint64_t, uint64_t, DMAFunction &, void *);
   void writeIMS(Namespace *, uint64_t, uint64_t, DMAFunction &, void *);
   void flush(Namespace *, DMAFunction &, void *);

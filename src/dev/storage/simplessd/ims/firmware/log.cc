@@ -10,7 +10,7 @@
 int Log::init_logRecordList(uint64_t logStoreLBN,uint64_t page_num){
     int err = OPERATION_FAILURE;
     if(logStoreLBN == INVALIDLBN) {
-        pr_info("Invalid log store LBN, cannot initialize log record list");
+        pr_info("Invalid log store LBN(%lu), cannot initialize log record list",logStoreLBN);
         return OPERATION_FAILURE;
     }
     uint64_t lpn = LBN2LPN(logStoreLBN);
@@ -20,7 +20,7 @@ int Log::init_logRecordList(uint64_t logStoreLBN,uint64_t page_num){
         return OPERATION_FAILURE;
     }
     for(int page = 0; page < page_num; page++) {
-        err = persistenceManager.disk.read(lpn, buffer);
+        err = persistenceManager.pDisk->readPage(lpn, buffer);
         if(err == OPERATION_FAILURE) {
             pr_info("Reading log record list from disk failed at LPN: %lu", lpn);
             free(buffer);
@@ -80,7 +80,7 @@ int Log::flush_logRecordList() {
 
         if (lbn == INVALIDLBN) {
             pr_info("Invalid LBN encountered in log record list, skipping");
-            logRecordList.pop_front();  // ✅ 避免死循環
+            logRecordList.pop_front(); 
             continue;
         }
 
@@ -88,7 +88,7 @@ int Log::flush_logRecordList() {
         logRecordList.pop_front();
 
         if (index == IMS_PAGE_SIZE / sizeof(uint64_t)) {
-            int err = persistenceManager.disk.write(lpn, buffer);
+            int err = persistenceManager.pDisk->writePage(lpn, buffer);
             if (err == OPERATION_FAILURE) {
                 pr_info("Flushing log record list to disk failed at LPN: %lu", lpn);
                 free(buffer);
@@ -99,12 +99,12 @@ int Log::flush_logRecordList() {
             sp_ptr_new->log_page_num++;
             index = 0;
             memset(buffer, 0, IMS_PAGE_SIZE);
-            logRecordPtr = (logLBNListRecord *)buffer;  // ✅ reset 指標
+            logRecordPtr = (logLBNListRecord *)buffer;
         }
     }
 
     if (index > 0) {
-        int err = persistenceManager.disk.write(lpn, buffer);
+        int err = persistenceManager.pDisk->writePage(lpn, buffer);
         if (err == OPERATION_FAILURE) {
             pr_info("Flushing remaining log record list to disk failed at LPN: %lu", lpn);
             free(buffer);

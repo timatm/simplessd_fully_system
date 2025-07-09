@@ -11,14 +11,14 @@
 #include <vector>
 #include <iostream>
 #include "def.hh"
-
 extern super_page *sp_ptr_old;
 extern super_page *sp_ptr_new;
 
 class IMS_interface{
 public:
+    int rebuild_super_page();
     int write_sstable(hostInfo *request,uint8_t *buffer);
-    int read_sstable(hostInfo request ,uint8_t *buffer);
+    int read_sstable(hostInfo *request ,uint8_t *buffer);
     // TODO need to finish
     int search_key(int key);
     int allocate_block(hostInfo request);

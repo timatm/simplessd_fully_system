@@ -13,7 +13,7 @@ extern "C" {
 #include <string>
 #include <array>
 #include <cstdint>
-int nvme_fd = -1;
+int nvme_fd;
 
 int pass_io_command(nmc_config_t *config){
     int err;
@@ -81,7 +81,7 @@ int ims_init(){
     nmc_config_t config_obj;
     nmc_config_t *config = &config_obj;
     init_nmc_config(config); 
-    config->OPCODE = OPCODE_INIT_IMS;
+    config->OPCODE = OPCODE_IMS_INIT;
     config->PSDT      = 0;
     // config->PRP1      = (uintptr_t)nullptr;
     err = pass_io_command(config);
@@ -90,6 +90,26 @@ int ims_init(){
     }
     else{
         pr("Init IMS failed");
+        pr("error code: 0x%x", err);
+        err = COMMAND_FAILD;
+    }
+    return err;
+}
+
+int ims_close(){
+    int err = 0;
+    nmc_config_t config_obj;
+    nmc_config_t *config = &config_obj;
+    init_nmc_config(config); 
+    config->OPCODE = OPCODE_IMS_CLOSE;
+    config->PSDT      = 0;
+    // config->PRP1      = (uintptr_t)nullptr;
+    err = pass_io_command(config);
+    if(err == STATUS_OPERATION_SUCCESS){
+        err = COMMAND_SUCCESS;
+    }
+    else{
+        pr("Close IMS failed");
         pr("error code: 0x%x", err);
         err = COMMAND_FAILD;
     }
@@ -179,6 +199,7 @@ int nvme_read_sstable(std::string filename,char *buffer){
     int err;
     nmc_config_t config_obj;
     nmc_config_t *config = &config_obj;
+    init_nmc_config(config); 
     config->data_len = DB_BLOCK_SIZE;
     config->data     = buffer;
     config->OPCODE    = OPCODE_READ_SSTABLE;

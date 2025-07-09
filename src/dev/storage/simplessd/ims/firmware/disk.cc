@@ -19,9 +19,9 @@ void Disk::open(const std::string& filename) {
     uint64_t actualSize = std::ftell(file);
 
     if (actualSize < expectedSize) {
-        std::fseek(file, expectedSize - 1, SEEK_SET);  // 定位到最後一個 byte
-        std::fwrite("", 1, 1, file);                   // 寫入 1 byte，強制擴展
-        std::fflush(file);                             // 確保 flush 到磁碟
+        std::fseek(file, expectedSize - 1, SEEK_SET); 
+        std::fwrite("", 1, 1, file);                   
+        std::fflush(file);                            
         pr_info("Disk file expanded to %lu bytes", expectedSize);
     }
 
@@ -56,6 +56,9 @@ int Disk::read(uint64_t lpn, uint8_t * buffer) {
 }
 
 int Disk::write(uint64_t lpn,const uint8_t * buffer) {
+    if(!ENABLE_DISK){
+        return 0; // If disk is not enabled, skip write operation
+    }
     if (!file) throw std::runtime_error("Disk not opened.");
 
     uint64_t offset = lpn * IMS_PAGE_SIZE;

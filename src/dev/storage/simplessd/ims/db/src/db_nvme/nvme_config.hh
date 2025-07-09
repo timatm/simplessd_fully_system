@@ -128,8 +128,9 @@ struct sstable_info{
 #define OPCODE_WRITE_SSTABLE    0x80
 #define OPCODE_READ_SSTABLE     0x81
 #define OPCODE_SEARCH_KEY       0x82
-#define OPCODE_INIT_IMS         0x83
-#define OPCODE_MONITOR_IMS      0x84
+#define OPCODE_IMS_INIT         0x83
+#define OPCODE_IMS_CLOSE        0x84
+#define OPCODE_MONITOR_IMS      0x85
 
 typedef enum{
   DUMP_MAPPING_INFO,
