@@ -110,16 +110,23 @@ int IMS_interface::search_key(int key) {
 
 // TODO now is not complete still need to finish  
 // This function is used to allocate a block for value log
-int IMS_interface::allocate_block(hostInfo request){
-    uint64_t lbn;
-    lbn = lbnPoolManager.allocate_valueLog_block();
-    if(lbn == INVALIDLBN){
-        pr_info("Allocate value log block is failed, need to check policy or free block list");
+int IMS_interface::allocate_block(uint64_t *l){
+    if (l == nullptr) {
+        pr_info("Output pointer is null");
         return OPERATION_FAILURE;
     }
 
+    uint64_t lbn = lbnPoolManager.allocate_valueLog_block();
+    if (lbn == INVALIDLBN) {
+        pr_info("Allocate value log block failed: no free block or policy issue");
+        return OPERATION_FAILURE;
+    }
+
+    *l = lbn;
+    pr_info("Allocated LBN: %lu", lbn);
     return OPERATION_SUCCESS;
 }
+
 
 int IMS_interface::rebuild_super_page() {
     pr_info("Try to initialize IMS interface with new super page");
@@ -276,22 +283,28 @@ int IMS_interface::close_IMS(){
     return OPERATION_SUCCESS;
 }
 // TODO now not complete still need to modify
-// int IMS_interface::write_log(valueLogInfo request,uint8_t *buffer){
-//     int err = OPERATION_FAILURE;
-//     uint64_t lpn = LBN2LPN(request.lbn) + request.page_offset;
-//     err = disk.write(lpn,buffer);
-//     if( err != OPERATION_SUCCESS){
-//         pr_info("Write value log is fail");
-//     }
-//     return err;
-// }
+int IMS_interface::write_log(uint64_t lpn,uint8_t *buffer){
+    if (buffer == nullptr) {
+        pr_info("Read log failed: null request or buffer");
+        return OPERATION_FAILURE;
+    }
+    int err = OPERATION_FAILURE;
+    err = persistenceManager.writeLog(lpn,buffer,IMS_PAGE_SIZE);
+    if( err != OPERATION_SUCCESS){
+        pr_info("Write value log failed at LPN %lu", lpn);
+    }
+    return err;
+}
 
-// int IMS_interface::read_log(valueLogInfo request,uint8_t *buffer){
-//     int err = OPERATION_FAILURE;
-//     uint64_t lpn = LBN2LPN(request.lbn) + request.page_offset;
-//     err = disk.read(lpn,buffer);
-//     if( err != OPERATION_SUCCESS){
-//         pr_info("Read value log is fail");
-//     }
-//     return err;
-// }
+int IMS_interface::read_log(uint64_t lpn,uint8_t *buffer){
+    if (buffer == nullptr) {
+        pr_info("Read log failed: null request or buffer");
+        return OPERATION_FAILURE;
+    }
+    int err = OPERATION_FAILURE;
+    err = persistenceManager.readLog(lpn,buffer,IMS_PAGE_SIZE);
+    if( err != OPERATION_SUCCESS){
+        pr_info("Read value log failed at LPN %lu", lpn);
+    }
+    return err;
+}

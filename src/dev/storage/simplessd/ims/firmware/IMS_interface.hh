@@ -21,9 +21,9 @@ public:
     int read_sstable(hostInfo *request ,uint8_t *buffer);
     // TODO need to finish
     int search_key(int key);
-    int allocate_block(hostInfo request);
-    int write_log(valueLogInfo request,uint8_t *buffer);
-    int read_log(valueLogInfo request,uint8_t *buffer); 
+    int allocate_block(uint64_t *);
+    int write_log(uint64_t,uint8_t *buffer);
+    int read_log(uint64_t,uint8_t *buffer); 
     int init_IMS();
     int close_IMS();
 private:

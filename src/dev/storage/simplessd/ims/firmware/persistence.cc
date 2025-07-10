@@ -148,3 +148,44 @@ int Persistence::readSStablePage(uint64_t lpn,uint8_t *buffer,size_t size){
     return OPERATION_SUCCESS;
 }
 
+int Persistence::readLog(uint64_t lpn,uint8_t *buffer,size_t size){
+    int err;
+    if (pDisk == nullptr) {
+        pr_debug("[ERROR] Disk not initialized.");
+        return OPERATION_FAILURE;
+    }
+    if (buffer == nullptr) {
+        pr_debug("[ERROR] Memory allocation failed");
+        return OPERATION_FAILURE;
+    }
+    if (size != IMS_PAGE_SIZE){
+        pr_debug("[ERROR] data size doesn't match");
+        return OPERATION_FAILURE;
+    }
+    err = pDisk->readPage(lpn,buffer);
+    if(err){
+        return OPERATION_FAILURE;
+    }
+    return OPERATION_SUCCESS;
+}
+
+int Persistence::writeLog(uint64_t lpn,uint8_t *buffer,size_t size){
+    int err;
+    if (pDisk == nullptr) {
+        pr_debug("[ERROR] Disk not initialized");
+        return OPERATION_FAILURE;
+    }
+    if (buffer == nullptr) {
+        pr_debug("[ERROR] Memory allocation failed");
+        return OPERATION_FAILURE;
+    }
+    if (size != IMS_PAGE_SIZE){
+        pr_debug("[ERROR] data size doesn't match");
+        return OPERATION_FAILURE;
+    }
+    err = pDisk->writePage(lpn,buffer);
+    if(err){
+        return OPERATION_FAILURE;
+    }
+    return OPERATION_SUCCESS;
+}

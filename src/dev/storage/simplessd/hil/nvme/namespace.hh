@@ -137,11 +137,11 @@ class Namespace {
   void read_sstable(SQEntryWrapper &, RequestFunction &);
   void write_log(SQEntryWrapper &, RequestFunction &);
   void read_log(SQEntryWrapper &, RequestFunction &);
-  void search_key(SQEntryWrapper &, RequestFunction &);
+  void allocate_lbn(SQEntryWrapper &, RequestFunction &);
   void init_IMS(SQEntryWrapper &, RequestFunction &);
   void close_IMS(SQEntryWrapper &, RequestFunction &);
   void monitor_IMS(SQEntryWrapper &, RequestFunction &);
-
+  void search_key(SQEntryWrapper &, RequestFunction &);
  public:
   Namespace(Subsystem *, ConfigData &);
   ~Namespace();

@@ -75,6 +75,12 @@ void fill_filename_to_dwords(const std::string& filename, uint32_t* dwords_out) 
             (static_cast<uint32_t>(raw[i*4 + 0]) << 0  ) ;
     }
 }
+void fill_uint64_to_dwords(uint64_t input, uint32_t* dwords_out) {
+    uint32_t low  = (uint32_t)input;
+    uint32_t high = (uint32_t)(input >> 32);
+    dwords_out[0] = low;
+    dwords_out[1] = high;
+}
 
 int ims_init(){
     int err = 0;
@@ -190,6 +196,38 @@ int nvme_write_sstable(sstable_info info,char *buffer){
     return err;
 }
 
+int write_log(uint64_t lpn,char *buffer){
+    
+    if(buffer == nullptr){
+        pr("Write sstable failed ,data buffer is nullptr");
+        return COMMAND_FAILD;
+    }
+    int err;
+    nmc_config_t config_obj;
+    nmc_config_t *config = &config_obj;
+    init_nmc_config(config); 
+    
+    // config->dry = true;
+    config->OPCODE = OPCODE_WRITE_LOG;
+    config->data = buffer;
+    config->data_len = DB_PAGE_SIZE;
+    uint32_t lpn_dword[2] = {0};
+    fill_uint64_to_dwords(lpn,lpn_dword);
+    config->cdw02 = lpn_dword[0];
+    config->cdw03 = lpn_dword[1];
+    err = pass_io_command(config);
+    if(err == STATUS_OPERATION_SUCCESS){
+        pr("nvme write success");
+        err = COMMAND_SUCCESS;
+    }
+    else{
+        pr("nvme write failed");
+        pr("error code: 0x%x", err);
+        err = COMMAND_FAILD;
+    }
+    return err;
+}
+
 
 int nvme_read_sstable(std::string filename,char *buffer){
     if(buffer == nullptr){
@@ -220,6 +258,38 @@ int nvme_read_sstable(std::string filename,char *buffer){
     }
     else{
         pr("nvme read failed");
+        pr("error code: 0x%x", err);
+    }
+    return err;
+}
+
+
+int read_log(uint64_t lpn,char *buffer){
+    if(buffer == nullptr){
+        pr("Write sstable failed ,data buffer is nullptr");
+        return COMMAND_FAILD;
+    }
+    int err;
+    nmc_config_t config_obj;
+    nmc_config_t *config = &config_obj;
+    init_nmc_config(config); 
+    config->data_len = DB_PAGE_SIZE;
+    config->data     = buffer;
+    config->OPCODE    = OPCODE_READ_LOG;
+    config->PSDT      = 0; /* use PRP */
+    config->meta_addr = (uintptr_t)NULL;
+    config->PRP1      = (uintptr_t)config->data;
+    uint32_t lpn_dwords[2] = {0};
+    fill_uint64_to_dwords(lpn,lpn_dwords);
+    config->cdw02 = lpn_dwords[0];
+    config->cdw03 = lpn_dwords[1];
+    err = pass_io_command(config);
+
+    if(err == 0){
+        pr("nvme read success");
+    }
+    else{
+        pr("nvme read log failed");
         pr("error code: 0x%x", err);
     }
     return err;
@@ -281,3 +351,4 @@ int close_device(){
     }
     return COMMAND_SUCCESS;
 }
+

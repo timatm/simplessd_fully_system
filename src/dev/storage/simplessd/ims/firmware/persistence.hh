@@ -19,6 +19,8 @@ public:
     int flushSStable(uint64_t lbn,uint8_t *buffer,size_t size);
     int readSStable(uint64_t lbn,uint8_t *buffer,size_t size);
     int readSStablePage(uint64_t lpn,uint8_t *buffer,size_t size);
+    int readLog(uint64_t lpn,uint8_t *buffer,size_t size);
+    int writeLog(uint64_t lpn,uint8_t *buffer,size_t size);
     // TODO log(blob log) need to add 
 private:
 };

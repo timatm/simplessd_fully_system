@@ -99,8 +99,10 @@ struct hostInfo
 
 struct valueLogInfo{
     uint64_t lbn;  // This log store in which LBN
-    uint64_t page_offset; // This log store in which LBN's LPN
-    uint8_t *buffer; //data buffer
+    uint64_t page_offset; // This log store in which LPN
+    valueLogInfo(uint64_t l,uint64_t p):
+        lbn(l),
+        page_offset(p){}
 };
 
 #pragma pack(push, 1)
