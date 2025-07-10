@@ -196,7 +196,7 @@ struct slotFormat {
 
     struct {
         union {
-            uint32_t cpdpbp;    // 4 B = packed bit-field
+            uint32_t lpn;
             struct {
                 uint32_t ch      : 3;
                 uint32_t plane   : 3;
@@ -206,31 +206,31 @@ struct slotFormat {
                 uint32_t page    : 10;
             };
         };
-        uint8_t offset[11];     // 11 B
-    } value_ptr;                // = 15 B
+        uint32_t offset;
+        uint8_t reserve[7];
+    } value_ptr;                // 15 B
 
     union {
-        uint8_t raw[8];         // raw access
+        uint8_t raw[8]; 
         struct {
-            uint64_t seq  : 56; // 7 B
-            uint64_t type : 8;  // 1 B
+            uint64_t seq  : 56;
+            uint64_t type : 8;
         };
     } info;                     // = 8 B
 };
+static_assert(sizeof(slotFormat) == 64, "slotFormat must be 64 bytes");
 
 #define SLOT_NUM IMS_PAGE_SIZE/sizeof(slotFormat)
 struct pageFormat
 {
     slotFormat slot[SLOT_NUM];
 };
+static_assert(sizeof(pageFormat) == IMS_PAGE_SIZE ,"pageformat must be same to page size");
+
 struct  SStableFormat
 {
     pageFormat SStablePerPage[IMS_PAGE_NUM];
 };
-
-
-static_assert(sizeof(slotFormat) == 64, "slotFormat must be 64 bytes");
-static_assert(sizeof(pageFormat) == IMS_PAGE_SIZE ,"pageformat must be same to page size");
 static_assert(sizeof(SStableFormat) == BLOCK_SIZE ,"SStableFormat must be same to block size");
 #pragma pack(pop)
 
@@ -246,7 +246,15 @@ static_assert(sizeof(SStableFormat) == BLOCK_SIZE ,"SStableFormat must be same t
 struct logLBNListRecord {
     uint64_t lbn[IMS_PAGE_SIZE / sizeof(uint64_t)]; // The LBN of the log record
 };
+
 static_assert(sizeof(logLBNListRecord) == IMS_PAGE_SIZE, "logLBNListRecord must be same to page size");
+
+struct logRecord{
+    uint32_t key_size;
+    uint32_t value_size;
+    uint8_t key[40];
+    uint8_t *value;
+};
 #pragma pack(pop)
 // [Log file setting end]
 
