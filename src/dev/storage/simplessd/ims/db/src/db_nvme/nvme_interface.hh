@@ -16,6 +16,6 @@ void init_nmc_config(nmc_config_t *config);
 
 int write_log(uint64_t lpn ,char *buffer);
 int read_log(uint64_t lpn ,char *buffer);
-int allcate_lbn();
+int allcate_lbn(char *buffer);
 int init_device();
 int close_device();

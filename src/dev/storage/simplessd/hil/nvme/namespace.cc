@@ -1162,7 +1162,7 @@ void Namespace::read_log(SQEntryWrapper &req, RequestFunction &func) {
       pContext->buffer = (uint8_t *)calloc(IMS_PAGE_SIZE, 1);
 
       if (pDisk) {
-        pDisk->readBlock(pContext->lbn, pContext->buffer);
+        pDisk->readPage(pContext->lbn, pContext->buffer);
       }
       
       pContext->dma->write(0, (uint64_t)IMS_PAGE_SIZE, pContext->buffer,
@@ -1176,7 +1176,7 @@ void Namespace::read_log(SQEntryWrapper &req, RequestFunction &func) {
     pContext->nlpn = 1;
     pContext->lbn = LPN2LBN(lpn);
     debugprint(LOG_IMS,
-              "NVM     | READ_SSTABLE | IOContext | LPN: %ld (LBN: %ld)| number of LPN: %ld",pContext->lpn ,pContext->lbn,pContext->nlpn);
+              "NVM     | READ LOG | IOContext | LPN: %ld (LBN: %ld)| number of LPN: %ld",pContext->lpn ,pContext->lbn,pContext->nlpn);
 
 
     CPUContext *pCPU =
@@ -1187,9 +1187,20 @@ void Namespace::read_log(SQEntryWrapper &req, RequestFunction &func) {
           new SGL(cfgdata, cpuHandler, pCPU, req.entry.data1, req.entry.data2);
     }
     else {
+      debugprint(LOG_IMS,
+              "NVM     | READ LOG | req.entry.data1 : 0x%x",req.entry.data1);
+      debugprint(LOG_IMS,
+              "NVM     | READ LOG | req.entry.data2 : 0x%x",req.entry.data2);
       pContext->dma =
           new PRPList(cfgdata, cpuHandler, pCPU, req.entry.data1,
                       req.entry.data2, (uint64_t)IMS_PAGE_SIZE);
+    }
+    if (!pContext->dma) {
+      debugprint(LOG_IMS, "FATAL: PRPList allocation failed!");
+      abort();
+    } 
+    else {
+      debugprint(LOG_IMS, "PRPList created: %p", pContext->dma);
     }
   }
   else {
@@ -1309,10 +1320,6 @@ void Namespace::allocate_lbn(SQEntryWrapper &req, RequestFunction &func) {
   }
   if(lbn == INVALIDLBN){
     err = true;
-    debugprint(LOG_IMS,
-             "NVM     | READ_SSTABLE | Allocate LBN is invalid");
-    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
-                    STATUS_LBN_INVALID);
   }
   if(err){
     debugprint(LOG_IMS,
@@ -1320,8 +1327,11 @@ void Namespace::allocate_lbn(SQEntryWrapper &req, RequestFunction &func) {
     resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
                     STATUS_COMMAND_FAILD);
   }
-  debugprint(LOG_IMS,
+  else{
+    debugprint(LOG_IMS,
              "NVM     | ALLOCATE LBN | allocate LBN is: %lu",lbn);
+  }
+  
 
   if (!err) {
     DMAFunction doRead = [this](uint64_t tick, void *context) {
@@ -1355,7 +1365,7 @@ void Namespace::allocate_lbn(SQEntryWrapper &req, RequestFunction &func) {
       pContext->tick = tick;
       pContext->beginAt = 0;
       pContext->buffer = (uint8_t *)calloc(sizeof(uint64_t), 1);
-      *(uint64_t *)pContext->buffer = pContext->lbn;
+      // memcpy(pContext->buffer, &pContext->lbn, sizeof(uint64_t));
       pContext->dma->write(0, (uint64_t)sizeof(uint64_t), pContext->buffer,
                            dmaDone, context);
     };

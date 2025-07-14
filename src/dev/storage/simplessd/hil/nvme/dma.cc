@@ -34,6 +34,10 @@ DMAInterface::DMAInterface(ConfigData &cfg, DMAFunction &f, void *c)
       callCounter(0),
       context(c),
       dmaHandler(commonDMAHandler) {
+        debugprint(LOG_IMS, "[DMAInterface] Constructor called");
+        debugprint(LOG_IMS, "  cfg.pInterface = %p", cfg.pInterface);
+        debugprint(LOG_IMS, "  initFunction  = %s", f ? "valid" : "nullptr");
+        debugprint(LOG_IMS, "  context       = %p", context);
   immediateEvent =
       allocate([this](uint64_t now) { initFunction(now, context); });
 }

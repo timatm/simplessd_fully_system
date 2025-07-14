@@ -28,6 +28,7 @@ int main() {
         printf("Failed to Monitor IMS\n");
         return 1;
     }
+    
     sstable_info info("0001",1,2,20);
 
     void* raw_ptr = nullptr;
@@ -35,18 +36,33 @@ int main() {
         perror("posix_memalign failed");
         exit(1);
     }
+
+    void* buffer = nullptr; 
+    if (posix_memalign(&buffer, 4096, DB_PAGE_SIZE)) {
+        perror("posix_memalign failed");
+        exit(1);
+    }
+    err = read_log(400,(char*)buffer);
+    // err = allcate_lbn((char*)buffer);
+    printf("Allovate buffer is %lu",*((uint64_t*)buffer));
+    for (int i = 0; i < DB_PAGE_SIZE;i++){
+        if( ((uint8_t *)buffer)[i] != 0xAB){
+            printf("Read log failed in %d , expect : 0xAB ,real : 0x%x",i,((uint8_t *)buffer)[i]);
+            break;
+        }
+    }
     // memset(raw_ptr, 0xAB, DB_BLOCK_SIZE);
     // err = nvme_write_sstable(info,(char*)raw_ptr);
     // if (err == COMMAND_FAILD) {
     //     printf("Failed to Write SStable\n");
     // }
-    memset(raw_ptr, 0, DB_BLOCK_SIZE);
-    err = monitor_IMS(DUMP_MAPPING_INFO);
-    err = nvme_read_sstable(info.filename, (char*)raw_ptr);
-    if (err == COMMAND_FAILD) {
-        printf("Failed to Read SStable\n");
-        return 1;
-    }
+    // memset(raw_ptr, 0, DB_BLOCK_SIZE);
+    // err = monitor_IMS(DUMP_MAPPING_INFO);
+    // err = nvme_read_sstable(info.filename, (char*)raw_ptr);
+    // if (err == COMMAND_FAILD) {
+    //     printf("Failed to Read SStable\n");
+    //     return 1;
+    // }
     
     err = ims_close();
     close_device();

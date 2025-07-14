@@ -17,7 +17,6 @@ int nvme_fd;
 
 int pass_io_command(nmc_config_t *config){
     int err;
-    config->meta_addr = (uintptr_t)NULL;
     config->PSDT      = 0;  /* use PRP */
     config->PRP1      = (uintptr_t)config->data;
     config->NSID      = 1;
@@ -29,6 +28,7 @@ int pass_io_command(nmc_config_t *config){
     pr("fd             : %d", nvme_fd);
     pr("OPCODE         : 0x%x", config->OPCODE);
     pr("flags          : 0x%x", config->flags);
+    pr("PSDT         : 0x%x", config->PSDT );
     pr("rsvd           : 0x%x", config->rsvd);
     pr("NSID           : 0x%x", config->NSID);
     pr("cdw02          : %u", config->cdw02);
@@ -321,19 +321,32 @@ void init_nmc_config(nmc_config_t *config){
     return;
 }
 
-// void print_fd_target(int fd) {
-//     char path[64];
-//     char resolved_path[64];
+int allcate_lbn(char *buffer){
+    if(buffer == nullptr){
+        pr("Allcate LBN failed ,data buffer is nullptr");
+        return COMMAND_FAILD;
+    }
+    int err;
+    nmc_config_t config_obj;
+    nmc_config_t *config = &config_obj;
+    init_nmc_config(config); 
+    config->data_len = (uint32_t)sizeof(uint64_t);
+    config->data     = buffer;
+    config->OPCODE    = OPCODE_ALLOCATE ;
+    config->PSDT      = 0; /* use PRP */
+    config->meta_addr = (uintptr_t)NULL;
+    config->PRP1      = (uintptr_t)config->data;
+    err = pass_io_command(config);
 
-//     snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
-//     ssize_t len = readlink(path, resolved_path, sizeof(resolved_path) - 1);
-//     if (len != -1) {
-//         resolved_path[len] = '\0';
-//         printf("%s\n", fd, resolved_path);
-//     } else {
-//         perror("readlink");
-//     }
-// }
+    if(err == 0){
+        pr("nvme read success");
+    }
+    else{
+        pr("nvme read log failed");
+        pr("error code: 0x%x", err);
+    }
+    return err;
+}
 
 int init_device(){
     const char *dev_path = "/dev/nvme0n1";
