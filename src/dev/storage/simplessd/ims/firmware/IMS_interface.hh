@@ -27,7 +27,7 @@ public:
     int init_IMS();
     int close_IMS();
 private:
-
+    void reset_superPage(super_page*);
 };
 
 

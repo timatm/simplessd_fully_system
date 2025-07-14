@@ -936,7 +936,7 @@ void Namespace::write_log(SQEntryWrapper &req, RequestFunction &func) {
           pContext->function(pContext->resp);
 
           if (pContext->buffer) {
-            pDisk->writeBlock(pContext->lbn,pContext->buffer);
+            pDisk->writePage(pContext->lbn,pContext->buffer);
 
             free(pContext->buffer);
           }
@@ -1338,8 +1338,7 @@ void Namespace::allocate_lbn(SQEntryWrapper &req, RequestFunction &func) {
       DMAFunction dmaDone = [this](uint64_t tick, void *context) {
         IOContext *pContext = (IOContext *)context;
         pContext->beginAt++;
-
-        if (pContext->beginAt == 2) {
+        if (pContext->beginAt == 1) {
           debugprint(
               LOG_HIL_NVME,
               "NVM     | READ_SSTABLE  | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
@@ -1365,8 +1364,8 @@ void Namespace::allocate_lbn(SQEntryWrapper &req, RequestFunction &func) {
       pContext->tick = tick;
       pContext->beginAt = 0;
       pContext->buffer = (uint8_t *)calloc(sizeof(uint64_t), 1);
-      // memcpy(pContext->buffer, &pContext->lbn, sizeof(uint64_t));
-      pContext->dma->write(0, (uint64_t)sizeof(uint64_t), pContext->buffer,
+      memcpy(pContext->buffer, &pContext->lbn, sizeof(uint64_t));
+      pContext->dma->write(0, sizeof(uint64_t), pContext->buffer,
                            dmaDone, context);
     };
 

@@ -4,7 +4,8 @@
 
 class API {
 public:
-    
+
+virtual void get();
 
 private:
 };

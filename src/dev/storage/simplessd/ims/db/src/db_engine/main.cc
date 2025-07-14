@@ -42,11 +42,14 @@ int main() {
         perror("posix_memalign failed");
         exit(1);
     }
-    err = read_log(400,(char*)buffer);
+    memset(buffer, 0xDE, DB_PAGE_SIZE);
+    err = write_log(400, (char*)buffer);
+    memset(buffer, 0x00, DB_PAGE_SIZE);
+    err = read_log(400, (char*)buffer);
+    // err = read_log(400,(char*)buffer);
     // err = allcate_lbn((char*)buffer);
-    printf("Allovate buffer is %lu",*((uint64_t*)buffer));
     for (int i = 0; i < DB_PAGE_SIZE;i++){
-        if( ((uint8_t *)buffer)[i] != 0xAB){
+        if( ((uint8_t *)buffer)[i] != 0xDE){
             printf("Read log failed in %d , expect : 0xAB ,real : 0x%x",i,((uint8_t *)buffer)[i]);
             break;
         }
@@ -57,7 +60,6 @@ int main() {
     //     printf("Failed to Write SStable\n");
     // }
     // memset(raw_ptr, 0, DB_BLOCK_SIZE);
-    // err = monitor_IMS(DUMP_MAPPING_INFO);
     // err = nvme_read_sstable(info.filename, (char*)raw_ptr);
     // if (err == COMMAND_FAILD) {
     //     printf("Failed to Read SStable\n");

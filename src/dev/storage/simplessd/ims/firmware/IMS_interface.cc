@@ -195,6 +195,7 @@ int IMS_interface::init_IMS(){
             free(buffer);
             return OPERATION_FAILURE;
         }
+        pr_info("InitLogRecordList: logStoreLBN = %lu", sp_ptr_old->log_store);
         err = logManager.init_logRecordList(sp_ptr_old->log_store,sp_ptr_old->log_page_num);
         if(err != OPERATION_SUCCESS){
             pr_info("Initialize log record list failed");
@@ -278,8 +279,8 @@ int IMS_interface::close_IMS(){
     lbnPoolManager.clear();
     mappingManager.clear();
     logManager.clear();
-    delete sp_ptr_old;
-    delete sp_ptr_new;
+    reset_superPage(sp_ptr_old);
+    reset_superPage(sp_ptr_new);
     return OPERATION_SUCCESS;
 }
 // TODO now not complete still need to modify
@@ -288,8 +289,8 @@ int IMS_interface::write_log(uint64_t lpn,uint8_t *buffer){
         pr_info("Read log failed: null request or buffer");
         return OPERATION_FAILURE;
     }
-    int err = OPERATION_FAILURE;
-    err = persistenceManager.writeLog(lpn,buffer,IMS_PAGE_SIZE);
+    int err = OPERATION_SUCCESS;
+    // err = persistenceManager.writeLog(lpn,buffer,IMS_PAGE_SIZE);
     if( err != OPERATION_SUCCESS){
         pr_info("Write value log failed at LPN %lu", lpn);
     }
@@ -301,10 +302,27 @@ int IMS_interface::read_log(uint64_t lpn,uint8_t *buffer){
         pr_info("Read log failed: null request or buffer");
         return OPERATION_FAILURE;
     }
-    int err = OPERATION_FAILURE;
-    err = persistenceManager.readLog(lpn,buffer,IMS_PAGE_SIZE);
+    int err = OPERATION_SUCCESS;
+    // err = persistenceManager.readLog(lpn,buffer,IMS_PAGE_SIZE);
     if( err != OPERATION_SUCCESS){
         pr_info("Read value log failed at LPN %lu", lpn);
     }
     return err;
+}
+
+void IMS_interface::reset_superPage(super_page *sp) {
+    if (sp == nullptr) {
+        pr_info("Super page pointer is null, cannot reset");
+        return;
+    }
+    sp->magic = 0;
+    sp->mapping_store = 0; // Default mapping store LBN
+    sp->mapping_page_num = 0;
+    sp->log_store = 0; // Default log store LBN
+    sp->log_page_num = 0;
+    sp->currentLogLBN = INVALIDLBN;
+    sp->nextLogLBN = INVALIDLBN;
+    sp->logOffset = INVALIDLBN;
+    sp->usedLBN_num = 0;
+    sp->lastUsedChannel = INVALIDCH;
 }

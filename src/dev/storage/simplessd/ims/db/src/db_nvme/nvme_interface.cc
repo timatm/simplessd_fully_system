@@ -28,7 +28,7 @@ int pass_io_command(nmc_config_t *config){
     pr("fd             : %d", nvme_fd);
     pr("OPCODE         : 0x%x", config->OPCODE);
     pr("flags          : 0x%x", config->flags);
-    pr("PSDT         : 0x%x", config->PSDT );
+    pr("PSDT           : 0x%x", config->PSDT );
     pr("rsvd           : 0x%x", config->rsvd);
     pr("NSID           : 0x%x", config->NSID);
     pr("cdw02          : %u", config->cdw02);
@@ -283,8 +283,9 @@ int read_log(uint64_t lpn,char *buffer){
     fill_uint64_to_dwords(lpn,lpn_dwords);
     config->cdw02 = lpn_dwords[0];
     config->cdw03 = lpn_dwords[1];
+    // config->dry = true; // set dry run to true for debug
     err = pass_io_command(config);
-
+    
     if(err == 0){
         pr("nvme read success");
     }
