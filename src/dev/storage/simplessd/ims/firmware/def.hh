@@ -160,17 +160,17 @@ struct mappingEntry {
         memset(fileName, 0, sizeof(fileName));
     }
 };
+static_assert(sizeof(mappingEntry) == 64, "mappingEntry must be 64B");
 #define MAPPING_TABLE_ENTRIES ( (IMS_PAGE_SIZE / sizeof(mappingEntry))-1 ) // 16384 / 64(mapping entry) = 128 , 128 - 1(header) = 127
 
 struct mappingTablePerPage {
     
     union {
         uint8_t header[sizeof(mappingEntry)];
-         // 完整 raw data
         struct {
             // Record the next page is stored mappingTable
-            uint8_t entry_num;     // 1 bytes
-            uint8_t reserved1[62];   // 61 bytes
+            uint8_t entry_num;
+            uint8_t reserved1[63]; 
         };
     };
     
