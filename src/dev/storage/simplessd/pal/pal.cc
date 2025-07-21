@@ -122,6 +122,9 @@ void PAL::read(Request &req, uint64_t &tick) {
 }
 
 void PAL::write(Request &req, uint64_t &tick) {
+  debugprint(
+      LOG_PAL, "PAL::write() called for reqID %lu, blockIndex %u, pageIndex %u",
+      req.reqID, req.blockIndex, req.pageIndex);
   pPAL->write(req, tick);
 }
 

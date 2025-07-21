@@ -549,6 +549,9 @@ bool GenericCache::write(Request &req, uint64_t &tick) {
   bool ret = false;
   uint64_t flash = tick;
   bool dirty = false;
+  debugprint(LOG_ICL_GENERIC_CACHE,
+             "ICL WRITE | beginTick: %lu",tick);
+
 
   debugprint(LOG_ICL_GENERIC_CACHE,
              "WRITE | REQ %7u-%-4u | LCA %" PRIu64 " | SIZE %" PRIu64,
@@ -747,7 +750,8 @@ bool GenericCache::write(Request &req, uint64_t &tick) {
   if (ret) {
     stat.cache[1]++;
   }
-
+  debugprint(LOG_ICL_GENERIC_CACHE,
+             "ICL WRITE | endTick: %lu",tick);
   return ret;
 }
 

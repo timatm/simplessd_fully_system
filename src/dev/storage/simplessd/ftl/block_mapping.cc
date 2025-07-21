@@ -675,6 +675,10 @@ void blockMapping::writeInternal(Request &req, uint64_t &tick, bool sendToPAL) {
   std::unordered_map<uint32_t, Block>::iterator block;
   uint32_t pbn = LPN2LBN(req.lpn);
   uint64_t ppn = req.lpn;
+  uint32_t pageOffset = ppn - LBN2LPN(pbn);
+
+  debugprint(LOG_FTL_PAGE_MAPPING,
+               "WRITE | LPN %" PRIu64 " | PBN %u | PPN %lu | OFFSET %u",req.lpn, pbn, ppn,pageOffset);
   auto mappingList = table.find(ppn);
   uint64_t beginAt;
   uint64_t finishedAt = tick;
@@ -711,7 +715,8 @@ void blockMapping::writeInternal(Request &req, uint64_t &tick, bool sendToPAL) {
 
   // Write data to free block
   block = blocks.find(pbn);
-
+  debugprint(LOG_FTL_PAGE_MAPPING,
+               "WRITE | Selected block %u | Page offset %u", block->first, pageOffset);
   if (block == blocks.end()) {
     panic("No such block");
   }
@@ -734,7 +739,8 @@ void blockMapping::writeInternal(Request &req, uint64_t &tick, bool sendToPAL) {
 
   for (uint32_t idx = 0; idx < bitsetSize; idx++) {
     if (req.ioFlag.test(idx) || !bRandomTweak) {
-      uint32_t pageIndex = block->second.getNextWritePageIndex(idx);
+      // uint32_t pageIndex = block->second.getNextWritePageIndex(idx);
+      uint32_t pageIndex = pageOffset;
       auto &mapping = mappingList->second.at(idx);
 
       beginAt = tick;

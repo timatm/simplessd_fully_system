@@ -105,7 +105,8 @@ void HIL::write(Request &req) {
   DMAFunction doWrite = [this](uint64_t beginAt, void *context) {
     auto pReq = (Request *)context;
     uint64_t tick = beginAt;
-
+    debugprint(LOG_HIL,
+               "HIL WRITE | beginAt:%lu",beginAt);
     pReq->reqID = ++reqCount;
 
     debugprint(LOG_HIL,
