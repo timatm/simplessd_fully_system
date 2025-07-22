@@ -1,7 +1,7 @@
 #include "record.hh"
 #include <cassert>
 #include <cstring>
-
+#include <iostream>
 Record::Record(const InternalKey& ikey, const std::string& val)
     : internal_key_size(sizeof(ikey)),
       internal_key(ikey),
@@ -47,4 +47,16 @@ Record Record::Decode(const std::string& data) {
     rec.value = data.substr(offset, rec.value_size);
 
     return rec;
+}
+
+void Record::Dump() const {
+    std::cout << "== Record Dump ==" << std::endl;
+    std::cout << "User Key: " << internal_key.UserKey() << std::endl;
+    std::cout << "Sequence : " << internal_key.info.seq << std::endl;
+    std::cout << "Type     : " << static_cast<uint32_t>(internal_key.info.type) << std::endl;
+    std::cout << "LPN      : " << internal_key.value_ptr.lpn << std::endl;
+    std::cout << "Offset   : " << internal_key.value_ptr.offset << std::endl;
+    std::cout << "Value Size : " << value_size << std::endl;
+    std::cout << "Value    : " << value << std::endl;
+    std::cout << "====================" << std::endl;
 }

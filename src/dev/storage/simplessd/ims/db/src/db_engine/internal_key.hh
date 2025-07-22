@@ -12,7 +12,7 @@ enum class ValueType : uint8_t {
     kTypeDeletion = 0x0,
     kTypeValue = 0x1,
 };
-
+#pragma pack(push,1)
 struct InternalKey {
     uint8_t key_size;       // 1B
     uint8_t key[40];        // 最多 40B，實際用前 key_size B
@@ -40,14 +40,15 @@ struct InternalKey {
             uint64_t type : 8;
         };
     } info;
-
     InternalKey();
     InternalKey(const std::string& user_key, uint64_t seq, ValueType t);
-
+    InternalKey(const std::string& user_key, uint32_t lpn,uint32_t offset,int64_t seq, ValueType t);
     std::string Encode() const;
     static InternalKey Decode(const std::string& buf);
     std::string UserKey() const;
 };
+#pragma pack(pop)
+static_assert(sizeof(InternalKey) == 64, "InternalKey must be 64 bytes");
 
 struct InternalKeyComparator {
     bool operator()(const InternalKey& a, const InternalKey& b) const;

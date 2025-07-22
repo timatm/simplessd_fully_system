@@ -1,28 +1,25 @@
 #ifndef SIMPLE_SKIPLIST_H
 #define SIMPLE_SKIPLIST_H
 
-#include <atomic>
 #include <cassert>
 #include <cstdlib>
 #include <memory>
 #include <random>
 #include <vector>
-#include "internal_key.hh"
 
-template <typename Comparator = InternalKeyComparator>
+template <typename Record, typename Comparator>
 class SkipList {
 private:
     struct Node;
 
 public:
-    using Key = InternalKey;
     class Iterator;
 
-    SkipList();
+    explicit SkipList(Comparator cmp = Comparator());
     ~SkipList();
 
-    void Insert(const Key& key);
-    bool Contains(const Key& key) const;
+    void Insert(const Record& record);
+    bool Contains(const Record& record) const;
 
     Iterator GetIterator() const;
 
@@ -37,28 +34,34 @@ private:
     mutable std::uniform_real_distribution<> dist_;
 
     int RandomHeight();
-    Node* CreateNode(const Key& key, int height);
-    Node* FindGreaterOrEqual(const Key& key, Node** prev = nullptr) const;
-    bool Equal(const Key& a, const Key& b) const { return !cmp_(a, b) && !cmp_(b, a); }
+    Node* CreateNode(const Record& record, int height);
+    Node* FindGreaterOrEqual(const Record& record, Node** prev = nullptr) const;
+    bool Equal(const Record& a, const Record& b) const {
+        return !cmp_(a, b) && !cmp_(b, a);
+    }
 };
 
-template <typename Comparator>
-struct SkipList<Comparator>::Node {
-    Key key;
+// Node struct
+template <typename Record, typename Comparator>
+struct SkipList<Record, Comparator>::Node {
+    Record record;
     std::vector<Node*> next;
 
-    Node(const Key& k, int height) : key(k), next(height, nullptr) {}
+    Node(const Record& r, int height) : record(r), next(height, nullptr) {}
 };
 
-template <typename Comparator>
-SkipList<Comparator>::SkipList()
-    : head_(new Node(Key("", 0, ValueType::kTypeValue), kMaxHeight)),
+// Constructor
+template <typename Record, typename Comparator>
+SkipList<Record, Comparator>::SkipList(Comparator cmp)
+    : head_(new Node(Record(), kMaxHeight)),
       max_height_(1),
+      cmp_(cmp),
       gen_(std::random_device{}()),
       dist_(0.0, 1.0) {}
 
-template <typename Comparator>
-SkipList<Comparator>::~SkipList() {
+// Destructor
+template <typename Record, typename Comparator>
+SkipList<Record, Comparator>::~SkipList() {
     Node* node = head_;
     while (node != nullptr) {
         Node* next = node->next[0];
@@ -67,27 +70,30 @@ SkipList<Comparator>::~SkipList() {
     }
 }
 
-template <typename Comparator>
-int SkipList<Comparator>::RandomHeight() {
+// Random height generator
+template <typename Record, typename Comparator>
+int SkipList<Record, Comparator>::RandomHeight() {
     int height = 1;
     while (height < kMaxHeight && dist_(gen_) < kBranching) {
-        height++;
+        ++height;
     }
     return height;
 }
 
-template <typename Comparator>
-typename SkipList<Comparator>::Node*
-SkipList<Comparator>::CreateNode(const Key& key, int height) {
-    return new Node(key, height);
+// Create a new node
+template <typename Record, typename Comparator>
+typename SkipList<Record, Comparator>::Node*
+SkipList<Record, Comparator>::CreateNode(const Record& r, int height) {
+    return new Node(r, height);
 }
 
-template <typename Comparator>
-typename SkipList<Comparator>::Node*
-SkipList<Comparator>::FindGreaterOrEqual(const Key& key, Node** prev) const {
+// Find greater or equal node
+template <typename Record, typename Comparator>
+typename SkipList<Record, Comparator>::Node*
+SkipList<Record, Comparator>::FindGreaterOrEqual(const Record& r, Node** prev) const {
     Node* x = head_;
     for (int level = max_height_ - 1; level >= 0; --level) {
-        while (x->next[level] && cmp_(x->next[level]->key, key)) {
+        while (x->next[level] && cmp_(x->next[level]->record, r)) {
             x = x->next[level];
         }
         if (prev) prev[level] = x;
@@ -95,12 +101,13 @@ SkipList<Comparator>::FindGreaterOrEqual(const Key& key, Node** prev) const {
     return x->next[0];
 }
 
-template <typename Comparator>
-void SkipList<Comparator>::Insert(const Key& key) {
+// Insert
+template <typename Record, typename Comparator>
+void SkipList<Record, Comparator>::Insert(const Record& r) {
     Node* prev[kMaxHeight];
-    Node* x = FindGreaterOrEqual(key, prev);
+    Node* x = FindGreaterOrEqual(r, prev);
 
-    if (x && Equal(x->key, key)) return;
+    if (x && Equal(x->record, r)) return;
 
     int height = RandomHeight();
     if (height > max_height_) {
@@ -110,36 +117,42 @@ void SkipList<Comparator>::Insert(const Key& key) {
         max_height_ = height;
     }
 
-    x = CreateNode(key, height);
+    x = CreateNode(r, height);
     for (int i = 0; i < height; ++i) {
         x->next[i] = prev[i]->next[i];
         prev[i]->next[i] = x;
     }
 }
 
-template <typename Comparator>
-bool SkipList<Comparator>::Contains(const Key& key) const {
-    Node* x = FindGreaterOrEqual(key);
-    return x && Equal(x->key, key);
+// Contains
+template <typename Record, typename Comparator>
+bool SkipList<Record, Comparator>::Contains(const Record& r) const {
+    Node* x = FindGreaterOrEqual(r);
+    return x && Equal(x->record, r);
 }
 
-template <typename Comparator>
-class SkipList<Comparator>::Iterator {
+// Iterator class
+template <typename Record, typename Comparator>
+class SkipList<Record, Comparator>::Iterator {
 public:
-    Iterator(Node* head, const Comparator& cmp) : head_(head), current_(head->next[0]), cmp_(cmp) {}
+    Iterator(Node* head, const Comparator& cmp)
+        : head_(head), current_(head->next[0]), cmp_(cmp) {}
 
     bool Valid() const { return current_ != nullptr; }
-    const Key& key() const { return current_->key; }
+    const Record& record() const { return current_->record; }
+
     void Next() {
         if (Valid()) current_ = current_->next[0];
     }
+
     void SeekToFirst() {
         current_ = head_->next[0];
     }
-    void Seek(const Key& target) {
+
+    void Seek(const Record& target) {
         Node* x = head_;
         for (int level = kMaxHeight - 1; level >= 0; --level) {
-            while (x->next[level] && cmp_(x->next[level]->key, target)) {
+            while (x->next[level] && cmp_(x->next[level]->record, target)) {
                 x = x->next[level];
             }
         }
@@ -152,8 +165,10 @@ private:
     Comparator cmp_;
 };
 
-template <typename Comparator>
-typename SkipList<Comparator>::Iterator SkipList<Comparator>::GetIterator() const {
+// Return an iterator
+template <typename Record, typename Comparator>
+typename SkipList<Record, Comparator>::Iterator
+SkipList<Record, Comparator>::GetIterator() const {
     return Iterator(head_, cmp_);
 }
 

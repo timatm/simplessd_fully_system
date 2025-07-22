@@ -1,5 +1,5 @@
-#ifndef __TABLE_BUILDER_HH_
-#define __TABLE_BUILDER_HH_
+#ifndef __TABLE_MANAGER_HH_
+#define __TABLE_MANAGER_HH_
 
 #include <cstddef>
 #include <cstdint>
@@ -20,4 +20,4 @@ private:
     uint32_t minRange_;
     uint32_t maxRange_;
 };
-#endif  // TABLE_HH_
+#endif  // __TABLE_MANAGER_HH_

@@ -14,6 +14,18 @@ InternalKey::InternalKey(const std::string& user_key, uint64_t seq, ValueType t)
     info.type = static_cast<uint8_t>(t);
 }
 
+InternalKey::InternalKey(const std::string& user_key, uint32_t lpn,uint32_t offset,int64_t seq, ValueType t) {
+    assert(user_key.size() <= 40);
+    key_size = static_cast<uint8_t>(user_key.size());
+    std::memcpy(key, user_key.data(), key_size);
+    std::memset(key + key_size, 0, 40 - key_size);  // zero padding
+    std::memset(&value_ptr, 0, sizeof(value_ptr));
+    value_ptr.lpn = lpn;
+    value_ptr.offset = offset;
+    info.seq = seq;
+    info.type = static_cast<uint8_t>(t);
+}
+
 std::string InternalKey::Encode() const {
     std::string out;
     out.push_back(static_cast<char>(key_size));

@@ -16,6 +16,7 @@ struct Record {
 
     std::string Encode() const;
     static Record Decode(const std::string& data);
+    void Dump() const;
 };
 
 #endif  // RECORD_HH
