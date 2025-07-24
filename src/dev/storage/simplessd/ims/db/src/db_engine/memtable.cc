@@ -3,6 +3,9 @@
 #include <iostream>
 #include <string_view>
 #include <functional>
+#include <cstdlib>
+#include <cstring>
+#include <stdexcept>
 
 MemTable::MemTable()
     : hash_num_(IMS_PAGE_SIZE / sizeof(InternalKey), 0) {}
@@ -66,6 +69,8 @@ bool MemTable::memTableIsFull() {
             return false;
     }
 }
+
+
 
 std::string MemTable::keyPerPagePacking() {
     std::string package;

@@ -82,7 +82,7 @@ void fill_uint64_to_dwords(uint64_t input, uint32_t* dwords_out) {
     dwords_out[1] = high;
 }
 
-int ims_init(){
+int nvme_ims_init(){
     int err = 0;
     nmc_config_t config_obj;
     nmc_config_t *config = &config_obj;
@@ -102,7 +102,7 @@ int ims_init(){
     return err;
 }
 
-int ims_close(){
+int nvme_ims_close(){
     int err = 0;
     nmc_config_t config_obj;
     nmc_config_t *config = &config_obj;
@@ -122,7 +122,7 @@ int ims_close(){
     return err;
 }
 
-int monitor_IMS(int monitor_type){
+int nvme_monitor_IMS(int monitor_type){
     int err;
     nmc_config_t config_obj;
     nmc_config_t *config = &config_obj;
@@ -196,7 +196,7 @@ int nvme_write_sstable(sstable_info info,char *buffer){
     return err;
 }
 
-int write_log(uint64_t lpn,char *buffer){
+int nvme_write_log(uint64_t lpn,char *buffer){
     
     if(buffer == nullptr){
         pr("Write sstable failed ,data buffer is nullptr");
@@ -264,7 +264,7 @@ int nvme_read_sstable(std::string filename,char *buffer){
 }
 
 
-int read_log(uint64_t lpn,char *buffer){
+int nvme_read_log(uint64_t lpn,char *buffer){
     if(buffer == nullptr){
         pr("Write sstable failed ,data buffer is nullptr");
         return COMMAND_FAILD;
@@ -322,7 +322,7 @@ void init_nmc_config(nmc_config_t *config){
     return;
 }
 
-int allcate_lbn(char *buffer){
+int nvme_allcate_lbn(char *buffer){
     if(buffer == nullptr){
         pr("Allcate LBN failed ,data buffer is nullptr");
         return COMMAND_FAILD;

@@ -4,6 +4,7 @@
 #include <string>
 #include "internal_key.hh"
 
+#pragma pack(push, 1) 
 struct Record {
     uint16_t internal_key_size;
     InternalKey internal_key;
@@ -18,5 +19,7 @@ struct Record {
     static Record Decode(const std::string& data);
     void Dump() const;
 };
+
+#pragma pack(pop)
 
 #endif  // RECORD_HH

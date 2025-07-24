@@ -1,28 +1,31 @@
-#ifndef __LOG_MANAGER_HH__
-#define __LOG_MANAGER_HH__
+#ifndef LOG_MANAGER_HH
+#define LOG_MANAGER_HH
 
+#include <deque>
 #include <cstdint>
 #include <string>
-#include <vector>
 #include "record.hh"
-#include "def.hh"
-class LOG_MANAGER {
 
+class LOG_MANAGER {
 public:
-    LOG_MANAGER() = default;
+    LOG_MANAGER();
     ~LOG_MANAGER() = default;
-    
-    // Add methods for log management, such as writing logs, reading logs, etc.
+    //TODO
+    void init();
     void writeLog(const Record& log);
-    Record* readLog(uint32_t lpn,uint32_t offset,std::string buffer) const;
-    void getLPN(uint32_t & current_lpn, uint32_t & byte_offset) const;
+    Record* readLog(uint32_t lpn, uint32_t offset) const;
+    void getLPN(uint32_t& current_lpn, uint32_t& byte_offset) const;
     void ClearLog();
+
 private:
-    // Internal storage for logs, could be a vector or a file-based system
-    uint32_t next_lbn_ ;
-    uint32_t currenet_lbn_ ;
-    uint32_t page_offset_ ;
-    uint32_t byte_offset_ ;
+    std::deque<uint32_t> logRecordBlock_;
+    uint32_t next_lbn_;
+    uint32_t currenet_lbn_;
+    uint32_t page_offset_;
+    uint32_t byte_offset_;
+    std::string buffer_;
+    void allocate_lbn();  // 模擬向裝置請求新的 LBN
+    void flush_buffer();
 };
 
-#endif  // __LOG_MANAGER_HH__
+#endif  // LOG_MANAGER_HH

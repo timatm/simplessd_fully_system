@@ -79,7 +79,7 @@
 struct hostInfo
 {
     uint64_t lbn;
-    std::string filename;
+    std::string filename; // SStable file name size have limit,read mappingEntry struct for more info
     int levelInfo;
     int channelInfo;
     int rangeMin;
@@ -150,17 +150,27 @@ static_assert(sizeof(super_page) == IMS_PAGE_SIZE, "super_page must be same to p
 // [mapping table setting start]
 #pragma pack(push, 1)
 struct mappingEntry {
+    static constexpr size_t fileNameSize =
+        64 - sizeof(uint64_t)  // lbn
+           - sizeof(uint8_t)   // level
+           - sizeof(uint8_t)   // channel
+           - sizeof(uint32_t)  // minRange
+           - sizeof(uint32_t); // maxRange
+
     uint64_t lbn;
     uint8_t level;
     uint8_t channel;
     uint32_t minRange;
     uint32_t maxRange;
-    char fileName[64-sizeof(lbn) - sizeof(level) - sizeof(channel) - sizeof(minRange) - sizeof(maxRange)]; // 64 bytes total
+    char fileName[fileNameSize];
+
     mappingEntry() : lbn(0xFFFFFFFFFFFFFFFF) {
         memset(fileName, 0, sizeof(fileName));
     }
 };
-static_assert(sizeof(mappingEntry) == 64, "mappingEntry must be 64B");
+
+static_assert(sizeof(mappingEntry) == 64, "mappingEntry must be 64 bytes");
+
 #define MAPPING_TABLE_ENTRIES ( (IMS_PAGE_SIZE / sizeof(mappingEntry))-1 ) // 16384 / 64(mapping entry) = 128 , 128 - 1(header) = 127
 
 struct mappingTablePerPage {
