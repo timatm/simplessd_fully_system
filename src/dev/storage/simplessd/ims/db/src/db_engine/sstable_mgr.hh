@@ -13,6 +13,8 @@
 #include "skiplist.hh"
 #include "record.hh"
 #include "memtable.hh"
+#include "tree.hh"
+#include "thread.hh"
 class SstableManager {
 public:
     SstableManager() = default;
@@ -20,15 +22,19 @@ public:
     // TODO
     void init();
     void readSSTable(const std::string& filename);
-    void writeSSTable(char * sstable_buffer);
+    void writeSSTable(uint8_t level,InternalKey minKey ,InternalKey maxKey,char * sstable_buffer);
     void deleteSSTable(const std::string& filename);
-    char * keyPerPagePacking(SkipList<Record,RecordComparator> &skiplist);
-    char * keyHashPacking(SkipList<Record,RecordComparator> &skiplist);
-    char * keyRangePacking(SkipList<Record,RecordComparator> &skiplist);
+    std::string packingTable(const SkipList<Record,RecordComparator> &skiplist);
 private:
+    int packing_type_ = static_cast<int>(PackingType::kKeyPerPage);
+    ThreadPool thread_pool_{1};
+    Tree lsmTree_;
     uint32_t sequenceNumber_ = 0; // Sequence number for SSTables
     std::unordered_map<std::string, std::shared_ptr<std::deque<InternalKey>>> keyRangeMap; // sstable name -> key range per slot
-    std::string generateFilename(uint32_t seq); 
+    std::string generateFilename(uint32_t seq);
+    char * keyPerPagePacking(const SkipList<Record,RecordComparator> &skiplist);
+    char * keyHashPacking(const SkipList<Record,RecordComparator> &skiplist);
+    char * keyRangePacking(const SkipList<Record,RecordComparator> &skiplist);
 };
 
 #endif // __SSTABLE_MGR_HH__

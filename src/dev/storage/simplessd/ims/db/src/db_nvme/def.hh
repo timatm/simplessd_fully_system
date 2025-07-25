@@ -1,6 +1,7 @@
 #ifndef __DEF_HH__
 #define __DEF_HH__
 
+#include "internal_key.hh"
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -76,26 +77,41 @@
 #define INVALID_KEYRANGE 0xFFFFFFFF
 #define INVALID_LEVEL -1
 #define INVALID_CHANNEL -1
-struct hostInfo
-{
+
+
+
+struct hostInfo {
     uint64_t lbn;
-    std::string filename; // SStable file name size have limit,read mappingEntry struct for more info
+    std::string filename; // SStable file name size has limit, read mappingEntry struct for more info
     int levelInfo;
     int channelInfo;
-    int rangeMin;
-    int rangeMax;
-    hostInfo(std::string name, int level, int ch, int min, int max) :
+    Key rangeMin;
+    Key rangeMax;
+
+    hostInfo(std::string name, int level, int ch, Key min, Key max) :
         filename(std::move(name)),
         levelInfo(level),
         channelInfo(ch),
         rangeMin(min),
         rangeMax(max) {}
-    hostInfo(std::string name, int level, int min, int max) :
+
+    hostInfo(std::string name, int level, Key min, Key max) :
         hostInfo(std::move(name), level, INVALID_CHANNEL, min, max) {}
+
     hostInfo(std::string name) :
-        hostInfo(std::move(name), INVALID_LEVEL , INVALID_CHANNEL, INVALID_KEYRANGE , INVALID_KEYRANGE) {}
-    
+        hostInfo(std::move(name), INVALID_LEVEL, INVALID_CHANNEL, Key{}, Key{}) {}
+    void dump() const {
+        std::cout << "hostInfo: filename=" << filename
+                << ", level=" << levelInfo
+                << ", channel=" << channelInfo << "\n";
+        std::cout << "  minKey: ";
+        rangeMin.dumpString();
+        std::cout << "  maxKey: ";
+        rangeMax.dumpString();
+    }
+
 };
+
 
 struct valueLogInfo{
     uint64_t lbn;  // This log store in which LBN
@@ -150,18 +166,19 @@ static_assert(sizeof(super_page) == IMS_PAGE_SIZE, "super_page must be same to p
 // [mapping table setting start]
 #pragma pack(push, 1)
 struct mappingEntry {
-    static constexpr size_t fileNameSize =
-        64 - sizeof(uint64_t)  // lbn
-           - sizeof(uint8_t)   // level
-           - sizeof(uint8_t)   // channel
-           - sizeof(uint32_t)  // minRange
-           - sizeof(uint32_t); // maxRange
+    
 
     uint64_t lbn;
     uint8_t level;
     uint8_t channel;
-    uint32_t minRange;
-    uint32_t maxRange;
+    Key minRange;
+    Key maxRange;
+    static constexpr size_t fileNameSize =
+        128 - sizeof(uint64_t)  // lbn
+           - sizeof(uint8_t)   // level
+           - sizeof(uint8_t)   // channel
+           - sizeof(Key)  // minRange
+           - sizeof(Key); // maxRange
     char fileName[fileNameSize];
 
     mappingEntry() : lbn(0xFFFFFFFFFFFFFFFF) {
@@ -169,7 +186,7 @@ struct mappingEntry {
     }
 };
 
-static_assert(sizeof(mappingEntry) == 64, "mappingEntry must be 64 bytes");
+static_assert(sizeof(mappingEntry) == 128, "mappingEntry must be 128 bytes");
 
 #define MAPPING_TABLE_ENTRIES ( (IMS_PAGE_SIZE / sizeof(mappingEntry))-1 ) // 16384 / 64(mapping entry) = 128 , 128 - 1(header) = 127
 

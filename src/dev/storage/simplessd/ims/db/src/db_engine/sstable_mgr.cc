@@ -1,5 +1,8 @@
 #include "sstable_mgr.hh"
 #include "def.hh"
+#include "internal_key.hh"
+#include "nvme_interface.hh"
+#include <iostream>
 #include <sstream>
 #include <iomanip>
 #include <string>
@@ -7,18 +10,37 @@
 #include <cstring>
 #include <stdexcept>
 
+void SstableManager::packingTable(const SkipList<Record, RecordComparator>& skiplist){
+    std::string package;
+    switch (packing_type_)
+    {
+        case 0:
+            package = keyPerPagePacking(skiplist);
+            break;
+        case 1:
+            package = keyHashPacking(skiplist);
+            break;
+        case 2:
+            package = keyRangePacking(skiplist);
+            break;
+        default:
+            break;
+    }
+}
+
 static void* allocateAligned(size_t size) {
     void* ptr = nullptr;
-    // alignment 必須是 2 的次方，且 >= sizeof(void*)
     if (posix_memalign(&ptr, 4096, size) != 0 || ptr == nullptr) {
         throw std::bad_alloc();
     }
-    // 先歸零
     std::memset(ptr, 0, size);
     return ptr;
 }
 
-char* SstableManager::keyPerPagePacking(SkipList<Record,RecordComparator> & skiplist) {
+// forward declare HashModN (assume in another file)
+size_t HashModN(const InternalKey& ikey, size_t n);
+
+char* SstableManager::keyPerPagePacking(const SkipList<Record, RecordComparator>& skiplist) {
     const size_t total_size = IMS_PAGE_NUM * IMS_PAGE_SIZE;
     char* buffer = static_cast<char*>(allocateAligned(total_size));
 
@@ -28,17 +50,15 @@ char* SstableManager::keyPerPagePacking(SkipList<Record,RecordComparator> & skip
     size_t page = 0;
     while (it.Valid()) {
         InternalKey key = it.record().internal_key;
-        std::string  enc = key.Encode();
+        std::string enc = key.Encode();
 
         if (enc.size() > IMS_PAGE_SIZE) {
             free(buffer);
             throw std::runtime_error("Encoded key size exceeds IMS_PAGE_SIZE");
         }
 
-        // 目標位址：每頁起始 + 已用長度 (這裡一次只放一個 key)
         char* dst = buffer + page * IMS_PAGE_SIZE;
         std::memcpy(dst, enc.data(), enc.size());
-        // padding 已在 AllocateAligned 歸零過，無需手動 append
 
         ++page;
         it.Next();
@@ -51,29 +71,27 @@ char* SstableManager::keyPerPagePacking(SkipList<Record,RecordComparator> & skip
     return buffer;
 }
 
-char* SstableManager::keyHashPacking(SkipList<Record,RecordComparator> & skiplist) {
+char* SstableManager::keyHashPacking(const SkipList<Record, RecordComparator>& skiplist) {
     const size_t slots_per_page = IMS_PAGE_SIZE / sizeof(InternalKey);
-    const size_t total_slots    = IMS_PAGE_NUM * slots_per_page;
-    const size_t block_size     = total_slots * sizeof(InternalKey);
+    const size_t total_slots = IMS_PAGE_NUM * slots_per_page;
+    const size_t block_size = total_slots * sizeof(InternalKey);
 
     char* buffer = static_cast<char*>(allocateAligned(block_size));
-
     auto it = skiplist.GetIterator();
     it.SeekToFirst();
 
     while (it.Valid()) {
         const InternalKey& key = it.record().internal_key;
         size_t slot_idx = HashModN(key, slots_per_page);
-        bool   placed   = false;
+        bool placed = false;
 
         for (size_t pg = 0; pg < IMS_PAGE_NUM; ++pg) {
-            size_t idx    = pg * slots_per_page + slot_idx;
+            size_t idx = pg * slots_per_page + slot_idx;
             size_t offset = idx * sizeof(InternalKey);
             InternalKey* ptr = reinterpret_cast<InternalKey*>(buffer + offset);
-
-            if (ptr->key_size == 0) {
-                *ptr    = key;
-                placed  = true;
+            if (ptr->key.key_size == 0) {
+                *ptr = key;
+                placed = true;
                 break;
             }
         }
@@ -82,17 +100,18 @@ char* SstableManager::keyHashPacking(SkipList<Record,RecordComparator> & skiplis
             free(buffer);
             throw std::runtime_error("Hash block full, cannot place key");
         }
+
         it.Next();
     }
+
     return buffer;
 }
 
-char* keyRangePacking(SkipList<Record, RecordComparator>& skiplist) {
+char* SstableManager::keyRangePacking(const SkipList<Record, RecordComparator>& skiplist) {
     const size_t slots_per_page = IMS_PAGE_SIZE / sizeof(InternalKey);
     const size_t total_slots = IMS_PAGE_NUM * slots_per_page;
     const size_t block_size = total_slots * sizeof(InternalKey);
 
-    // 配置一個 block_size 的連續空間
     char* buffer = static_cast<char*>(allocateAligned(block_size));
     if (!buffer) {
         throw std::bad_alloc();
@@ -127,21 +146,68 @@ std::string SstableManager::generateFilename(uint32_t seq) {
     return str;
 }
 
-// TODO
-void SstableManager::init(){
+void SstableManager::init() {}
 
-}
-void SstableManager::readSSTable(const std::string& filename){
-    
-}
-void SstableManager::writeSSTable(char * sstable_buffer){
-    if (sstable_buffer == nullptr) {
-        throw std::invalid_argument("SSTable buffer cannot be null");
+void SstableManager::readSSTable(const std::string& filename) {
+    const size_t buffer_size = IMS_PAGE_NUM * IMS_PAGE_SIZE;
+    char* read_buffer = static_cast<char*>(std::aligned_alloc(4096, buffer_size));
+    if (!read_buffer) {
+        std::cerr << "Failed to allocate buffer for reading SSTable\n";
+        return;
     }
-    hostInfo request(generateFilename(sequenceNumber_));
 
+    // 背景讀取任務提交給 thread pool
+    thread_pool_.Submit([filename, read_buffer, this]() {
+        std::cout << "Reading SSTable from: " << filename << std::endl;
 
+        int err = nvme_read_sstable(filename, read_buffer);
+        if (err == COMMAND_FAILD) {
+            std::cerr << "[Thread] Failed to read SSTable: " << filename << std::endl;
+            std::free(read_buffer);  // 釋放資源
+            return;
+        }
+        std::cout << "[Thread] Read success: " << filename << std::endl;
+        std::free(read_buffer);  // 釋放資源
+    });
+
+    std::cout << "[Main] Async read dispatched.\n";
 }
-void SstableManager::deleteSSTable(const std::string& filename){
 
+
+void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey maxKey, char* sstable_buffer) {
+    if (sstable_buffer == nullptr) {
+        std::cerr << "SSTable buffer cannot be null" << std::endl;
+        return;
+    }
+
+    Key rangeMinKey = minKey.key;
+    Key rangeMaxKey = maxKey.key;
+    std::string filename = generateFilename(sequenceNumber_);
+
+    sstable_info info(filename, level, rangeMinKey, rangeMaxKey);
+    std::cout << "Dispatching write for SSTable: " << filename << std::endl;
+    info.dump();
+
+    thread_pool_.Submit([info, sstable_buffer, this]() {
+        int err = nvme_write_sstable(info, sstable_buffer);
+        if (err == COMMAND_FAILD) {
+            std::cerr << "[Thread] Failed to write SSTable: " << info.filename << std::endl;
+            return;
+        }
+        std::cout << "[Thread] Write success: " << info.filename << std::endl;
+
+        auto node = std::make_shared<TreeNode>(info.filename,
+                                            info.level,
+                                            info.min, 
+                                            info.max);
+        lsmTree_.insert_node(node);
+
+        std::cout << "SStable(" << info.filename << ") written successfully.\n";
+        ++sequenceNumber_;
+    });
+
+    std::cout << "[Main] Async write dispatched.\n";
 }
+
+
+void SstableManager::deleteSSTable(const std::string& filename) {}

@@ -8,8 +8,6 @@ int nvme_ims_init();
 int nvme_ims_close();
 
 int nvme_monitor_IMS(int monitor_type);
-
-
 void init_nmc_config(nmc_config_t *config);
 // void print_fd_target(int fd);
 

@@ -35,7 +35,8 @@ target_include_directories(mydb_nvme PRIVATE
     ${CMAKE_SOURCE_DIR}/src/db_nvme
     ${CMAKE_SOURCE_DIR}/src/db_nvme/lib
     ${CMAKE_SOURCE_DIR}/src/db_nvme/libnvme
-    ${CMAKE_SOURCE_DIR}/include)
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/src/db_engine)
 
 target_link_libraries(mydb_nvme PRIVATE
     ${CMAKE_SOURCE_DIR}/src/db_nvme/lib/libnvme.a
@@ -49,7 +50,10 @@ add_executable(mydb_engine ${ENGINE_SRC})
 
 target_include_directories(mydb_engine PRIVATE
     ${CMAKE_SOURCE_DIR}/src/db_nvme
-    ${CMAKE_SOURCE_DIR}/include)
+    ${CMAKE_SOURCE_DIR}/src/db_nvme/lib
+    ${CMAKE_SOURCE_DIR}/src/db_nvme/libnvme
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/src/db_engine)
 
 target_link_libraries(mydb_engine PRIVATE mydb_nvme pthread)
 

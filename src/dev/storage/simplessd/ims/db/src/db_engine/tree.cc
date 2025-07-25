@@ -6,7 +6,7 @@
 #include <unordered_set>
 extern Tree tree;
 
-std::vector<std::shared_ptr<TreeNode>> Tree::search_overlap(int level, int queryMin, int queryMax) {
+std::vector<std::shared_ptr<TreeNode>> Tree::search_overlap(int level, const Key& queryMin, const Key& queryMax) {
     std::vector<std::shared_ptr<TreeNode>> result;
     auto& nodes = level_map[level];
 
@@ -15,13 +15,13 @@ std::vector<std::shared_ptr<TreeNode>> Tree::search_overlap(int level, int query
 
     if (it != nodes.begin()) {
         auto prev = std::prev(it);
-        if ((*prev)->rangeMax >= queryMin) {
+        if (compareKey((*prev)->rangeMax, queryMin) >= 0) {
             result.push_back(*prev);
         }
     }
 
-    while (it != nodes.end() && (*it)->rangeMin <= queryMax) {
-        if ((*it)->rangeMax >= queryMin) {
+    while (it != nodes.end() && compareKey((*it)->rangeMin, queryMax) <= 0) {
+        if (compareKey((*it)->rangeMax, queryMin) >= 0) {
             result.push_back(*it);
         }
         ++it;
@@ -29,8 +29,6 @@ std::vector<std::shared_ptr<TreeNode>> Tree::search_overlap(int level, int query
 
     return result;
 }
-
-
 
 void Tree::build_link(std::shared_ptr<TreeNode> node){
     int parent_level = node->levelInfo - 1;
@@ -71,18 +69,15 @@ void Tree::build_link(std::shared_ptr<TreeNode> node){
             }
         }
     }
-
 }
 
 void Tree::insert_node(std::shared_ptr<TreeNode> node){
     int level = node->levelInfo;
-    int rangeMin = node->rangeMin;
-    int rangeMax = node->rangeMax;
     if(level < 0 || level > MAX_LEVEL) {
         pr_debug("Invalid level: %d", level);
         return;
     }
-    std::vector<std::shared_ptr<TreeNode>> overlap = search_overlap(level,rangeMin,rangeMax);
+    std::vector<std::shared_ptr<TreeNode>> overlap = search_overlap(level, node->rangeMin, node->rangeMax);
     if(overlap.empty()){
         level_map[level].insert(node);
     }
@@ -95,17 +90,14 @@ void Tree::insert_node(std::shared_ptr<TreeNode> node){
 void Tree::remove_node(std::shared_ptr<TreeNode> node){
     int level = node->levelInfo;
 
-    // 從 level_map 中移除
     auto& nodes = level_map[level];
     nodes.erase(node);
 
-    // 清除 parent 的 children map 中移除它node
     for (auto& weak_parent : node->parent) {
         if (auto parent = weak_parent.lock()) {
             parent->children.erase(node->filename);
         }
     }
-    // 清除 node 的 child 列表中的所有指向 node 的 weak_ptr
     for (auto& [filename, child] : node->children) {
         for (auto it = child->parent.begin(); it != child->parent.end(); ) {
             if (auto sp = it->lock(); sp.get() == node.get()) {
@@ -119,18 +111,17 @@ void Tree::remove_node(std::shared_ptr<TreeNode> node){
     node->children.clear();
 }
 
-std::queue<std::shared_ptr<TreeNode>> Tree::search_key(int key) {
+std::queue<std::shared_ptr<TreeNode>> Tree::search_key(const Key& key) {
     std::queue<std::shared_ptr<TreeNode>> result;
     std::shared_ptr<TreeNode> dummy = std::make_shared<TreeNode>("dummy", 0, key, key);
 
-
-    for(int i = 0;i < MAX_LEVEL;i++){
-        auto nodes = level_map[i];
+    for(int i = 0; i < MAX_LEVEL; i++){
+        auto& nodes = level_map[i];
         auto it = nodes.upper_bound(dummy);
         if (it != nodes.begin()) {
             --it;
             std::cout << "Check node " << (*it)->filename  << " in level:" << (*it)->levelInfo << std::endl;
-            if ((*it)->rangeMin <= key && (*it)->rangeMax >= key) {
+            if (compareKey((*it)->rangeMin, key) <= 0 && compareKey((*it)->rangeMax, key) >= 0) {
                 result.push(*it);
             }
         }
@@ -139,20 +130,19 @@ std::queue<std::shared_ptr<TreeNode>> Tree::search_key(int key) {
     return result;
 }
 
-std::shared_ptr<TreeNode> Tree::find_node(std::string filename, int level, int rangeMin, int rangeMax) {
+std::shared_ptr<TreeNode> Tree::find_node(const std::string& filename, int level, const Key& rangeMin, const Key& rangeMax) {
     auto& nodes = level_map[level];
     for (const auto& node : nodes) {
         if (node->filename == filename &&
-            node->rangeMin == rangeMin &&
-            node->rangeMax == rangeMax) {
+            compareKey(node->rangeMin, rangeMin) == 0 &&
+            compareKey(node->rangeMax, rangeMax) == 0) {
             return node;
         }
     }
-    return nullptr;  // 如果沒有找到，返回hostInfo空指針
+    return nullptr;
 }
 
-std::shared_ptr<TreeNode> Tree::find_node(std::string filename) {
-    
+std::shared_ptr<TreeNode> Tree::find_node(const std::string&  filename) {
     for(const auto& [level, nodes] : level_map) {
         for (const auto& node : nodes) {
             if (node->filename == filename) {
@@ -160,8 +150,7 @@ std::shared_ptr<TreeNode> Tree::find_node(std::string filename) {
             }
         }
     }
-    
-    return nullptr;  // 如果沒有找到，返回hostInfo空指針
+    return nullptr;
 }
 
 std::vector<int> Tree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
@@ -176,25 +165,23 @@ std::vector<int> Tree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
         Cqueue.push(child.second);
     }
 
-    // ---- 向上搜尋 parent ----
     while (!Pqueue.empty()) {
         auto parent = Pqueue.front(); 
         Pqueue.pop();
         if (!Pvisited.insert(parent.get()).second) continue;
 
         if (parent->channelInfo != -1) {
-            // std::cout << "filename :"<< parent->filename << std::endl;
             relate_ch_info[parent->channelInfo]++;
         }
         for (auto& p : parent->parent) {
             if (auto sp = p.lock())
-            if(sp->rangeMin <= node->rangeMax && sp->rangeMax >= node->rangeMin) {
+            if (compareKey(sp->rangeMin, node->rangeMax) <= 0 &&
+                compareKey(sp->rangeMax, node->rangeMin) >= 0) {
                 Pqueue.push(sp);
             }
         }
     }
 
-    // ---- 向下搜尋 children ----
     while (!Cqueue.empty()) {
         auto child = Cqueue.front();
         Cqueue.pop();
@@ -203,30 +190,31 @@ std::vector<int> Tree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
         if (child->channelInfo != -1) {
             relate_ch_info[child->channelInfo]++;
         }
-        for (auto& [filename,c] : child->children) {
+        for (auto& [filename, c] : child->children) {
             if (!c){
-                pr_debug("Filename: %s can't find pointer",filename);
+                pr_debug("Filename: %s can't find pointer", filename);
                 continue;
-            };
-            if(c->rangeMin <= node->rangeMax && c->rangeMax >= node->rangeMin) {
+            }
+            if (compareKey(c->rangeMin, node->rangeMax) <= 0 &&
+                compareKey(c->rangeMax, node->rangeMin) >= 0) {
                 Cqueue.push(c);
             }
         }
     }
-    
+
     auto& nodes = level_map[node->levelInfo];
     auto it = nodes.find(node);
-    if(it == nodes.end()){
+    if (it == nodes.end()) {
         pr_debug("Node not found in level_map");
         return relate_ch_info;
     }
-    if(it != nodes.begin()){
+    if (it != nodes.begin()) {
         auto prev = std::prev(it);
         relate_ch_info[(*prev)->channelInfo]++;
     }
-    if(it != nodes.end()){
+    if (it != nodes.end()) {
         auto next = std::next(it);
-        if(next != nodes.end()){
+        if (next != nodes.end()) {
             relate_ch_info[(*next)->channelInfo]++;
         }
     }
@@ -244,4 +232,22 @@ void Tree::clear() {
         nodes.clear();
     }
     level_map.clear();
+}
+
+void Tree::dump() const {
+    std::cout << "=== Tree Dump ===" << std::endl;
+
+    for (int level = 0; level <= 7; ++level) {
+        auto it = level_map.find(level);
+        if (it == level_map.end() || it->second.empty()) continue;
+
+        std::cout << "Level " << level << ":\n";
+        for (const auto& node : it->second) {
+            std::cout << "  - " << node->filename << " | "
+                      << "rangeMin: " << node->rangeMin.toString()
+                      << ", rangeMax: " << node->rangeMax.toString() << "\n";
+        }
+    }
+
+    std::cout << "=================\n";
 }

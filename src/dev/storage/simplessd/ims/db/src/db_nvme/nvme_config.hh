@@ -4,6 +4,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string>
+#include <iostream>
+#include <iomanip>
+#include "def.hh"
 typedef struct
 {
     // host info
@@ -113,13 +116,22 @@ typedef struct
 struct sstable_info{
     std::string filename;
     uint32_t level;
-    uint32_t min;
-    uint32_t max;
-    sstable_info(std::string name,uint32_t l,uint32_t min,uint32_t max):
+    Key min;
+    Key max;
+    sstable_info(std::string name,uint32_t l,Key min,Key max):
         filename(std::move(name)),
         level(l),
         min(min),
         max(max){}
+    void dump(){
+        std::cout << "=========sstable_info===========" << std::endl;
+        std::cout << "Filename=" << filename
+                  << ", Level=" << level << std::endl;
+        std::cout << " Key range: " << std::endl;
+        min.dumpString();
+        max.dumpString();
+        std::cout << "============================" << std::endl;
+    }
 };
 /* -------------------------------------------------------------------------- */
 /*                             NMC related configs                            */

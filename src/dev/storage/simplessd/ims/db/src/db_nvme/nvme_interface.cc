@@ -168,8 +168,9 @@ int nvme_write_sstable(sstable_info info,char *buffer){
     config->OPCODE = OPCODE_WRITE_SSTABLE;
     config->data = buffer;
     config->data_len = DB_BLOCK_SIZE;
-    config->cdw02 = info.min;
-    config->cdw03 = info.max;
+    // TODO
+    // config->cdw02 = info.min;
+    // config->cdw03 = info.max;
     config->cdw10 = info.level;
     uint32_t filename_dwords[5] = {0};
     fill_filename_to_dwords(info.filename,filename_dwords);

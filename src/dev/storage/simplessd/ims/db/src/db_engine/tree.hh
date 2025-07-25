@@ -7,78 +7,74 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <set>
-
 #include <queue>
 #include "print.hh"
 #include "def.hh"
-#include "lbn_pool.hh"
-#include "IMS_interface.hh"
-#include "mapping_table.hh"
+#include "internal_key.hh"
 
-struct TreeNode : public std::enable_shared_from_this<TreeNode>{
+// key 比較工具函式（放 global namespace）
+inline int compareKey(const Key& a, const Key& b) {
+    int cmp = std::memcmp(a.key, b.key, std::min(a.key_size, b.key_size));
+    if (cmp == 0) return a.key_size - b.key_size;
+    return cmp;
+}
+
+struct TreeNode : public std::enable_shared_from_this<TreeNode> {
     std::string filename;
     int levelInfo;
     int channelInfo;
-    // std::string rangeMin;
-    // std::string rangeMax;
-    // std::unordered_map<std::string, std::shared_ptr<TreeNode> > children;
-    // std::vector<std::weak_ptr<TreeNode>> parent;
-    // TreeNode(std::string name, int level,int ch,std::string min, std::string max):
-    //     filename(std::move(name)),
-    //     levelInfo(level),
-    //     channelInfo(ch),
-    //     rangeMin(min),
-    //     rangeMax(max){}
-    // TreeNode(std::string name, int level,std::string min, std::string max):
-    //     TreeNode(std::move(name), level, -1, std::move(min), std::move(max)){}
+    Key rangeMin;
+    Key rangeMax;
 
-    int rangeMin;
-    int rangeMax;
-    std::unordered_map<std::string, std::shared_ptr<TreeNode> > children;
-    // Weak_ptr cna't be used in unordered_map, so we use vetor to contain parent nodes
+    std::unordered_map<std::string, std::shared_ptr<TreeNode>> children;
     std::vector<std::weak_ptr<TreeNode>> parent;
-    TreeNode(std::string name, int level,int ch,int min, int max):
-        filename(std::move(name)),
-        levelInfo(level),
-        channelInfo(ch),
-        rangeMin(min),
-        rangeMax(max){}
-    TreeNode(std::string name, int level,int min, int max):
-        TreeNode(std::move(name), level,INVALIDCH, min,max){}
 
-    ~TreeNode() {
-        // std::cout << "TreeNode " << filename << " is destroyed\n";
-    }
+    TreeNode(std::string name, int level, int ch, const Key& min, const Key& max)
+        : filename(std::move(name)),
+          levelInfo(level),
+          channelInfo(ch),
+          rangeMin(min),
+          rangeMax(max) {}
+
+    TreeNode(std::string name, int level, const Key& min, const Key& max)
+        : TreeNode(std::move(name), level, INVALIDCH, min, max) {}
+
+    ~TreeNode() = default;
 };
+
 struct TreeNodeComparator {
     bool operator()(const std::shared_ptr<TreeNode>& a,
                     const std::shared_ptr<TreeNode>& b) const {
-        if (a->rangeMin != b->rangeMin)
-            return a->rangeMin < b->rangeMin;
-        if (a->rangeMax != b->rangeMax)
-            return a->rangeMax < b->rangeMax;
-        return a.get() < b.get();  // 保證即使 range 一樣也不會視為重複
+        int cmpMin = compareKey(a->rangeMin, b->rangeMin);
+        if (cmpMin != 0) return cmpMin < 0;
+
+        int cmpMax = compareKey(a->rangeMax, b->rangeMax);
+        if (cmpMax != 0) return cmpMax < 0;
+
+        return a.get() < b.get();
     }
 };
+
 class Tree {
-public: 
-    std::unordered_map<int, std::set<std::shared_ptr<TreeNode>, TreeNodeComparator>> level_map;
+public:
+    
+
     int init_tree();
     void insert_node(std::shared_ptr<TreeNode> node);
     void remove_node(std::shared_ptr<TreeNode> node);
-    std::queue<std::shared_ptr<TreeNode>> search_key(int key);
+    std::queue<std::shared_ptr<TreeNode>> search_key(const Key& key);
 
-    std::vector<std::shared_ptr<TreeNode>> search_overlap(int level, int queryMin, int queryMax);
+    std::vector<std::shared_ptr<TreeNode>> search_overlap(int level, const Key& queryMin, const Key& queryMax);
     void build_link(std::shared_ptr<TreeNode> node);
 
-    std::shared_ptr<TreeNode> find_node(std::string filename,int level,int ,int);
-    std::shared_ptr<TreeNode> find_node(std::string filename);
+    std::shared_ptr<TreeNode> find_node(const std::string& filename, int level, const Key& min, const Key& max);
+    std::shared_ptr<TreeNode> find_node(const std::string& filename);
     std::vector<int> get_relate_ch_info(std::shared_ptr<TreeNode> node);
-    // TODO release memory of the tree
+
     void clear();
+    void dump() const;
+private:
+    std::unordered_map<int, std::set<std::shared_ptr<TreeNode>, TreeNodeComparator>> level_map;
 };
 
-
-extern Tree tree;
-
-#endif
+#endif // __TREE_H__

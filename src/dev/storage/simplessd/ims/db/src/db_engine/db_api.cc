@@ -7,9 +7,8 @@ Status API::put(std::string key ,std::string value){
     if (memtable_->memTableIsFull()) {
         immutable_memtable_ = std::move(memtable_);
         memtable_ = std::make_unique<MemTable>();
-
-        // 可通知背景 thread 做 flush（例如加條件變數）
-        // NotifyFlush();
+        std::string buffer = sstableManager_.packingTable(immutable_memtable_->GetSkipList());
+        sstableManager_.writeSSTable(0, immutable_memtable_->getMinKey(), immutable_memtable_->getMaxKey(), buffer.data());
     }
     uint32_t lpn = 0;
     uint32_t offset = 0;

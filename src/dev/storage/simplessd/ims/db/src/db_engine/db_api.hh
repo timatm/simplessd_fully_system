@@ -8,6 +8,7 @@
 #include "status.hh"
 #include "log_manager.hh"
 #include "memtable.hh"
+#include "sstable_mgr.hh"
 // Forward declaration of MemTable
 class MemTable;
 
@@ -22,5 +23,6 @@ private:
     std::unique_ptr<MemTable> immutable_memtable_;
     LOG_MANAGER logManager_;
     std::atomic<uint64_t> global_seq_{0}; 
+    SstableManager sstableManager_;
 };
 #endif
