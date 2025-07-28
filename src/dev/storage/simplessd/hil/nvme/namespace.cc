@@ -19,21 +19,15 @@
 
 #include "hil/nvme/namespace.hh"
 #include "ims/firmware/IMS_interface.hh"
-#include "ims/firmware/tree.hh"
-#include "ims/firmware/mapping_table.hh"
 #include "ims/firmware/persistence.hh"
 #include "ims/firmware/log.hh"
 #include "hil/nvme/subsystem.hh"
 #include "util/algorithm.hh"
-extern Tree tree;
-extern Mapping mappingManager;
-extern LBNPool lbnPoolManager; 
-extern Persistence persistenceManager;
-extern Log logManager;
+
 
 #include "ims/firmware/lbn_pool.hh"
 #include "ims/firmware/mapping_table.hh"
-#include "ims/firmware/tree.hh"
+#include "ims/include/tree.hh"
 
 extern Tree tree;
 extern LBNPool lbnPoolManager; 
@@ -777,8 +771,10 @@ void Namespace::write_sstable(SQEntryWrapper &req, RequestFunction &func) {
   memcpy(buf, dwords, sizeof(dwords));
   std::string filename(buf);
   uint32_t level = req.entry.dword10;
-  uint32_t min =  req.entry.reserved1;
-  uint32_t max = req.entry.reserved2;
+  Key min;
+  Key max;
+  // uint32_t min =  req.entry.reserved1;
+  // uint32_t max = req.entry.reserved2;
   uint8_t *buffer  = new uint8_t[2]; // dummy buffer not real data
   hostInfo request(filename,level,min,max);
   request.lbn = INVALIDLBN;
@@ -1219,11 +1215,13 @@ void Namespace::init_IMS(SQEntryWrapper &req, RequestFunction &func) {
     resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
                     STATUS_NAMESPACE_NOT_ATTACHED);
   }
+  err = (bool)ims.init_IMS();
   if (pDisk){
-    persistenceManager.pDisk = pDisk;
     debugprint(LOG_IMS,
               "NVM     | Init_IMS start");
-    err = (bool)ims.init_IMS();
+  #if RUNTYPE_SIMPLESSD
+    ims.disk_ = pDisk;
+  #endif
   }
   else{
     err = true;

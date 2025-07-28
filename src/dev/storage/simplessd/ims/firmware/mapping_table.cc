@@ -1,101 +1,109 @@
 #include "mapping_table.hh"
+#include "tree.hh"
 #include <iomanip>
 #include <algorithm>
+#include <memory>
 
-#include "persistence.hh"
-#include "tree.hh"
-#include "lbn_pool.hh"
-int Mapping::init_mapping_table(uint64_t mappingPageLBN,uint64_t page_num){
+Mapping::Mapping(Persistence& persistence, LBNPool& pool, Tree& tree)
+    : persistenceManager_(persistence), lbnPool_(pool), tree_(tree) {
+}
+
+int Mapping::init_mapping_table(uint64_t mappingPageLBN, uint64_t page_num) {
     int err = OPERATION_FAILURE;
-    if(mappingPageLBN == INVALIDLBN) {
+    if (mappingPageLBN == INVALIDLBN) {
         pr_info("Invalid mapping page LBN, cannot initialize mapping table");
         return err;
     }
+
     size_t size = IMS_PAGE_SIZE;
-    uint8_t *buffer  = (uint8_t*)malloc(size);
+    uint8_t* buffer = (uint8_t*)malloc(size);
     if (!buffer) {
         pr_info("Failed to allocate buffer for mapping table");
         return err;
     }
+
     uint64_t lpn = LBN2LPN(mappingPageLBN);
     pr_info("Initializing mapping table from LPN: %lu with page num: %lu", lpn, page_num);
-    for(int page = 0;page < page_num;page++){
-        err = persistenceManager.readMappingTable(lpn, buffer, size);
-        if(err != OPERATION_SUCCESS){
+
+    for (int page = 0; page < page_num; page++) {
+        err = persistenceManager_.readMappingTable(lpn, buffer, size);
+        if (err != OPERATION_SUCCESS) {
             pr_info("Failed to read mapping table at LPN: %lu", lpn);
             free(buffer);
             return OPERATION_FAILURE;
         }
-        mappingTablePerPage *mappingTablePtr = (mappingTablePerPage *)buffer;
-        if(mappingTablePtr->entry_num > MAPPING_TABLE_ENTRIES){
-            pr_info("Mapping table entry num is error: %d",mappingTablePtr->entry_num);
+
+        mappingTablePerPage* mappingTablePtr = (mappingTablePerPage*)buffer;
+        if (mappingTablePtr->entry_num > MAPPING_TABLE_ENTRIES) {
+            pr_info("Mapping table entry num is error: %d", mappingTablePtr->entry_num);
         }
-        pr_info("Mapping table[%d] entry num :%d",page,mappingTablePtr->entry_num);
+
+        pr_info("Mapping table[%d] entry num: %d", page, mappingTablePtr->entry_num);
         for (int i = 0; i < mappingTablePtr->entry_num; i++) {
-            mappingEntry *entry = &mappingTablePtr->entry[i];
-            // Recover mapping table and SStable tree info
+            mappingEntry* entry = &mappingTablePtr->entry[i];
             if (entry->lbn != INVALIDLBN) {
-                pr_info("Recover mapping entry: filename: %s, lbn: %lu, level: %d, channel: %d, range: [%d, %d]",
-                        entry->fileName, entry->lbn, entry->level, entry->channel, entry->minRange, entry->maxRange);
-                mappingTable[std::string(entry->fileName)] = entry->lbn;
-                std::shared_ptr<TreeNode> node = std::make_shared<TreeNode>(entry->fileName,entry->level, entry->channel, entry->minRange, entry->maxRange);
-                tree.insert_node(node);
+                pr_info("Recover mapping entry: filename: %s, lbn: %lu, level: %d, channel: %d, range: [%s, %s]",
+                        entry->fileName, entry->lbn, entry->level, entry->channel, entry->minRange.toString(), entry->maxRange.toString());
+                mappingTable_[entry->fileName] = entry->lbn;
+
+                auto node = std::make_shared<TreeNode>(entry->fileName, entry->level, entry->channel, entry->minRange, entry->maxRange);
+                tree_.insert_node(node);
             }
         }
         lpn++;
     }
+
     free(buffer);
     return OPERATION_SUCCESS;
 }
 
-
 void Mapping::insert_mapping(const std::string& filename, uint64_t lbn) {
-    if (mappingTable.find(filename) != mappingTable.end()) {
-        std::cerr << "File already exists in the mapping table , update mapping to " << lbn << "\n";
+    if (mappingTable_.find(filename) != mappingTable_.end()) {
+        std::cerr << "File already exists in the mapping table, updating to LBN: " << lbn << "\n";
     }
-    auto it = std::find(lbnPoolManager.freeLBNList[LBN2CH(lbn)].begin(),lbnPoolManager.freeLBNList[LBN2CH(lbn)].end(),lbn);
-    if(it == lbnPoolManager.freeLBNList[LBN2CH(lbn)].end()){
-        pr_info("Free list does't have LBN:%lld" ,lbn);
+    auto& list = lbnPool_.get_freeLBNList_ref(LBN2CH(lbn)); 
+    auto it = std::find(list.begin(), list.end(), lbn);
+    if (it == list.end()) {
+        pr_info("Free list does not have LBN: %llu", lbn);
     }
-    lbnPoolManager.remove_freeLBNList(lbn);
-    mappingTable[filename] = lbn;
-    lbnPoolManager.insert_usedLBNList(lbn);
-    return;
+
+    lbnPool_.remove_freeLBNList(lbn);
+    mappingTable_[filename] = lbn;
+    lbnPool_.insert_usedLBNList(lbn);
 }
 
-uint64_t Mapping::getLBN(const std::string& filename){
-    return mappingTable[filename];
+uint64_t Mapping::getLBN(const std::string& filename) const {
+    auto it = mappingTable_.find(filename);
+    return (it != mappingTable_.end()) ? it->second : INVALIDLBN;
 }
 
 void Mapping::remove_mapping(const std::string& filename) {
-    auto it = mappingTable.find(filename);
-    if (it == mappingTable.end()) {
+    auto it = mappingTable_.find(filename);
+    if (it == mappingTable_.end()) {
         pr_info("File \"%s\" does not exist in the mapping table", filename.c_str());
-        return; 
+        return;
     }
+
     uint64_t lbn = it->second;
-    mappingTable.erase(it);
-    lbnPoolManager.remove_usedLBNList(lbn);   
-    lbnPoolManager.insert_freeLBNList(lbn);    
+    mappingTable_.erase(it);
+    lbnPool_.remove_usedLBNList(lbn);
+    lbnPool_.insert_freeLBNList(lbn);
 }
 
-
-void Mapping::dump_mapping() {
-    pr_info("Dumping mapping table to page...");
-    pr_info("===== Mapping Table Page =====");
-    size_t count = 0;
-    for(auto [filename,lbn]:mappingTable){
-        pr_info("filename: %s  -> LBN(%lu)",filename.c_str(),lbn);
+void Mapping::dump_mapping() const {
+    pr_info("[Mapping Table Dump]");
+    for (const auto& [filename, lbn] : mappingTable_) {
+        pr_info("filename: %s -> LBN(%lu)", filename.c_str(), lbn);
     }
     pr_info("================================");
 }
 
-
-int Mapping::flush_mapping_table(){
-    
+int Mapping::flush_mapping_table() {
+    // TODO：根據 mappingTable_ 分頁序列化成 mappingTablePerPage 結構後寫入
+    // 你可以將其對應的 LPN 為 sp_ptr_new_->mapping_store 開始的連續區塊
+    return OPERATION_SUCCESS;
 }
 
-void Mapping::clear(){
-    mappingTable.clear();
-    return;
+void Mapping::clear() {
+    mappingTable_.clear();
 }

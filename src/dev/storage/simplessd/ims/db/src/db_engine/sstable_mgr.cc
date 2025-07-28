@@ -10,7 +10,7 @@
 #include <cstring>
 #include <stdexcept>
 
-void SstableManager::packingTable(const SkipList<Record, RecordComparator>& skiplist){
+std::string SstableManager::packingTable(const SkipList<Record, RecordComparator>& skiplist){
     std::string package;
     switch (packing_type_)
     {
@@ -26,6 +26,7 @@ void SstableManager::packingTable(const SkipList<Record, RecordComparator>& skip
         default:
             break;
     }
+    return package;
 }
 
 static void* allocateAligned(size_t size) {
@@ -38,17 +39,32 @@ static void* allocateAligned(size_t size) {
 }
 
 // forward declare HashModN (assume in another file)
-size_t HashModN(const InternalKey& ikey, size_t n);
+size_t HashModN(const InternalKey& ikey, size_t n) {
+    std::string_view data = ikey.Encode(); 
+
+    std::hash<std::string_view> hasher;
+    size_t hash_value = hasher(data);
+    return hash_value % n;
+}
 
 char* SstableManager::keyPerPagePacking(const SkipList<Record, RecordComparator>& skiplist) {
     const size_t total_size = IMS_PAGE_NUM * IMS_PAGE_SIZE;
+    std::cout << skiplist.get_node_num() << std::endl;
     char* buffer = static_cast<char*>(allocateAligned(total_size));
+    if (!buffer) throw std::runtime_error("Failed to allocate aligned buffer");
+
+    std::memset(buffer, 0xFF, total_size);  // optional: fill with default value
 
     auto it = skiplist.GetIterator();
     it.SeekToFirst();
 
     size_t page = 0;
     while (it.Valid()) {
+        if (page > IMS_PAGE_NUM) {
+            free(buffer);
+            throw std::runtime_error("Too many records for fixed page count (IMS_PAGE_NUM)");
+        }
+
         InternalKey key = it.record().internal_key;
         std::string enc = key.Encode();
 
@@ -64,12 +80,10 @@ char* SstableManager::keyPerPagePacking(const SkipList<Record, RecordComparator>
         it.Next();
     }
 
-    if (page != IMS_PAGE_NUM) {
-        free(buffer);
-        throw std::runtime_error("Packed page count mismatch");
-    }
     return buffer;
 }
+
+
 
 char* SstableManager::keyHashPacking(const SkipList<Record, RecordComparator>& skiplist) {
     const size_t slots_per_page = IMS_PAGE_SIZE / sizeof(InternalKey);
@@ -174,8 +188,8 @@ void SstableManager::readSSTable(const std::string& filename) {
 }
 
 
-void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey maxKey, char* sstable_buffer) {
-    if (sstable_buffer == nullptr) {
+void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey maxKey, std::string sstable_buffer) {
+    if (sstable_buffer.empty()) {
         std::cerr << "SSTable buffer cannot be null" << std::endl;
         return;
     }
@@ -188,8 +202,8 @@ void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey
     std::cout << "Dispatching write for SSTable: " << filename << std::endl;
     info.dump();
 
-    thread_pool_.Submit([info, sstable_buffer, this]() {
-        int err = nvme_write_sstable(info, sstable_buffer);
+    thread_pool_.Submit([info, buf = std::move(sstable_buffer), this]() {
+        int err = nvme_write_sstable(info,  const_cast<char*>(buf.data()));
         if (err == COMMAND_FAILD) {
             std::cerr << "[Thread] Failed to write SSTable: " << info.filename << std::endl;
             return;

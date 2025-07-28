@@ -8,8 +8,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
 # 加入 src 子目錄
-add_subdirectory(src)
+add_subdirectory(firmware)
 
 # 加入 tests 子目錄
 enable_testing()
 add_subdirectory(tests)
+

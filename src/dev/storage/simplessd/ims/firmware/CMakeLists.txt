@@ -1,13 +1,31 @@
-file(GLOB SRC_FILES *.cc)
-list(REMOVE_ITEM SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/main.cc)
-list(REMOVE_ITEM SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/testmain.cc)
-list(REMOVE_ITEM SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/disktest.cc)
-include_directories(${CMAKE_SOURCE_DIR}/src/dev/storage/simplessd)
 
-add_library(mapping_obj OBJECT ${SRC_FILES})
+cmake_minimum_required(VERSION 3.10)
+project(firmware_lib)
 
-# 設定 include path 給其他 target 使用
-target_include_directories(mapping_obj PUBLIC 
-    ${PROJECT_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/src/dev/storage/simplessd
-    )
+set(CMAKE_CXX_STANDARD 17)
+
+# 包含 include/ 目錄的 .hh 檔
+include_directories(
+    ${CMAKE_SOURCE_DIR}/../include
+)
+
+# 將 firmware 中所有 .cc 檔設為庫的來源
+add_library(firmware_lib STATIC
+    disk.cc
+    IMS_interface.cc
+    lbn_pool.cc
+    log.cc
+    mapping_table.cc
+    persistence.cc
+    ${CMAKE_SOURCE_DIR}/../include/tree.cc
+    ${CMAKE_SOURCE_DIR}/../include/lsmtree.cc
+)
+
+# 方便其他 CMakeLists 使用
+target_include_directories(firmware_lib PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    # ${CMAKE_CURRENT_SOURCE_DIR}/../db/src/db_engine
+    # ${CMAKE_CURRENT_SOURCE_DIR}/../db/src/db_nvme
+)
+

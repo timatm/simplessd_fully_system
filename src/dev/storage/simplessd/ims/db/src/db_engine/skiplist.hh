@@ -22,6 +22,10 @@ public:
     bool Contains(const Record& record) const;
 
     Iterator GetIterator() const;
+    size_t get_node_num() const;
+    const Record* Min() const;
+    const Record* Max() const;
+    void dump() const;
 
 private:
     static const int kMaxHeight = 12;
@@ -135,6 +139,8 @@ bool SkipList<Record, Comparator>::Contains(const Record& r) const {
 template <typename Record, typename Comparator>
 class SkipList<Record, Comparator>::Iterator {
 public:
+    Iterator() : head_(nullptr), current_(nullptr), cmp_() {}
+
     Iterator(Node* head, const Comparator& cmp)
         : head_(head), current_(head->next[0]), cmp_(cmp) {}
 
@@ -165,11 +171,53 @@ private:
     Comparator cmp_;
 };
 
-// Return an iterator
+
 template <typename Record, typename Comparator>
 typename SkipList<Record, Comparator>::Iterator
 SkipList<Record, Comparator>::GetIterator() const {
     return Iterator(head_, cmp_);
 }
+
+template <typename Record, typename Comparator>
+const Record* SkipList<Record, Comparator>::Min() const {
+    Node* x = head_->next[0];
+    return x ? &x->record : nullptr;
+}
+
+template <typename Record, typename Comparator>
+const Record* SkipList<Record, Comparator>::Max() const {
+    Node* x = head_;
+    for (int level = max_height_ - 1; level >= 0; --level) {
+        while (x->next[level]) {
+            x = x->next[level];
+        }
+    }
+    return x != head_ ? &x->record : nullptr;
+}
+
+template <typename Record, typename Comparator>
+size_t SkipList<Record, Comparator>::get_node_num() const{
+    size_t count = 0;
+    Iterator it = GetIterator(); 
+    it.SeekToFirst();             
+    while (it.Valid()) {
+        ++count;
+        it.Next();
+    }
+    return count;
+}
+
+template <typename Record, typename Comparator>
+void SkipList<Record, Comparator>::dump() const {
+    std::cout << "=== SkipList Dump (Total Nodes: " << get_node_num() << ") ===" << std::endl;
+    Iterator it = GetIterator();
+    it.SeekToFirst();
+    while (it.Valid()) {
+        it.record().Dump();
+        it.Next();
+    }
+    std::cout << "=== End of Dump ===" << std::endl;
+}
+
 
 #endif  // SIMPLE_SKIPLIST_H

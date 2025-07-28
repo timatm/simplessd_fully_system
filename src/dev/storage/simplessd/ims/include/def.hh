@@ -2,6 +2,7 @@
 #define __DEF_HH__
 
 #include "internal_key.hh"
+#include "print.hh"
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -39,12 +40,14 @@
 #define MAPPINGLBN 1
 
 #define LBN_NUM ( CHANNEL_NUM * PACKAGE_NUM * DIE_NUM * PLANE_NUM * BLOCK_NUM )
-#define LBN_SIZE ( PAGE_SIZE * IMS_PAGE_NUM )
+#define LBN_SIZE ( IMS_PAGE_SIZE * IMS_PAGE_NUM )
 
-#define LBN2PLANE(LBA)  ( (LBA >> BLOCK_BITS) % PLANE_NUM )
-#define LBN2DIE(LBA)    ( (LBA >> (PLANE_BITS + BLOCK_BITS)) % DIE_NUM )
-#define LBN2PACKAGE(LBA)( (LBA >> (DIE_BITS + PLANE_BITS + BLOCK_BITS)) % PACKAGE_NUM )
-#define LBN2CH(LBA)     ( (LBA >> (PACKAGE_BITS + DIE_BITS + PLANE_BITS + BLOCK_BITS)) % CHANNEL_NUM )
+#define LBN2CH(lbn)       ((lbn) % CHANNEL_NUM)
+#define LBN2PACKAGE(lbn)  (((lbn) / CHANNEL_NUM) % PACKAGE_NUM)
+#define LBN2DIE(lbn)      (((lbn) / (CHANNEL_NUM * PACKAGE_NUM)) % DIE_NUM)
+#define LBN2PLANE(lbn)    (((lbn) / (CHANNEL_NUM * PACKAGE_NUM * DIE_NUM)) % PLANE_NUM)
+
+
 
 #define LBN2LPN(lbn) (lbn * IMS_PAGE_NUM) 
 #define LPN2LBN(lpn) (lpn / IMS_PAGE_NUM)
@@ -53,13 +56,33 @@
 #define OPERATION_FAILURE 1
 
 
-// Enable : 1
-// Disable: 0
-#define ENABLE_DISK 0
 
 #define INVALIDLBN 0xFFFFFFFFFFFFFFFF
 #define INVALIDCH  0xFF
 // [SSD setting end]
+
+
+
+// [DB setting]
+enum class SelectT {
+    WROSTCASE = 0,
+    RR        = 1,
+    LEVEL2CH  = 2,
+    MYPOLICY  = 3
+};
+#define SELECT_POLICT (static_cast<int>(SelectT::MYPOLICY))
+
+
+// Enable : 1
+// Disable: 0
+#define ENABLE_DISK 1
+
+
+
+
+// [DB setting end]
+
+
 
 
 // [IMS setting start]
@@ -154,9 +177,24 @@ struct super_page{
         log_page_num(0),
         currentLogLBN(INVALIDLBN),
         nextLogLBN(INVALIDLBN),
-        logOffset(INVALIDLBN),
-        usedLBN_num(INVALIDLBN),
+        logOffset(0),
+        usedLBN_num(0),
         lastUsedChannel(INVALIDCH){}
+    void dump() {
+        std::cout << "========= Super Page Dump =========" << std::endl;
+        std::cout << "magic             : 0x" << std::hex << magic << std::dec << std::endl;
+        std::cout << "mapping_store     : " << mapping_store << std::endl;
+        std::cout << "mapping_page_num  : " << mapping_page_num << std::endl;
+        std::cout << "log_store         : " << log_store << std::endl;
+        std::cout << "log_page_num      : " << log_page_num << std::endl;
+        std::cout << "currentLogLBN     : " << currentLogLBN << std::endl;
+        std::cout << "nextLogLBN        : " << nextLogLBN << std::endl;
+        std::cout << "logOffset         : " << logOffset << std::endl;
+        std::cout << "usedLBN_num       : " << usedLBN_num << std::endl;
+        std::cout << "lastUsedChannel   : " << static_cast<int>(lastUsedChannel) << std::endl;
+        std::cout << "===================================" << std::endl;
+    }
+
 };
 static_assert(sizeof(super_page) == IMS_PAGE_SIZE, "super_page must be same to page size");
 #pragma pack(pop)

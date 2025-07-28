@@ -20,6 +20,11 @@ struct Key {
     Key() : key_size(0) {
         std::memset(key, 0, sizeof(key));
     }
+    Key(std::string str){
+        key_size = std::min(static_cast<size_t>(40), str.size());
+        std::memset(key, 0, sizeof(key));
+        std::memcpy(key, str.data(), key_size);
+    }
 
     void fromString(const std::string& str) {
         key_size = std::min(static_cast<size_t>(40), str.size());

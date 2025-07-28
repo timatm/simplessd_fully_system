@@ -17,79 +17,69 @@ int Persistence::readMappingTable(uint64_t lpn,uint8_t *buffer,size_t size) {
         pr_debug("[ERROR] Memory allocation failed.");
         return OPERATION_FAILURE;
     }
-    err = pDisk->readPage(lpn, buffer);
+    err = pDisk_->readPage(lpn, buffer);
     if(err){
         return OPERATION_FAILURE;
     }
     return OPERATION_SUCCESS;
 }
 
-int Persistence::flushMappingTable(std::unordered_map<std::string, uint64_t>& mappingTable) {
-
-    uint64_t mappingPageLBN = sp_ptr_old->mapping_store;
+int Persistence::flushMappingTable(const std::unordered_map<std::string, uint64_t>& mappingTable) {
+    uint64_t mappingPageLBN = sp_ptr_old_->mapping_store;
     pr_info("Flush mapping table to disk at LBN: %lu", mappingPageLBN);
-    uint64_t lpn = LBN2LPN(mappingPageLBN);
-    uint8_t *buffer = (uint8_t*)malloc(IMS_PAGE_SIZE);
-    int err = OPERATION_FAILURE;
-    if (!buffer) {
-        std::cerr << "[ERROR] Memory allocation failed.\n";
-        return OPERATION_FAILURE;
-    }
-    memset(buffer, 0xFF, IMS_PAGE_SIZE);
 
-    auto *page = reinterpret_cast<mappingTablePerPage*>(buffer);
-    if(!page){
-        pr_info("[ERROR] Memory allocation failed.\n");
-        return OPERATION_FAILURE;
-    }
+    uint64_t lpn = LBN2LPN(mappingPageLBN);
+    auto* buffer = (uint8_t*)malloc(IMS_PAGE_SIZE);
+    if (!buffer) return OPERATION_FAILURE;
+
+    memset(buffer, 0xFF, IMS_PAGE_SIZE);
+    auto* page = reinterpret_cast<mappingTablePerPage*>(buffer);
+    if (!page) return OPERATION_FAILURE;
+
+    int err = OPERATION_FAILURE;
     size_t idx = 0;
-    for (const auto& pair : mappingTable) {
-        if (idx == MAPPING_TABLE_ENTRIES){
+    sp_ptr_new_->mapping_page_num = 0;
+
+    for (const auto& [filename, lbn] : mappingTable) {
+        if (idx == MAPPING_TABLE_ENTRIES) {
             page->entry_num = idx;
-            err = pDisk->writePage(lpn, buffer);
-            if(err == OPERATION_FAILURE) {
-                free(buffer);
+            err = pDisk_->writePage(lpn++, buffer);
+            if (err == OPERATION_FAILURE) {
                 return OPERATION_FAILURE;
             }
-            pr_info("Flushed mapping table to disk at LPN: %lu", lpn);
-            pr_info("Mapping store entry num:%d", page->entry_num);
-            sp_ptr_new->mapping_page_num++;
+            pr_info("Flushed mapping table page with %zu entries", idx);
+            sp_ptr_new_->mapping_page_num++;
             memset(buffer, 0xFF, IMS_PAGE_SIZE);
-            lpn++;
             idx = 0;
         }
-        mappingEntry &entry = page->entry[idx++];
-        memset(entry.fileName, 0, sizeof(entry.fileName));
-        strncpy(entry.fileName, pair.first.c_str(), sizeof(entry.fileName) - 1);
-        entry.fileName[sizeof(entry.fileName) - 1] = '\0';
-        entry.lbn = pair.second;
-        auto node = tree.find_node(pair.first.c_str());
-        if (!node) {
-            pr_debug("Cannot find node for %s", pair.first.c_str());
-        }
-        else{
+
+        mappingEntry& entry = page->entry[idx++];
+        std::strncpy(entry.fileName, filename.c_str(), sizeof(entry.fileName) - 1);
+        entry.lbn = lbn;
+
+        auto node = tree_.find_node(filename);
+        if (node) {
             entry.level = node->levelInfo;
             entry.channel = node->channelInfo;
             entry.minRange = node->rangeMin;
             entry.maxRange = node->rangeMax;
         }
     }
-    if(idx > 0) {
-        sp_ptr_new->mapping_page_num++;
+
+    if (idx > 0) {
         page->entry_num = idx;
-        err = pDisk->writePage(lpn, buffer);
-        if(err == OPERATION_FAILURE) {
-            free(buffer);
-            return OPERATION_FAILURE;
+        err = pDisk_->writePage(lpn, buffer);
+        if (err == OPERATION_SUCCESS) {
+            pr_info("Flushed final mapping page with %zu entries", idx);
+            sp_ptr_new_->mapping_page_num++;
         }
-        pr_info("Flushed mapping table to disk at LPN: %lu", lpn);
-        pr_info("Mapping store entry num:%d", page->entry_num);
     }
-    pr_info("Mapping store pages num: %lu", sp_ptr_new->mapping_page_num);
-    
+    pr_info("Flushed mapping done ,mapping store in LBN: %lu (num of pages: %lu)",mappingPageLBN ,sp_ptr_new_->mapping_page_num );
     free(buffer);
-    return OPERATION_SUCCESS;
+    return err == 0 ? OPERATION_SUCCESS : OPERATION_FAILURE;
 }
+
+
 
 int  Persistence::readSStable(uint64_t lbn,uint8_t *buffer,size_t size){
     int err;
@@ -101,18 +91,19 @@ int  Persistence::readSStable(uint64_t lbn,uint8_t *buffer,size_t size){
         pr_debug("[ERROR] Memory allocation failed.");
         return OPERATION_FAILURE;
     }
-    err = pDisk->readBlock(lbn, buffer);
+    err = pDisk_->readBlock(lbn, buffer);
     if(err){
         return OPERATION_FAILURE;
     }
     return OPERATION_SUCCESS;
 }
+
 int Persistence::flushSStable(uint64_t lbn,uint8_t *buffer,size_t size){
     int err;
     if(!ENABLE_DISK){
         return OPERATION_SUCCESS;
     }
-    if(!disk.file){
+    if(!pDisk_->file_){
         pr_debug("Disk does't open");
         return OPERATION_FAILURE;
     }
@@ -124,7 +115,7 @@ int Persistence::flushSStable(uint64_t lbn,uint8_t *buffer,size_t size){
         pr_debug("[ERROR] Memory allocation failed.");
         return OPERATION_FAILURE;
     }
-    err = pDisk->writeBlock(lbn, buffer);
+    err = pDisk_->writeBlock(lbn, buffer);
     if(!err){
         return err;
     }
@@ -141,7 +132,7 @@ int Persistence::readSStablePage(uint64_t lpn,uint8_t *buffer,size_t size){
         pr_debug("[ERROR] Memory allocation failed.");
         return OPERATION_FAILURE;
     }
-    err = pDisk->readPage(lpn,buffer);
+    err = pDisk_->readPage(lpn,buffer);
     if(err){
         return OPERATION_FAILURE;
     }
@@ -150,7 +141,7 @@ int Persistence::readSStablePage(uint64_t lpn,uint8_t *buffer,size_t size){
 
 int Persistence::readLog(uint64_t lpn,uint8_t *buffer,size_t size){
     int err;
-    if (pDisk == nullptr) {
+    if (pDisk_ == nullptr) {
         pr_debug("[ERROR] Disk not initialized.");
         return OPERATION_FAILURE;
     }
@@ -162,7 +153,7 @@ int Persistence::readLog(uint64_t lpn,uint8_t *buffer,size_t size){
         pr_debug("[ERROR] data size doesn't match");
         return OPERATION_FAILURE;
     }
-    err = pDisk->readPage(lpn,buffer);
+    err = pDisk_->readPage(lpn,buffer);
     if(err){
         return OPERATION_FAILURE;
     }
@@ -171,7 +162,7 @@ int Persistence::readLog(uint64_t lpn,uint8_t *buffer,size_t size){
 
 int Persistence::writeLog(uint64_t lpn,uint8_t *buffer,size_t size){
     int err;
-    if (pDisk == nullptr) {
+    if (pDisk_ == nullptr) {
         pr_debug("[ERROR] Disk not initialized");
         return OPERATION_FAILURE;
     }
@@ -183,7 +174,7 @@ int Persistence::writeLog(uint64_t lpn,uint8_t *buffer,size_t size){
         pr_debug("[ERROR] data size doesn't match");
         return OPERATION_FAILURE;
     }
-    err = pDisk->writePage(lpn,buffer);
+    err = pDisk_->writePage(lpn,buffer);
     if(err){
         return OPERATION_FAILURE;
     }

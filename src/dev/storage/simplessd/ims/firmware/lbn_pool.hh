@@ -15,13 +15,9 @@
 
 class LBNPool {
 public:
-    std::array<std::deque<uint64_t>, CHANNEL_NUM> usedLBNList;
-    std::array<std::deque<uint64_t>, CHANNEL_NUM> freeLBNList;
-    std::deque<uint64_t> valueLogList;
-    int lastUsedChannel;
-
     void reset_lbn_pool();
-    int init_lbn_pool(int);
+    int init_lbn_pool(const std::vector<uint64_t>& used_lbn_list);
+
     void insert_freeLBNList(uint64_t lbn);
     bool remove_freeLBNList(uint64_t lbn);
     bool get_freeLBNList(uint64_t lbn);
@@ -36,21 +32,27 @@ public:
     void remove_valueLogList(uint64_t lbn);
     uint64_t allocate_valueLog_block();
 
-    uint64_t select_lbn(int type,hostInfo *info);
     void dump_LBNPool();
     uint64_t worst_policy();
     uint64_t RRpolicy();
-    uint64_t level2CH(hostInfo *info);
-    uint64_t my_policy(hostInfo *info);
+    uint64_t level2CH(int level);
+    uint64_t my_policy(const std::vector<int>& relate_ch_list);
     void clear();
-    enum{
-        WROSTCASE = 0,
-        RR        = 1,
-        LEVEL2CH  = 2,
-        MYPOLICY  = 3
-    };
+    uint8_t get_lastUsedChannel(){return lastUsedChannel_;};
+    void set_lastUsedChannel(uint8_t ch) {lastUsedChannel_ = ch;}
+    const std::array<std::deque<uint64_t>, CHANNEL_NUM>& get_usedLBNList() const {
+        return usedLBNList_;
+    }
+    std::deque<uint64_t>& get_freeLBNList_ref(int ch) {
+        return freeLBNList_[ch];
+    }
+
+private:
+    std::array<std::deque<uint64_t>, CHANNEL_NUM> usedLBNList_;
+    std::array<std::deque<uint64_t>, CHANNEL_NUM> freeLBNList_;
+    std::deque<uint64_t> valueLogList_;
+    uint8_t lastUsedChannel_;
 };
 
-extern LBNPool lbnPoolManager; 
 
 #endif

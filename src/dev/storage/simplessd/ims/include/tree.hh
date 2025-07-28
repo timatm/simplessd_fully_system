@@ -12,7 +12,6 @@
 #include "def.hh"
 #include "internal_key.hh"
 
-// key 比較工具函式（放 global namespace）
 inline int compareKey(const Key& a, const Key& b) {
     int cmp = std::memcmp(a.key, b.key, std::min(a.key_size, b.key_size));
     if (cmp == 0) return a.key_size - b.key_size;
@@ -55,26 +54,47 @@ struct TreeNodeComparator {
     }
 };
 
-class Tree {
-public:
+// class Tree {
+// public:
+//     class iterator;
+
+//     int init_tree();
+//     void insert_node(std::shared_ptr<TreeNode> node);
+//     void remove_node(std::shared_ptr<TreeNode> node);
+//     // std::queue<std::shared_ptr<TreeNode>> search_key(const Key& key);
+    
+//     std::vector<std::shared_ptr<TreeNode>> search_overlap(int level, const Key& queryMin, const Key& queryMax);
     
 
+//     std::shared_ptr<TreeNode> find_node(const std::string& filename, int level, const Key& min, const Key& max);
+//     std::shared_ptr<TreeNode> find_node(const std::string& filename);
+//     std::vector<int> get_relate_ch_info(std::shared_ptr<TreeNode> node);
+
+//     void clear();
+//     void dump() const;
+// private:
+//     std::unordered_map<int, std::set<std::shared_ptr<TreeNode>, TreeNodeComparator>> level_map_;
+//     void build_link(std::shared_ptr<TreeNode> node);
+// };
+
+
+class Tree {
+public:
     int init_tree();
     void insert_node(std::shared_ptr<TreeNode> node);
     void remove_node(std::shared_ptr<TreeNode> node);
-    std::queue<std::shared_ptr<TreeNode>> search_key(const Key& key);
-
     std::vector<std::shared_ptr<TreeNode>> search_overlap(int level, const Key& queryMin, const Key& queryMax);
-    void build_link(std::shared_ptr<TreeNode> node);
-
     std::shared_ptr<TreeNode> find_node(const std::string& filename, int level, const Key& min, const Key& max);
     std::shared_ptr<TreeNode> find_node(const std::string& filename);
-    std::vector<int> get_relate_ch_info(std::shared_ptr<TreeNode> node);
-
+    const std::unordered_map<int, std::set<std::shared_ptr<TreeNode>, TreeNodeComparator>>& get_level_map() const;
+    const std::set<std::shared_ptr<TreeNode>, TreeNodeComparator>& get_level_nodes(int level) const;
     void clear();
     void dump() const;
 private:
-    std::unordered_map<int, std::set<std::shared_ptr<TreeNode>, TreeNodeComparator>> level_map;
+    std::unordered_map<int, std::set<std::shared_ptr<TreeNode>, TreeNodeComparator>> level_map_;
+    void build_link(std::shared_ptr<TreeNode> node);
 };
+
+
 
 #endif // __TREE_H__

@@ -7,42 +7,44 @@
 #include "persistence.hh"
 #include "mapping_table.hh"
 #include "IMS_interface.hh"
-int Log::init_logRecordList(uint64_t logStoreLBN,uint64_t page_num){
-    int err = OPERATION_FAILURE;
-    if(logStoreLBN == INVALIDLBN) {
-        pr_info("Invalid log store LBN(%lu), cannot initialize log record list",logStoreLBN);
+
+int Log::init_logRecordList(uint64_t logStoreLBN, uint64_t page_num) {
+    if (logStoreLBN == INVALIDLBN) {
+        pr_info("Invalid log store LBN(%lu), cannot initialize log record list", logStoreLBN);
         return OPERATION_FAILURE;
     }
+
     uint64_t lpn = LBN2LPN(logStoreLBN);
-    uint8_t *buffer = (uint8_t *)malloc(IMS_PAGE_SIZE);
-    if(!buffer){
+    uint8_t* buffer = (uint8_t*)malloc(IMS_PAGE_SIZE);
+    if (!buffer) {
         pr_info("Allocating memory for log record list buffer failed");
         return OPERATION_FAILURE;
     }
-    for(int page = 0; page < page_num; page++) {
-        err = persistenceManager.pDisk->readPage(lpn, buffer);
-        if(err == OPERATION_FAILURE) {
-            pr_info("Reading log record list from disk failed at LPN: %lu", lpn);
+
+    for (int page = 0; page < page_num; ++page) {
+        if (persistence_.pDisk_->readPage(lpn++, buffer)) {
+            pr_info("Reading log record list from disk failed");
             free(buffer);
             return OPERATION_FAILURE;
         }
-        logLBNListRecord *logRecordPtr = (logLBNListRecord *)buffer;
-        for (int i = 0; i < IMS_PAGE_SIZE / sizeof(uint64_t); i++) {
-            if (logRecordPtr->lbn[i] != INVALIDLBN) {
+
+        auto* logRecordPtr = reinterpret_cast<logLBNListRecord*>(buffer);
+        for (int i = 0; i < IMS_PAGE_SIZE / sizeof(uint64_t); ++i) {
+            if (logRecordPtr->lbn[i] != INVALIDLBN && logRecordPtr->lbn[i] != 0) {
                 logRecordList.push_back(logRecordPtr->lbn[i]);
             }
         }
-        lpn++;
     }
+
     free(buffer);
     return OPERATION_SUCCESS;
-}   
+}
+
 
 void Log::insert_logRecord(uint64_t lbn) {
     logRecordList.push_back(lbn);
-    lbnPoolManager.remove_freeLBNList(lbn);
-    lbnPoolManager.insert_usedLBNList(lbn);
-    return ;
+    lbnPool_.remove_freeLBNList(lbn);
+    lbnPool_.insert_usedLBNList(lbn);
 }
 
 void Log::remove_logRecord_head() {
@@ -50,11 +52,12 @@ void Log::remove_logRecord_head() {
         pr_info("Log record is empty, nothing to remove");
         return;
     }
+
     uint64_t headLBN = logRecordList.front();
     logRecordList.pop_front();
-    lbnPoolManager.remove_usedLBNList(headLBN);
-    lbnPoolManager.insert_freeLBNList(headLBN);
-    return ;
+
+    lbnPool_.remove_usedLBNList(headLBN);
+    lbnPool_.insert_freeLBNList(headLBN);
 }
 
 int Log::flush_logRecordList() {
@@ -63,59 +66,73 @@ int Log::flush_logRecordList() {
         return OPERATION_SUCCESS;
     }
 
-    uint64_t lbn = sp_ptr_old->log_store;
-    uint64_t lpn = LBN2LPN(lbn);
-    uint8_t *buffer = (uint8_t *)malloc(IMS_PAGE_SIZE);
-    if (!buffer) {
-        pr_info("Allocating memory for log record list buffer failed");
-        return OPERATION_FAILURE;
-    }
+    uint64_t lpn = LBN2LPN(sp_old_->log_store);
+    uint8_t* buffer = (uint8_t*)malloc(IMS_PAGE_SIZE);
+    if (!buffer) return OPERATION_FAILURE;
 
     memset(buffer, 0, IMS_PAGE_SIZE);
-    logLBNListRecord *logRecordPtr = (logLBNListRecord *)buffer;
+    auto* logRecordPtr = reinterpret_cast<logLBNListRecord*>(buffer);
     int index = 0;
 
     while (!logRecordList.empty()) {
         uint64_t lbn = logRecordList.front();
+        logRecordList.pop_front();
 
         if (lbn == INVALIDLBN) {
             pr_info("Invalid LBN encountered in log record list, skipping");
-            logRecordList.pop_front(); 
             continue;
         }
 
         logRecordPtr->lbn[index++] = lbn;
-        logRecordList.pop_front();
 
         if (index == IMS_PAGE_SIZE / sizeof(uint64_t)) {
-            int err = persistenceManager.pDisk->writePage(lpn, buffer);
-            if (err == OPERATION_FAILURE) {
-                pr_info("Flushing log record list to disk failed at LPN: %lu", lpn);
+            if (persistence_.pDisk_->writePage(lpn++, buffer)) {
+                pr_info("Flush failed at full log page");
                 free(buffer);
                 return OPERATION_FAILURE;
             }
-            pr_info("Flushed log page at LPN: %lu", lpn);
-            lpn++;
-            sp_ptr_new->log_page_num++;
+            sp_new_->log_page_num++;
+            pr_info("Flushed full log page at LPN: %lu", lpn - 1);
             index = 0;
             memset(buffer, 0, IMS_PAGE_SIZE);
-            logRecordPtr = (logLBNListRecord *)buffer;
         }
     }
 
     if (index > 0) {
-        int err = persistenceManager.pDisk->writePage(lpn, buffer);
-        if (err == OPERATION_FAILURE) {
-            pr_info("Flushing remaining log record list to disk failed at LPN: %lu", lpn);
+        if (persistence_.pDisk_->writePage(lpn++, buffer)) {
+            pr_info("Flush failed at final log page");
             free(buffer);
             return OPERATION_FAILURE;
         }
-        pr_info("Flushed final partial log page at LPN: %lu", lpn);
-        sp_ptr_new->log_page_num++;
+        sp_new_->log_page_num++;
+        pr_info("Flushed final log page at LBN: %lu (num of page: %lu)", sp_old_->log_store,sp_new_->log_page_num);
     }
 
     free(buffer);
     return OPERATION_SUCCESS;
+}
+void Log::dump() const {
+    pr_info("");
+    pr_info("[Log Dump]");
+    pr_info("  currentLogLBN: %lu",currentLogLBN);
+    pr_info("  nextLogLBN:    %lu",nextLogLBN);
+    pr_info("  logOffset:     %lu",logOffset);
+    pr_info("  logRecordList (%lu entries): ",logRecordList.size());
+    int count = 0;
+    std::string line;
+    for (auto lbn : logRecordList) {
+        line += std::to_string(lbn) + " ";
+        count++;
+
+        if (count % 16 == 0) {
+            pr_info("%s", line.c_str());
+            line.clear();
+        }
+    }
+
+    if (!line.empty()) {
+        pr_info("%s", line.c_str());
+    }
 }
 
 void Log::clear(){

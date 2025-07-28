@@ -22,7 +22,7 @@ public:
     // TODO
     void init();
     void readSSTable(const std::string& filename);
-    void writeSSTable(uint8_t level,InternalKey minKey ,InternalKey maxKey,char * sstable_buffer);
+    void writeSSTable(uint8_t level,InternalKey minKey ,InternalKey maxKey,std::string sstable_buffer);
     void deleteSSTable(const std::string& filename);
     std::string packingTable(const SkipList<Record,RecordComparator> &skiplist);
 private:
@@ -32,9 +32,9 @@ private:
     uint32_t sequenceNumber_ = 0; // Sequence number for SSTables
     std::unordered_map<std::string, std::shared_ptr<std::deque<InternalKey>>> keyRangeMap; // sstable name -> key range per slot
     std::string generateFilename(uint32_t seq);
-    char * keyPerPagePacking(const SkipList<Record,RecordComparator> &skiplist);
-    char * keyHashPacking(const SkipList<Record,RecordComparator> &skiplist);
-    char * keyRangePacking(const SkipList<Record,RecordComparator> &skiplist);
+    char* keyPerPagePacking(const SkipList<Record,RecordComparator> &skiplist);
+    char* keyHashPacking(const SkipList<Record,RecordComparator> &skiplist);
+    char* keyRangePacking(const SkipList<Record,RecordComparator> &skiplist);
 };
 
 #endif // __SSTABLE_MGR_HH__

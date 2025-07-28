@@ -26,8 +26,9 @@ public:
     size_t ApproximateMemoryUsage() const;
     bool memTableIsFull();
     const SkipList<Record, RecordComparator>& GetSkipList() const { return skiplist_; }
-    InternalKey getMinKey(){ return minRange_ ;};
-    InternalKey getMaxKey(){ return maxRange_ ;};
+    InternalKey getMinKey(){ return skiplist_.Min()->internal_key ;};
+    InternalKey getMaxKey(){ return skiplist_.Max()->internal_key ;};
+    void setPackingT(PackingType t){packing_type_ = static_cast<int>(t); }
 private:
     // std::string keyPerPagePacking();
     // std::string keyHashPacking();
