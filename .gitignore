@@ -43,3 +43,4 @@ compile_flags.txt
 /src/dev/storage/simplessd/ims/db/libnvme
 disk.bin
 *.img
+src/dev/storage/simplessd/ims/db/test.img
