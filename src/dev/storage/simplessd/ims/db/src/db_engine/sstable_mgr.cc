@@ -174,7 +174,7 @@ void SstableManager::readSSTable(const std::string& filename) {
     thread_pool_.Submit([filename, read_buffer, this]() {
         std::cout << "Reading SSTable from: " << filename << std::endl;
 
-        int err = nvme_read_sstable(filename, read_buffer);
+        int err = nvme_.nvme_read_sstable(filename, read_buffer);
         if (err == COMMAND_FAILD) {
             std::cerr << "[Thread] Failed to read SSTable: " << filename << std::endl;
             std::free(read_buffer);  // 釋放資源
@@ -196,14 +196,16 @@ void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey
 
     Key rangeMinKey = minKey.key;
     Key rangeMaxKey = maxKey.key;
-    std::string filename = generateFilename(sequenceNumber_);
+    std::string filename = generateFilename(sequenceNumber_.fetch_add(1));
 
     sstable_info info(filename, level, rangeMinKey, rangeMaxKey);
     std::cout << "Dispatching write for SSTable: " << filename << std::endl;
     info.dump();
 
     thread_pool_.Submit([info, buf = std::move(sstable_buffer), this]() {
-        int err = nvme_write_sstable(info,  const_cast<char*>(buf.data()));
+        std::cout << "[Thread] Entered thread task\n";
+        int err = nvme_.nvme_write_sstable(info,  const_cast<char*>(buf.data()));
+        std::cout << "[Thread] nvme_write_sstable returned " << err << std::endl;
         if (err == COMMAND_FAILD) {
             std::cerr << "[Thread] Failed to write SSTable: " << info.filename << std::endl;
             return;
@@ -214,10 +216,13 @@ void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey
                                             info.level,
                                             info.min, 
                                             info.max);
-        lsmTree_.insert_node(node);
+        {
+            std::unique_lock<std::mutex> lock(tree_mutex_);
+            lsmTree_.insert_node(node);
+        }
+        
 
         std::cout << "SStable(" << info.filename << ") written successfully.\n";
-        ++sequenceNumber_;
     });
 
     std::cout << "[Main] Async write dispatched.\n";

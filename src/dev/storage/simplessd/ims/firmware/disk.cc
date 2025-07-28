@@ -67,12 +67,14 @@ int Disk::writePage(uint64_t lpn,const uint8_t * buffer) {
         throw std::runtime_error("Seek failed.");
         return -1;
     }
-
+    std::cout << "Write offset is " << offset << std::endl;
     size_t writtenBytes = std::fwrite(buffer, 1, IMS_PAGE_SIZE, file_);
     if (writtenBytes != IMS_PAGE_SIZE) {
+        std::cerr << "[ERROR] fwrite failed: only wrote " << writtenBytes << " bytes, expected " << IMS_PAGE_SIZE << std::endl;
+        perror("fwrite");
         throw std::runtime_error("Write error.");
-        return -1;
     }
+
     std::fflush(file_);
     return 0;
 }
@@ -83,6 +85,8 @@ int Disk::writeBlock(uint64_t lbn ,uint8_t *buffer) {
     if (file_) {
         for(int i = 0;i < IMS_PAGE_NUM;i++){
             uint8_t *page_ptr = buffer + i * IMS_PAGE_SIZE;
+            // assert(reinterpret_cast<uintptr_t>(page_ptr) % 4096 == 0 && "buffer must be 4KB aligned");
+
             lpn = lpn + 1;
             // pr_debug("Write block at page: %d LPN: %lu", i, lpn);
             uint16_t written = writePage(lpn, page_ptr);

@@ -36,7 +36,7 @@ private:
     Comparator cmp_;
     mutable std::mt19937 gen_;
     mutable std::uniform_real_distribution<> dist_;
-
+    bool userKeyEqual(const InternalKey& a, const InternalKey& b);
     int RandomHeight();
     Node* CreateNode(const Record& record, int height);
     Node* FindGreaterOrEqual(const Record& record, Node** prev = nullptr) const;
@@ -105,13 +105,25 @@ SkipList<Record, Comparator>::FindGreaterOrEqual(const Record& r, Node** prev) c
     return x->next[0];
 }
 
+template <typename Record, typename Comparator>
+bool SkipList<Record, Comparator>::userKeyEqual(const InternalKey& a, const InternalKey& b) {
+    if (a.key.key_size != b.key.key_size) return false;
+    return std::memcmp(a.key.key, b.key.key, a.key.key_size) == 0;
+}
+
 // Insert
 template <typename Record, typename Comparator>
 void SkipList<Record, Comparator>::Insert(const Record& r) {
     Node* prev[kMaxHeight];
     Node* x = FindGreaterOrEqual(r, prev);
 
-    if (x && Equal(x->record, r)) return;
+    if (x && userKeyEqual(x->record.internal_key, r.internal_key)) {
+        // 如果 user key 相同，且 r 的 sequence 較新，就更新
+        if (r.internal_key.info.seq > x->record.internal_key.info.seq) {
+            x->record = r;
+        }
+        return;  // 更新完就不需要再插入新節點
+    }
 
     int height = RandomHeight();
     if (height > max_height_) {
@@ -127,6 +139,7 @@ void SkipList<Record, Comparator>::Insert(const Record& r) {
         prev[i]->next[i] = x;
     }
 }
+
 
 // Contains
 template <typename Record, typename Comparator>

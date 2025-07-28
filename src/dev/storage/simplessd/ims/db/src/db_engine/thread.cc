@@ -2,25 +2,33 @@
 
 ThreadPool::ThreadPool(size_t thread_count) : stop_(false) {
     for (size_t i = 0; i < thread_count; ++i) {
-        workers_.emplace_back([this] {
+        workers_.emplace_back([this]() {
             while (true) {
                 std::function<void()> task;
-
                 {
-                    std::unique_lock<std::mutex> lock(this->queue_mutex_);
-                    this->condition_.wait(lock, [this] {
-                        return this->stop_ || !this->tasks_.empty();
+                    std::unique_lock<std::mutex> lock(queue_mutex_);
+                    condition_.wait(lock, [this]() {
+                        return stop_ || !tasks_.empty();
                     });
-
-                    if (this->stop_ && this->tasks_.empty()) return;
-                    task = std::move(this->tasks_.front());
-                    this->tasks_.pop();
+                    if (stop_ && tasks_.empty()) return;
+                    task = std::move(tasks_.front());
+                    tasks_.pop();
+                    ++active_tasks_;
                 }
 
                 task();
+
+                {
+                    std::unique_lock<std::mutex> lock(queue_mutex_);
+                    --active_tasks_;
+                    if (tasks_.empty() && active_tasks_ == 0) {
+                        wait_condition_.notify_all();  // 通知 WaitForAll 可以結束了
+                    }
+                }
             }
         });
     }
+
 }
 
 void ThreadPool::Shutdown() {
@@ -32,6 +40,12 @@ void ThreadPool::Shutdown() {
     for (auto& thread : workers_) {
         if (thread.joinable()) thread.join();
     }
+}
+void ThreadPool::WaitForAll() {
+    std::unique_lock<std::mutex> lock(queue_mutex_);
+    wait_condition_.wait(lock, [this]() {
+        return tasks_.empty() && active_tasks_ == 0;
+    });
 }
 
 ThreadPool::~ThreadPool() {

@@ -6,8 +6,8 @@
 #include "def.hh"
 #include <algorithm>
 
-LOG_MANAGER::LOG_MANAGER()
-    : next_lbn_(0), currenet_lbn_(0), page_offset_(0), byte_offset_(0) {}
+LOG_MANAGER::LOG_MANAGER(NVMe& nvme)
+    : next_lbn_(0), currenet_lbn_(0), page_offset_(0), byte_offset_(0) ,nvme_(nvme) {}
 
 void LOG_MANAGER::allocate_lbn() {
     char *buffer = (char*)calloc(sizeof(uint32_t), 1);
@@ -16,7 +16,7 @@ void LOG_MANAGER::allocate_lbn() {
         return;
     }
 
-    if (nvme_allcate_lbn(buffer) == COMMAND_FAILD) {
+    if (nvme_.nvme_allcate_lbn(buffer) == COMMAND_FAILD) {
         std::cerr << "Failed to allocate LBN." << std::endl;
         free(buffer);
         return;
@@ -42,7 +42,7 @@ void LOG_MANAGER::flush_buffer() {
     char* write_data = new char[buffer_.size()];
     std::memcpy(write_data, buffer_.data(), buffer_.size());
 
-    int err = nvme_write_log(lpn, write_data);
+    int err = nvme_.nvme_write_log(lpn, write_data);
     if (err == COMMAND_FAILD) {
         std::cerr << "Failed to write log at LPN: " << lpn << std::endl;
         delete[] write_data;
@@ -98,7 +98,7 @@ Record* LOG_MANAGER::readLog(uint32_t lpn, uint32_t offset) const {
     uint32_t currentLPN = lpn;
     uint32_t currentOffset = offset;
 
-    if (nvme_read_log(currentLPN, buffer) == COMMAND_FAILD) {
+    if (nvme_.nvme_read_log(currentLPN, buffer) == COMMAND_FAILD) {
         std::cerr << "Failed to read log at LPN: " << currentLPN << std::endl;
         free(buffer);
         return nullptr;
@@ -130,7 +130,7 @@ Record* LOG_MANAGER::readLog(uint32_t lpn, uint32_t offset) const {
             page_index = 0;
             currentLPN = LBN2LPN(block_index);
         }
-        if (nvme_read_log(currentLPN, buffer) == COMMAND_FAILD) {
+        if (nvme_.nvme_read_log(currentLPN, buffer) == COMMAND_FAILD) {
             std::cerr << "Failed to read log at LPN: " << currentLPN << std::endl;
             free(buffer);
             return nullptr;

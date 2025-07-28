@@ -18,9 +18,10 @@ public:
     template <class F, class... Args>
     auto Submit(F&& f, Args&&... args)
         -> std::future<typename std::invoke_result<F, Args...>::type>;
-
+    
+    void WaitForAll(); 
     void Shutdown();
-
+    
 private:
     std::vector<std::thread> workers_;
     std::queue<std::function<void()>> tasks_;
@@ -28,6 +29,9 @@ private:
     std::mutex queue_mutex_;
     std::condition_variable condition_;
     std::atomic<bool> stop_;
+
+    std::atomic<size_t> active_tasks_{0};
+    std::condition_variable wait_condition_;
 };
 
 // Submit implementation must be in header (template)

@@ -128,7 +128,7 @@ int IMS_interface::write_sstable(hostInfo *request, uint8_t *buffer) {
         pr_info("Failed to write block to LBN %lu for file: %s", lbn, filename.c_str());
         return OPERATION_FAILURE;
     }
-
+    pr_info("Write success return");
     return OPERATION_SUCCESS;
 }
 
@@ -313,6 +313,7 @@ int IMS_interface::init_IMS() {
     logManager_->logOffset = sp_ptr_old_->logOffset;
 
     free(buffer);
+    pr_info("Initialize LBN pool success");
     return OPERATION_SUCCESS;
 }
 

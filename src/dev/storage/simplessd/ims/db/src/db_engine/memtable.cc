@@ -38,6 +38,7 @@ void MemTable::Dump() const {
     auto iter = skiplist_.GetIterator();
     iter.SeekToFirst();
     std::cout << "== MemTable Dump ==" << std::endl;
+    std::cout << "Total Nodes: " << skiplist_.get_node_num() << std::endl;
     while (iter.Valid()) {
         const auto& record = iter.record();
         const auto& key = record.internal_key;

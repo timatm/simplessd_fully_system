@@ -36,18 +36,18 @@ void fill_uint64_to_dwords(uint64_t input, uint32_t* dwords_out) {
     dwords_out[1] = high;
 }
 
-int nvme_ims_init(){
+int NVMe::nvme_ims_init(){
     int err = ims.init_IMS();
     return err;
 }
 
-int nvme_ims_close(){
+int NVMe::nvme_ims_close(){
     int err = 0;
     err = ims.close_IMS();
     return err;
 }
 
-int nvme_write_sstable(sstable_info info,char *buffer){
+int NVMe::nvme_write_sstable(sstable_info info,char *buffer){
     if(buffer == nullptr){
         pr("Write sstable failed ,data buffer is nullptr");
         return COMMAND_FAILD;
@@ -57,7 +57,7 @@ int nvme_write_sstable(sstable_info info,char *buffer){
     err = ims.write_sstable(&req,reinterpret_cast<uint8_t*>(buffer));
     return err;
 }
-int nvme_write_log(uint64_t lpn,char *buffer){
+int NVMe::nvme_write_log(uint64_t lpn,char *buffer){
     if(buffer == nullptr){
         pr("Write sstable failed ,data buffer is nullptr");
         return COMMAND_FAILD;
@@ -69,7 +69,7 @@ int nvme_write_log(uint64_t lpn,char *buffer){
 }
 
 
-int nvme_read_sstable(std::string filename,char *buffer){
+int NVMe::nvme_read_sstable(std::string filename,char *buffer){
     if(buffer == nullptr){
         pr("Write sstable failed ,data buffer is nullptr");
         return COMMAND_FAILD;
@@ -81,7 +81,7 @@ int nvme_read_sstable(std::string filename,char *buffer){
 }
 
 
-int nvme_read_log(uint64_t lpn,char *buffer){
+int NVMe::nvme_read_log(uint64_t lpn,char *buffer){
     if(buffer == nullptr){
         pr("Write sstable failed ,data buffer is nullptr");
         return COMMAND_FAILD;
@@ -93,7 +93,7 @@ int nvme_read_log(uint64_t lpn,char *buffer){
 
 
 
-int nvme_allcate_lbn(char *buffer){
+int NVMe::nvme_allcate_lbn(char *buffer){
     if(buffer == nullptr){
         pr("Allcate LBN failed ,data buffer is nullptr");
         return COMMAND_FAILD;

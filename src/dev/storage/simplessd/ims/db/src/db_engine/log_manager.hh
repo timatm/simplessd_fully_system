@@ -5,10 +5,10 @@
 #include <cstdint>
 #include <string>
 #include "record.hh"
-
+#include "nvme_interface.hh"
 class LOG_MANAGER {
 public:
-    LOG_MANAGER();
+    LOG_MANAGER(NVMe& nvme);
     ~LOG_MANAGER() = default;
     //TODO
     void init();
@@ -26,6 +26,7 @@ private:
     std::string buffer_;
     void allocate_lbn();  // 模擬向裝置請求新的 LBN
     void flush_buffer();
+    NVMe& nvme_;
 };
 
 #endif  // LOG_MANAGER_HH
