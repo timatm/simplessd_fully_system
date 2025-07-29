@@ -39,7 +39,15 @@ int main() {
     db.getSSTable()->waitAllTasksDone();
     db.dump_memtable();
     db.dump_lsmtree();
-    
+    char * buffer = (char *)allocateAligned(BLOCK_SIZE);
+    db.getSSTable()->readSSTable("00000000000000000000000000000000000",buffer);
+    db.getSSTable()->waitAllTasksDone();
+    std::set<InternalKey ,InternalKeyComparator> keys = db.parse_sstable(buffer);
+    for(auto internalkey:keys){
+        std::cout << internalkey.key.toString() << "  ";
+    }
+    std::cout << std::endl;
+    free(buffer);
     return 0;
 }
 

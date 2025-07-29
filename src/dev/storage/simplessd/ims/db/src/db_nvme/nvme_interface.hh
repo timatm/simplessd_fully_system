@@ -6,9 +6,7 @@
 
 class NVMe{
 public:
-    NVMe(){
-        ims.init_IMS();
-    }
+    NVMe() = default;
     int pass_io_command(nmc_config_t *config);
 
     int nvme_write_sstable(sstable_info ,char *buffer);

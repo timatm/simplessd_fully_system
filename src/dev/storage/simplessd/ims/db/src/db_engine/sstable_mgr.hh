@@ -23,7 +23,7 @@ public:
     ~SstableManager() = default;
     // TODO
     void init();
-    void readSSTable(const std::string& filename);
+    void readSSTable(const std::string& filename,char *buffer);
     void writeSSTable(uint8_t level,InternalKey minKey ,InternalKey maxKey,std::string sstable_buffer);
     void deleteSSTable(const std::string& filename);
     std::string packingTable(const SkipList<Record,RecordComparator> &skiplist);

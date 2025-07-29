@@ -42,8 +42,7 @@ std::string InternalKey::Encode() const {
 }
 
 // Decode from binary string
-InternalKey InternalKey::Decode(const std::string& buf) {
-    assert(buf.size() == sizeof(InternalKey));  // precise check
+InternalKey InternalKey::Decode(const std::string buf) {
     InternalKey ik;
     size_t offset = 0;
 
@@ -88,4 +87,15 @@ void InternalKey::dump() const {
               << (info.type == static_cast<uint8_t>(ValueType::kTypeValue) ? "Put" : "Deletion") << ")\n";
 
     std::cout << "=========================\n";
+}
+
+bool InternalKey::operator()(const InternalKey& a,const InternalKey& b) const{
+uint8_t size = std::min(a.key.key_size,b.key.key_size);
+if(memcmp(a.key.key,b.key.key,size) != 0){
+    return a.key.key > b.key.key;
+}
+if(a.key.key_size != b.key.key_size){
+    return a.key.key_size > b.key.key_size;
+}
+return a.info.seq > b.info.seq;
 }

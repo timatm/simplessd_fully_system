@@ -32,7 +32,7 @@ IMS_interface::IMS_interface() {
 
     lsmTree_ = std::make_unique<LSMTree>(tree_);
 
-    pr_info("IMS_interface constructed successfully.");
+    init_IMS();
 }
 
 

@@ -75,11 +75,13 @@ struct InternalKey {
             uint64_t type : 8;
         };
     } info;
+
+    bool operator()(const InternalKey& a,const InternalKey& b) const;
     InternalKey();
     InternalKey(const std::string& user_key, uint64_t seq, ValueType t);
     InternalKey(const std::string& user_key, uint32_t lpn,uint32_t offset,uint64_t seq, ValueType t);
     std::string Encode() const;
-    static InternalKey Decode(const std::string& buf);
+    static InternalKey Decode(const std::string buf);
     std::string UserKey() const;
     void dump() const;
 

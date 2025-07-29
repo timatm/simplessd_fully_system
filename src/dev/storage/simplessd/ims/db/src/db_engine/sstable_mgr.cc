@@ -15,13 +15,13 @@ std::string SstableManager::packingTable(const SkipList<Record, RecordComparator
     switch (packing_type_)
     {
         case 0:
-            package = keyPerPagePacking(skiplist);
+            package = std::string(keyPerPagePacking(skiplist), BLOCK_SIZE);
             break;
         case 1:
-            package = keyHashPacking(skiplist);
+            package = std::string(keyHashPacking(skiplist),BLOCK_SIZE);
             break;
         case 2:
-            package = keyRangePacking(skiplist);
+            package = std::string(keyRangePacking(skiplist),BLOCK_SIZE);
             break;
         default:
             break;
@@ -162,26 +162,23 @@ std::string SstableManager::generateFilename(uint32_t seq) {
 
 void SstableManager::init() {}
 
-void SstableManager::readSSTable(const std::string& filename) {
-    const size_t buffer_size = IMS_PAGE_NUM * IMS_PAGE_SIZE;
-    char* read_buffer = static_cast<char*>(std::aligned_alloc(4096, buffer_size));
-    if (!read_buffer) {
+void SstableManager::readSSTable(const std::string& filename,char *buffer) {
+    
+    if (!buffer) {
         std::cerr << "Failed to allocate buffer for reading SSTable\n";
         return;
     }
 
-    // 背景讀取任務提交給 thread pool
-    thread_pool_.Submit([filename, read_buffer, this]() {
+    thread_pool_.Submit([filename, buffer, this]() {
         std::cout << "Reading SSTable from: " << filename << std::endl;
 
-        int err = nvme_.nvme_read_sstable(filename, read_buffer);
+        int err = nvme_.nvme_read_sstable(filename, buffer);
         if (err == COMMAND_FAILD) {
             std::cerr << "[Thread] Failed to read SSTable: " << filename << std::endl;
-            std::free(read_buffer);  // 釋放資源
+            std::free(buffer);
             return;
         }
         std::cout << "[Thread] Read success: " << filename << std::endl;
-        std::free(read_buffer);  // 釋放資源
     });
 
     std::cout << "[Main] Async read dispatched.\n";

@@ -30,6 +30,7 @@ public:
     MemTable* getImmutMemTable(){return immutable_memtable_.get();}
     LOG_MANAGER* getLogManager(){return logManager_.get();}
     SstableManager* getSSTable(){return sstableManager_.get();}
+    std::set<InternalKey,InternalKeyComparator> parse_sstable(char *);
 
 private:
     
@@ -39,6 +40,6 @@ private:
     std::unique_ptr<LOG_MANAGER> logManager_;
     std::atomic<uint64_t> global_seq_{0}; 
     std::unique_ptr<SstableManager> sstableManager_;
-
+    
 };
 #endif

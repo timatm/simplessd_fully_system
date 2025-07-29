@@ -73,8 +73,7 @@ enum class SelectT {
 #define SELECT_POLICT (static_cast<int>(SelectT::MYPOLICY))
 
 
-// Enable : 1
-// Disable: 0
+// Enable / Disable = 1 / 0
 #define ENABLE_DISK 1
 
 
@@ -100,12 +99,12 @@ enum class SelectT {
 #define INVALID_KEYRANGE 0xFFFFFFFF
 #define INVALID_LEVEL -1
 #define INVALID_CHANNEL -1
-
+#define INVALID_KEY_TYPE 0xFF
 
 
 struct hostInfo {
     uint64_t lbn;
-    std::string filename; // SStable file name size has limit, read mappingEntry struct for more info
+    std::string filename; // file name size <= 36 SStable file name size has limit, read mappingEntry struct for more info
     int levelInfo;
     int channelInfo;
     Key rangeMin;

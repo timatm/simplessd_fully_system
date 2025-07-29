@@ -67,7 +67,7 @@ int Disk::writePage(uint64_t lpn,const uint8_t * buffer) {
         throw std::runtime_error("Seek failed.");
         return -1;
     }
-    std::cout << "Write offset is " << offset << std::endl;
+    // std::cout << "Write offset is " << offset << std::endl;
     size_t writtenBytes = std::fwrite(buffer, 1, IMS_PAGE_SIZE, file_);
     if (writtenBytes != IMS_PAGE_SIZE) {
         std::cerr << "[ERROR] fwrite failed: only wrote " << writtenBytes << " bytes, expected " << IMS_PAGE_SIZE << std::endl;

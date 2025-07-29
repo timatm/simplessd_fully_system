@@ -19,8 +19,9 @@ Status API::put(std::string key ,std::string value){
     if (memtable_->memTableIsFull()) {
         immutable_memtable_ = std::move(memtable_);
         memtable_ = std::make_unique<MemTable>();
+        
         std::string buffer( sstableManager_->packingTable(immutable_memtable_->GetSkipList()) );
-        assert(buffer.size() != BLOCK_SIZE);
+        assert(buffer.size() == BLOCK_SIZE);
         if (buffer.empty()) {
             std::cerr << "[ERROR] packingTable returned empty buffer!" << std::endl;
             return Status::IOError("Packing failed");
@@ -36,6 +37,26 @@ Status API::put(std::string key ,std::string value){
     Record internal_value(internal_key,value);
     memtable_->Put(internal_value);
     return Status::OK();
+}
+
+
+
+std::set<InternalKey ,InternalKeyComparator> API::parse_sstable(char* buffer) {
+    size_t offset = 0;
+    std::set<InternalKey ,InternalKeyComparator> keys;
+
+    while (offset + sizeof(InternalKey) <= BLOCK_SIZE) {
+        InternalKey key;
+        std::string buf(buffer ,BLOCK_SIZE);
+        key = InternalKey::Decode(buffer + offset);
+        offset += sizeof(InternalKey);
+        if(key.info.type == INVALID_KEY_TYPE){
+            continue;
+        }
+        keys.insert(key);
+    }
+
+    return keys;
 }
 
 
