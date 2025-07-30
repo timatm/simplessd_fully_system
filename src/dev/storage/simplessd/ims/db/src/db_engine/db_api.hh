@@ -33,7 +33,7 @@ public:
     std::set<InternalKey,InternalKeyComparator> parse_sstable(char *);
 
 private:
-    
+    std::unique_ptr<LSMTree> lsmTree_;
     PackingType packing_;
     std::unique_ptr<MemTable> memtable_;
     std::unique_ptr<MemTable> immutable_memtable_;

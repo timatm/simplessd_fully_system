@@ -18,8 +18,8 @@
  */
 
 #include "util/disk.hh"
-#include "ims/firmware/def.hh"
-#include "ims/firmware/print.hh"
+#include "ims/include/def.hh"
+#include "ims/include/print.hh"
 #include <cstring>
 
 

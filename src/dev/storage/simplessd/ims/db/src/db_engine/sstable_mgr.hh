@@ -16,10 +16,11 @@
 #include "tree.hh"
 #include "thread.hh"
 #include "nvme_interface.hh"
+#include "lsmtree.hh"
 class SstableManager {
 public:
     SstableManager() = default;
-    SstableManager(NVMe& nvme):nvme_(nvme){}
+    SstableManager(NVMe& nvme,LSMTree& tree):nvme_(nvme) , lsmTree_(tree){}
     ~SstableManager() = default;
     // TODO
     void init();
@@ -27,8 +28,8 @@ public:
     void writeSSTable(uint8_t level,InternalKey minKey ,InternalKey maxKey,std::string sstable_buffer);
     void deleteSSTable(const std::string& filename);
     std::string packingTable(const SkipList<Record,RecordComparator> &skiplist);
-    void dump_lsmtere() const {
-        lsmTree_.dump();
+    void dump(){
+        lsmTree_.dump_lsmtere();
     }
     void waitAllTasksDone() {
         thread_pool_.WaitForAll();
@@ -36,7 +37,7 @@ public:
 private:
     int packing_type_ = static_cast<int>(PackingType::kKeyPerPage);
     ThreadPool thread_pool_{1};
-    Tree lsmTree_;
+    LSMTree& lsmTree_;
     mutable std::mutex tree_mutex_;
     NVMe& nvme_;
     std::atomic<uint32_t> sequenceNumber_ = 0; // Sequence number for SSTables

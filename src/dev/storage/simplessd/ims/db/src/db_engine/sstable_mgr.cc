@@ -215,7 +215,7 @@ void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey
                                             info.max);
         {
             std::unique_lock<std::mutex> lock(tree_mutex_);
-            lsmTree_.insert_node(node);
+            lsmTree_.insert_sstable(node);
         }
         
 

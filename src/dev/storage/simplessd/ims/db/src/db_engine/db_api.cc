@@ -1,14 +1,16 @@
 #include "db_api.hh"
 #include "nvme_interface.hh"
 #include "IMS_interface.hh"
+#include "lsmtree.hh"
 API::API(){
+    lsmTree_ = std::make_unique<LSMTree>();
     nvme_ = std::make_unique<NVMe>();
     packing_ = PACKING_T;
     memtable_ = std::make_unique<MemTable>();
     immutable_memtable_ = nullptr;
     logManager_ = std::make_unique<LOG_MANAGER>(*nvme_);
     global_seq_ = 0;
-    sstableManager_ = std::make_unique<SstableManager>(*nvme_);
+    sstableManager_ = std::make_unique<SstableManager>(*nvme_,*lsmTree_);
 }
 
 
@@ -71,7 +73,7 @@ void API::dump_memtable() {
 
 void API::dump_lsmtree(){
     if(sstableManager_){
-        sstableManager_->dump_lsmtere();
+        sstableManager_->dump();
     } else {
         std::cout << "SSTable Manager is not initialized." << std::endl;
     }

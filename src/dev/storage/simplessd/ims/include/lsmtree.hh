@@ -11,11 +11,13 @@ public:
     std::queue<std::shared_ptr<TreeNode>> search_key(const Key& key);
     std::vector<int> get_relate_ch_info(std::shared_ptr<TreeNode> node);
 
-    // 延伸行為建議：
     void insert_sstable(std::shared_ptr<TreeNode> node); 
     void remove_sstable(std::shared_ptr<TreeNode> node);     
     std::shared_ptr<TreeNode> find_node(const std::string& filename, int level, const Key& min, const Key& max);
     std::shared_ptr<TreeNode> find_node(const std::string& filename);
+    void dump_lsmtere() const {
+        tree_->dump();
+    }
 private:
     std::shared_ptr<Tree> tree_;
 };
