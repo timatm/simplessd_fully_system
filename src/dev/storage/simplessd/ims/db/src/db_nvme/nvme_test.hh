@@ -1,0 +1,26 @@
+#ifndef NVME_INTERFACE_HH
+#define NVME_INTERFACE_HH
+
+#include "nvme_interface.hh"
+
+class MyNVMeDriver : public INVMEDriver {
+public:
+
+    int nvme_write_sstable(sstable_info ,char *buffer) override;
+    int nvme_read_sstable(std::string ,char *buffer) override;
+    int nvme_ims_init() override;
+    int nvme_ims_close() override;
+
+    int nvme_open_DB(uint8_t *buffer) override;
+    int nvme_close_DB() override;
+
+    int nvme_write_log(uint64_t lpn ,char *buffer) override;
+    int nvme_read_log(uint64_t lpn ,char *buffer) override;
+    int nvme_allcate_lbn(char *buffer) override;
+    int nvme_dump_ims() override;
+
+private:
+    IMS_interface ims;
+};
+
+#endif // NVME_INTERFACE_HH

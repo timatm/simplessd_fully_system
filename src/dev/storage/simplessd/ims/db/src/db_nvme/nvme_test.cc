@@ -4,7 +4,7 @@ extern "C" {
 }
 #include <fcntl.h>
 #include "debug.hh"
-#include "nvme_interface.hh"
+#include "nvme_test.hh"
 #include "IMS_interface.hh"
 #include <stdio.h>
 #include <unistd.h>
@@ -15,39 +15,20 @@ extern "C" {
 #include <array>
 #include <cstdint>
 
-IMS_interface ims;
 
-void fill_filename_to_dwords(const std::string& filename, uint32_t* dwords_out) {
-    std::array<uint8_t, 20> raw = {0}; 
-    std::memcpy(raw.data(), filename.data(), std::min(filename.size(), raw.size()));
 
-    for (int i = 0; i < 5; ++i) {
-        dwords_out[i] = 
-            (static_cast<uint32_t>(raw[i*4 + 3]) << 24 ) |
-            (static_cast<uint32_t>(raw[i*4 + 2]) << 16 ) |
-            (static_cast<uint32_t>(raw[i*4 + 1]) << 8  ) |
-            (static_cast<uint32_t>(raw[i*4 + 0]) << 0  ) ;
-    }
-}
-void fill_uint64_to_dwords(uint64_t input, uint32_t* dwords_out) {
-    uint32_t low  = (uint32_t)input;
-    uint32_t high = (uint32_t)(input >> 32);
-    dwords_out[0] = low;
-    dwords_out[1] = high;
-}
-
-int NVMe::nvme_ims_init(){
+int MyNVMeDriver::nvme_ims_init() {
     int err = ims.init_IMS();
     return err;
 }
 
-int NVMe::nvme_ims_close(){
+int MyNVMeDriver::nvme_ims_close(){
     int err = 0;
     err = ims.close_IMS();
     return err;
 }
 
-int NVMe::nvme_write_sstable(sstable_info info,char *buffer){
+int MyNVMeDriver::nvme_write_sstable(sstable_info info,char *buffer){
     if(buffer == nullptr){
         pr("Write sstable failed ,data buffer is nullptr");
         return COMMAND_FAILD;
@@ -57,7 +38,8 @@ int NVMe::nvme_write_sstable(sstable_info info,char *buffer){
     err = ims.write_sstable(&req,reinterpret_cast<uint8_t*>(buffer));
     return err;
 }
-int NVMe::nvme_write_log(uint64_t lpn,char *buffer){
+int MyNVMeDriver::nvme_write_log(uint64_t lpn,char *buffer){
+    pr_info("Write log to LPN: %lu", lpn);
     if(buffer == nullptr){
         pr("Write sstable failed ,data buffer is nullptr");
         return COMMAND_FAILD;
@@ -69,7 +51,7 @@ int NVMe::nvme_write_log(uint64_t lpn,char *buffer){
 }
 
 
-int NVMe::nvme_read_sstable(std::string filename,char *buffer){
+int MyNVMeDriver::nvme_read_sstable(std::string filename,char *buffer){
     if(buffer == nullptr){
         pr("Write sstable failed ,data buffer is nullptr");
         return COMMAND_FAILD;
@@ -81,9 +63,9 @@ int NVMe::nvme_read_sstable(std::string filename,char *buffer){
 }
 
 
-int NVMe::nvme_read_log(uint64_t lpn,char *buffer){
+int MyNVMeDriver::nvme_read_log(uint64_t lpn,char *buffer){
     if(buffer == nullptr){
-        pr("Write sstable failed ,data buffer is nullptr");
+        pr("Read sstable failed ,data buffer is nullptr");
         return COMMAND_FAILD;
     }
     int err;
@@ -91,9 +73,13 @@ int NVMe::nvme_read_log(uint64_t lpn,char *buffer){
     return err;
 }
 
+int MyNVMeDriver::nvme_dump_ims(){
+    int err;
+    err = ims.dump_IMS();
+    return err;
+}
 
-
-int NVMe::nvme_allcate_lbn(char *buffer){
+int MyNVMeDriver::nvme_allcate_lbn(char *buffer){
     if(buffer == nullptr){
         pr("Allcate LBN failed ,data buffer is nullptr");
         return COMMAND_FAILD;
@@ -101,4 +87,18 @@ int NVMe::nvme_allcate_lbn(char *buffer){
     int err;
     err = ims.allocate_block(reinterpret_cast<uint64_t*>(buffer));
     return err;
+}
+
+int MyNVMeDriver::nvme_open_DB(uint8_t *buffer){
+    if (buffer == nullptr) {
+        pr("Open DB failed: null buffer");
+        return OPERATION_FAILURE;
+    }
+    int err;
+    err = ims.open_DB(buffer, DB_PAGE_SIZE);
+    return err;
+}
+int MyNVMeDriver::nvme_close_DB(){
+    std::cout << "Close DB with buffer size: " <<  std::endl;
+    return OPERATION_SUCCESS;
 }

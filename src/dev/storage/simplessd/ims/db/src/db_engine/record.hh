@@ -6,10 +6,9 @@
 
 #pragma pack(push, 1) 
 struct Record {
-    uint16_t internal_key_size;
-    InternalKey internal_key;
-
+    uint32_t internal_key_size;
     uint32_t value_size;
+    InternalKey internal_key;
     std::string value;
 
     Record() = default;

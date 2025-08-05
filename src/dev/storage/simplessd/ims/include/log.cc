@@ -66,7 +66,7 @@ int Log::flush_logRecordList() {
         return OPERATION_SUCCESS;
     }
 
-    uint64_t lpn = LBN2LPN(sp_old_->log_store);
+    uint32_t lpn = LBN2LPN(sp_old_->log_store);
     uint8_t* buffer = (uint8_t*)malloc(IMS_PAGE_SIZE);
     if (!buffer) return OPERATION_FAILURE;
 
@@ -75,7 +75,7 @@ int Log::flush_logRecordList() {
     int index = 0;
 
     while (!logRecordList.empty()) {
-        uint64_t lbn = logRecordList.front();
+        uint32_t lbn = logRecordList.front();
         logRecordList.pop_front();
 
         if (lbn == INVALIDLBN) {
@@ -85,7 +85,7 @@ int Log::flush_logRecordList() {
 
         logRecordPtr->lbn[index++] = lbn;
 
-        if (index == IMS_PAGE_SIZE / sizeof(uint64_t)) {
+        if (index == IMS_PAGE_SIZE / sizeof(uint32_t)) {
             if (persistence_.pDisk_->writePage(lpn++, buffer)) {
                 pr_info("Flush failed at full log page");
                 free(buffer);
@@ -137,4 +137,28 @@ void Log::dump() const {
 
 void Log::clear(){
     logRecordList.clear();
+}
+
+std::string Log::encode() const {
+    std::string buf;
+    for (uint32_t val : logRecordList) {
+        for (int i = 0; i < 4; ++i) {
+            buf += static_cast<char>((val >> (i * 8)) & 0xFF);  // Little Endian
+        }
+    }
+    return buf;
+}
+
+bool Log::decode(const std::string& buf) {
+    if (buf.size() % 4 != 0) return false;
+    logRecordList.clear();
+
+    for (size_t i = 0; i < buf.size(); i += 4) {
+        uint32_t val = 0;
+        for (int j = 0; j < 4; ++j) {
+            val |= static_cast<uint8_t>(buf[i + j]) << (j * 8);  // Little Endian
+        }
+        logRecordList.push_back(val);
+    }
+    return true;
 }

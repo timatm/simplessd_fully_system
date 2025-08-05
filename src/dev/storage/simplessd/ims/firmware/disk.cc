@@ -74,7 +74,7 @@ int Disk::writePage(uint64_t lpn,const uint8_t * buffer) {
         perror("fwrite");
         throw std::runtime_error("Write error.");
     }
-
+    pr_info("Write page at LPN: %lu is success", lpn);
     std::fflush(file_);
     return 0;
 }

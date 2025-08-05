@@ -19,7 +19,7 @@ void MemTable::Put(const Record &rec) {
 
 std::optional<std::string> MemTable::Get(const std::string& user_key) const {
     SkipList<Record, RecordComparator>::Iterator iter = skiplist_.GetIterator();
-    InternalKey lookup(user_key, UINT64_MAX, ValueType::kTypeValue);  // 最大 seq，保證找最新
+    InternalKey lookup(user_key, UINT64_MAX, ValueType::kTypeValue); 
     Record lookup_rec(lookup, "");
 
     iter.Seek(lookup_rec);

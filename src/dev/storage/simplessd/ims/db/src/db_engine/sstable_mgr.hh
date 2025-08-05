@@ -20,7 +20,7 @@
 class SstableManager {
 public:
     SstableManager() = default;
-    SstableManager(NVMe& nvme,LSMTree& tree):nvme_(nvme) , lsmTree_(tree){}
+    SstableManager(INVMEDriver& nvme,LSMTree& tree):nvme_(nvme) , lsmTree_(tree){}
     ~SstableManager() = default;
     // TODO
     void init();
@@ -28,6 +28,9 @@ public:
     void writeSSTable(uint8_t level,InternalKey minKey ,InternalKey maxKey,std::string sstable_buffer);
     void deleteSSTable(const std::string& filename);
     std::string packingTable(const SkipList<Record,RecordComparator> &skiplist);
+    void setSequenceNumber(uint32_t seq) {
+        sequenceNumber_ = seq;
+    }
     void dump(){
         lsmTree_.dump_lsmtere();
     }
@@ -39,7 +42,7 @@ private:
     ThreadPool thread_pool_{1};
     LSMTree& lsmTree_;
     mutable std::mutex tree_mutex_;
-    NVMe& nvme_;
+    INVMEDriver& nvme_;
     std::atomic<uint32_t> sequenceNumber_ = 0; // Sequence number for SSTables
     std::unordered_map<std::string, std::shared_ptr<std::deque<InternalKey>>> keyRangeMap; // sstable name -> key range per slot
     std::string generateFilename(uint32_t seq);
@@ -48,4 +51,12 @@ private:
     char* keyRangePacking(const SkipList<Record,RecordComparator> &skiplist);
 };
 
+static void* allocateAligned(size_t size) {
+    void* ptr = nullptr;
+    if (posix_memalign(&ptr, 4096, size) != 0 || ptr == nullptr) {
+        throw std::bad_alloc();
+    }
+    std::memset(ptr, 0, size);
+    return ptr;
+}
 #endif // __SSTABLE_MGR_HH__

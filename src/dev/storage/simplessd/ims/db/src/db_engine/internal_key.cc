@@ -7,6 +7,13 @@ InternalKey::InternalKey() {
     std::memset(this, 0, sizeof(InternalKey));
 }
 
+InternalKey::InternalKey(const std::string& user_key){
+    assert(user_key.size() <= 40);
+    key.key_size = static_cast<uint8_t>(user_key.size());
+    std::memcpy(key.key, user_key.data(), key.key_size);
+    std::memset(key.key + key.key_size, 0, 40 - key.key_size);
+}
+
 // UserKey + seq/type constructor
 InternalKey::InternalKey(const std::string& user_key, uint64_t seq, ValueType t) {
     assert(user_key.size() <= 40);
@@ -36,23 +43,61 @@ std::string InternalKey::Encode() const {
     std::string out;
     out.push_back(static_cast<char>(key.key_size));
     out.append(reinterpret_cast<const char*>(key.key), 40);
-    out.append(reinterpret_cast<const char*>(&value_ptr), sizeof(value_ptr));
-    out.append(reinterpret_cast<const char*>(info.raw), sizeof(info.raw));
+
+    // —— value_ptr：手動寫 15 bytes，保證不受 pack 影響 ——
+    out.append(reinterpret_cast<const char*>(&value_ptr.lpn),     4);
+    out.append(reinterpret_cast<const char*>(&value_ptr.offset),  4);
+    out.append(reinterpret_cast<const char*>(value_ptr.reserve),  7);
+
+    // —— meta：明確 cast ——  
+    uint64_t meta = (static_cast<uint64_t>(info.seq) << 8) |
+                    static_cast<uint8_t>(info.type);
+    out.append(reinterpret_cast<const char*>(&meta), sizeof(meta));
+
     return out;
 }
 
-// Decode from binary string
-InternalKey InternalKey::Decode(const std::string buf) {
-    InternalKey ik;
-    size_t offset = 0;
+InternalKey InternalKey::Decode(const std::string& buf) {
 
-    ik.key.key_size = static_cast<uint8_t>(buf[offset++]);
-    std::memcpy(ik.key.key, buf.data() + offset, 40); offset += 40;
-    std::memcpy(&ik.value_ptr, buf.data() + offset, sizeof(ik.value_ptr)); offset += sizeof(ik.value_ptr);
-    std::memcpy(ik.info.raw, buf.data() + offset, sizeof(ik.info.raw));
+    InternalKey ik{};
+    size_t off = 0;
+
+    ik.key.key_size = static_cast<uint8_t>(buf[off++]);
+    std::memcpy(ik.key.key, buf.data() + off, 40); off += 40;
+
+    std::memcpy(&ik.value_ptr.lpn,    buf.data() + off, 4); off += 4;
+    std::memcpy(&ik.value_ptr.offset, buf.data() + off, 4); off += 4;
+    std::memcpy( ik.value_ptr.reserve,buf.data() + off, 7); off += 7;
+
+    uint64_t meta;
+    std::memcpy(&meta, buf.data() + off, sizeof(meta));
+
+    ik.info.seq  = meta >> 8;
+    ik.info.type = static_cast<uint8_t>(meta & 0xFF);
+
     return ik;
 }
 
+InternalKey InternalKey::Decode(char* buf) {
+
+    InternalKey ik{};
+    size_t off = 0;
+
+    ik.key.key_size = static_cast<uint8_t>(buf[off++]);
+    std::memcpy(ik.key.key, buf + off, 40); off += 40;
+
+    std::memcpy(&ik.value_ptr.lpn,    buf + off, 4); off += 4;
+    std::memcpy(&ik.value_ptr.offset, buf + off, 4); off += 4;
+    std::memcpy( ik.value_ptr.reserve,buf + off, 7); off += 7;
+
+    uint64_t meta;
+    std::memcpy(&meta, buf + off, sizeof(meta));
+
+    ik.info.seq  = meta >> 8;
+    ik.info.type = static_cast<uint8_t>(meta & 0xFF);
+
+    return ik;
+}
 // Extract user key string
 std::string InternalKey::UserKey() const {
     return std::string(reinterpret_cast<const char*>(key.key), key.key_size);
@@ -67,6 +112,15 @@ bool InternalKeyComparator::operator()(const InternalKey& a, const InternalKey& 
         if (a.info.seq != b.info.seq)
             return a.info.seq > b.info.seq;  // higher seq first
         return a.info.type > b.info.type;    // higher type wins
+    }
+    return cmp < 0;
+}
+
+bool SetComparator::operator()(const InternalKey& a, const InternalKey& b) const {
+    int cmp = std::memcmp(a.key.key, b.key.key, std::min(a.key.key_size, b.key.key_size));
+    if (cmp == 0) {
+        if (a.key.key_size != b.key.key_size)
+            return a.key.key_size < b.key.key_size;
     }
     return cmp < 0;
 }

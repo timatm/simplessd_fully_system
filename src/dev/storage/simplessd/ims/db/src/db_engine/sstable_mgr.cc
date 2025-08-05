@@ -29,14 +29,7 @@ std::string SstableManager::packingTable(const SkipList<Record, RecordComparator
     return package;
 }
 
-static void* allocateAligned(size_t size) {
-    void* ptr = nullptr;
-    if (posix_memalign(&ptr, 4096, size) != 0 || ptr == nullptr) {
-        throw std::bad_alloc();
-    }
-    std::memset(ptr, 0, size);
-    return ptr;
-}
+
 
 // forward declare HashModN (assume in another file)
 size_t HashModN(const InternalKey& ikey, size_t n) {
@@ -226,4 +219,6 @@ void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey
 }
 
 
-void SstableManager::deleteSSTable(const std::string& filename) {}
+void SstableManager::deleteSSTable(const std::string& filename) {
+
+}

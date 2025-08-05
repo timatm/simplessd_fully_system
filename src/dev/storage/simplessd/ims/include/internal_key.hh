@@ -47,6 +47,22 @@ struct Key {
         std::cout << "Key: " << toString()
                   << " (size: " << +key_size << ")" << std::endl;
     }
+    std::string encode() const {
+        std::string out;
+        out += static_cast<char>(key_size);
+        out.append(reinterpret_cast<const char*>(key), 40);
+        return out;
+    }
+    static Key decode(const char* data) {
+        Key result;
+        result.key_size = static_cast<uint8_t>(data[0]);
+        std::memcpy(result.key, data + 1, 40);
+        return result;
+    }
+
+    std::string to_string() const {
+        return std::string(reinterpret_cast<const char*>(key), key_size);
+    }
 };
 
 #pragma pack(push,1)
@@ -78,19 +94,27 @@ struct InternalKey {
 
     bool operator()(const InternalKey& a,const InternalKey& b) const;
     InternalKey();
+    InternalKey(const std::string& user_key);
     InternalKey(const std::string& user_key, uint64_t seq, ValueType t);
     InternalKey(const std::string& user_key, uint32_t lpn,uint32_t offset,uint64_t seq, ValueType t);
     std::string Encode() const;
-    static InternalKey Decode(const std::string buf);
+    static InternalKey Decode(const std::string& buf);
+    static InternalKey Decode(char* buf);
     std::string UserKey() const;
     void dump() const;
 
 };
 #pragma pack(pop)
 static_assert(sizeof(InternalKey) == 64, "InternalKey must be 64 bytes");
-
+static_assert(sizeof(InternalKey::value_ptr) == 15,
+              "value_ptr must be 15 bytes; verify every TU has pragma pack(1)");
 struct InternalKeyComparator {
     bool operator()(const InternalKey& a, const InternalKey& b) const;
 };
+
+struct SetComparator {
+    bool operator()(const InternalKey& a, const InternalKey& b) const;
+};
+
 
 #endif  // INTERNAL_KEY_HH

@@ -64,7 +64,8 @@ void Mapping::insert_mapping(const std::string& filename, uint64_t lbn) {
     auto& list = lbnPool_.get_freeLBNList_ref(LBN2CH(lbn)); 
     auto it = std::find(list.begin(), list.end(), lbn);
     if (it == list.end()) {
-        pr_info("Free list does not have LBN: %llu", lbn);
+        pr_debug("Free list does not have LBN: %llu(CH:%d)", lbn,LBN2CH(lbn));
+        return;
     }
 
     lbnPool_.remove_freeLBNList(lbn);

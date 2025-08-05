@@ -20,19 +20,24 @@ class API {
 public:
     API();
     ~API() = default;
-    std::unique_ptr<NVMe> nvme_;
-    void get();
+    std::unique_ptr<INVMEDriver> nvme_;
+    Status open();
+    Status get(std::string key ,std::string& vlaue);
+    Status delete_key(std::string key ,std::string& vlaue);
     Status put(std::string key ,std::string value);
     void dump_memtable();
     void dump_lsmtree();
-
+    void dump_log_manager();
+    void dump_all();
     MemTable* getMemTable(){return memtable_.get();}
     MemTable* getImmutMemTable(){return immutable_memtable_.get();}
     LOG_MANAGER* getLogManager(){return logManager_.get();}
     SstableManager* getSSTable(){return sstableManager_.get();}
-    std::set<InternalKey,InternalKeyComparator> parse_sstable(char *);
+    LSMTree* getLSMTree(){return lsmTree_.get();}
+    std::set<InternalKey,SetComparator> parse_sstable(char *);
 
 private:
+    std::shared_ptr<Tree> tree_;
     std::unique_ptr<LSMTree> lsmTree_;
     PackingType packing_;
     std::unique_ptr<MemTable> memtable_;

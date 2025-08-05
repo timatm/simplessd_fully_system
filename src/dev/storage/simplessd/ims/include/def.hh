@@ -1,6 +1,6 @@
 #ifndef __DEF_HH__
 #define __DEF_HH__
-
+#include <optional>
 #include "internal_key.hh"
 #include "print.hh"
 #include <cstdint>
@@ -76,6 +76,8 @@ enum class SelectT {
 // Enable / Disable = 1 / 0
 #define ENABLE_DISK 1
 
+// Enable NVMe driver = 0 / 1  (my NVMe driver) / (simplessd NVMe driver)
+#define NVME_DRIVER 0
 
 
 
@@ -103,7 +105,7 @@ enum class SelectT {
 
 
 struct hostInfo {
-    uint64_t lbn;
+    uint32_t lbn;
     std::string filename; // file name size <= 36 SStable file name size has limit, read mappingEntry struct for more info
     int levelInfo;
     int channelInfo;
@@ -136,8 +138,8 @@ struct hostInfo {
 
 
 struct valueLogInfo{
-    uint64_t lbn;  // This log store in which LBN
-    uint64_t page_offset; // This log store in which LPN
+    uint32_t lbn;  // This log store in which LBN
+    uint32_t page_offset; // This log store in which LPN
     valueLogInfo(uint64_t l,uint64_t p):
         lbn(l),
         page_offset(p){}
@@ -154,6 +156,8 @@ struct super_page{
     uint64_t nextLogLBN;        
     uint64_t logOffset;
     uint64_t usedLBN_num;
+    uint64_t global_sequence;
+    uint64_t sstable_sequence;
     uint8_t lastUsedChannel;
 
     static constexpr size_t header_size =
@@ -166,7 +170,9 @@ struct super_page{
         sizeof(nextLogLBN) +
         sizeof(logOffset) +
         sizeof(usedLBN_num) +
-        sizeof(lastUsedChannel);
+        sizeof(lastUsedChannel) +
+        sizeof(global_sequence) +
+        sizeof(sstable_sequence);
     uint8_t reserved[IMS_PAGE_SIZE - header_size];
     super_page(uint64_t m,uint64_t mapping_store,uint64_t log_store):
         magic(m),
@@ -191,6 +197,8 @@ struct super_page{
         std::cout << "logOffset         : " << logOffset << std::endl;
         std::cout << "usedLBN_num       : " << usedLBN_num << std::endl;
         std::cout << "lastUsedChannel   : " << static_cast<int>(lastUsedChannel) << std::endl;
+        std::cout << "global_sequence   : " << global_sequence << std::endl;
+        std::cout << "sstable_sequence  : " << sstable_sequence << std::endl;
         std::cout << "===================================" << std::endl;
     }
 
@@ -310,7 +318,7 @@ static_assert(sizeof(SStableFormat) == BLOCK_SIZE ,"SStableFormat must be same t
 
 #pragma pack(push, 1)
 struct logLBNListRecord {
-    uint64_t lbn[IMS_PAGE_SIZE / sizeof(uint64_t)]; // The LBN of the log record
+    uint32_t lbn[IMS_PAGE_SIZE / sizeof(uint32_t)]; // The LBN of the log record
 };
 
 static_assert(sizeof(logLBNListRecord) == IMS_PAGE_SIZE, "logLBNListRecord must be same to page size");
@@ -323,6 +331,32 @@ struct logRecord{
 };
 #pragma pack(pop)
 // [Log file setting end]
+
+
+
+struct  DB_INIT {
+    // struct{
+    //     uint32_t magic;
+    //     uint32_t payload_size;
+    // }header;
+    uint64_t sstable_seq;
+    uint64_t global_seq;
+    uint32_t next_lbn;
+    uint32_t current_lbn;
+    uint32_t page_offset;
+    std::string log_list;
+    std::string node_list;
+    DB_INIT() : 
+        sstable_seq(0), 
+        global_seq(0), 
+        next_lbn(0), 
+        current_lbn(0), 
+        page_offset(0) {}
+    void dump() const; 
+    std::string encode();
+    static std::optional<DB_INIT> decode(const std::string& buf);
+};
+
 
 
 #endif // __DEF_HH__

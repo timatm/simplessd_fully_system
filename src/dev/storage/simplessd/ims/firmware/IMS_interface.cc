@@ -228,6 +228,8 @@ int IMS_interface::rebuild_super_page() {
     sp_ptr_old_->log_page_num = 0;
     sp_ptr_old_->currentLogLBN = lbnPool_->RRpolicy();
     sp_ptr_old_->nextLogLBN = lbnPool_->RRpolicy();
+    get_logManager()->insert_logRecord(sp_ptr_old_->currentLogLBN);
+    get_logManager()->insert_logRecord(sp_ptr_old_->nextLogLBN);
     sp_ptr_old_->logOffset = 0;
     sp_ptr_old_->usedLBN_num = 0;
     lbnPool_->set_lastUsedChannel(0);
@@ -314,6 +316,8 @@ int IMS_interface::init_IMS() {
 
     free(buffer);
     pr_info("Initialize LBN pool success");
+    pr_info("Init_IMS is done");    
+    dump_all();
     return OPERATION_SUCCESS;
 }
 
@@ -381,18 +385,23 @@ int IMS_interface::close_IMS() {
 
     return OPERATION_SUCCESS;
 }
-
-
+int IMS_interface::init_DB(uint8_t *buffer){
+    uint32_t next_lbn = get_logManager()->nextLogLBN;
+    uint32_t current_lbn = get_logManager()->currentLogLBN;
+    uint32_t page_offset = get_logManager()->logOffset;
+    
+}
 // TODO now not complete still need to modify
 int IMS_interface::write_log(uint64_t lpn,uint8_t *buffer){
+    pr_info("Write log at LPN: %lu in IMS", lpn);
     if (buffer == nullptr) {
-        pr_info("Read log failed: null request or buffer");
+        pr_debug("Read log failed: null request or buffer");
         return OPERATION_FAILURE;
     }
     int err = OPERATION_SUCCESS;
-    // err = persistenceManager.writeLog(lpn,buffer,IMS_PAGE_SIZE);
+    err = get_persistenceManager()->writeLog(lpn,buffer,IMS_PAGE_SIZE);
     if( err != OPERATION_SUCCESS){
-        pr_info("Write value log failed at LPN %lu", lpn);
+        pr_debug("Write value log failed at LPN %lu", lpn);
     }
     return err;
 }
@@ -403,7 +412,7 @@ int IMS_interface::read_log(uint64_t lpn,uint8_t *buffer){
         return OPERATION_FAILURE;
     }
     int err = OPERATION_SUCCESS;
-    // err = persistenceManager.readLog(lpn,buffer,IMS_PAGE_SIZE);
+    err = get_persistenceManager()->readLog(lpn,buffer,IMS_PAGE_SIZE);
     if( err != OPERATION_SUCCESS){
         pr_info("Read value log failed at LPN %lu", lpn);
     }
@@ -439,4 +448,25 @@ int IMS_interface::reset_IMS(){
     return OPERATION_SUCCESS;
 }
 
+int IMS_interface::dump_IMS(){
+    dump_all();
+    return OPERATION_SUCCESS;
+}
 
+int IMS_interface::open_DB(uint8_t* buffer, size_t buffer_size) {
+    std::string result;
+    DB_INIT info;
+    info.current_lbn  = get_logManager()->currentLogLBN;
+    info.next_lbn     = get_logManager()->nextLogLBN;
+    info.page_offset  = get_logManager()->logOffset;
+    info.global_seq   = get_oldSuperPage()->global_sequence;
+    info.sstable_seq  = get_oldSuperPage()->sstable_sequence;
+    info.log_list     = get_logManager()->encode();
+    info.node_list    = get_lsmTree()->encode();
+    result = info.encode();
+
+    if (result.size() > buffer_size) return OPERATION_FAILURE;  
+    std::memcpy(buffer, result.data(), result.size());
+
+    return OPERATION_SUCCESS;
+}

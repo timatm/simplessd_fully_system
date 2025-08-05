@@ -237,8 +237,7 @@ uint64_t LBNPool::RRpolicy(){
 
     do {
         if (!freeLBNList_[ch].empty()) {
-            lbn = pop_freeLBNList(ch);
-            insert_usedLBNList(lbn);
+            lbn = getFront_freeLBNList(ch);
             lastUsedChannel_ = ch; 
             return lbn;
         }

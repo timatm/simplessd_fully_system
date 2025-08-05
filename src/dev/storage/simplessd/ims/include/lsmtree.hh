@@ -7,7 +7,9 @@ class LSMTree {
 public:
     explicit LSMTree(std::shared_ptr<Tree> tree)
         : tree_(std::move(tree)) {}
-
+    LSMTree(){
+        tree_ = std::make_shared<Tree>();
+    }
     std::queue<std::shared_ptr<TreeNode>> search_key(const Key& key);
     std::vector<int> get_relate_ch_info(std::shared_ptr<TreeNode> node);
 
@@ -18,6 +20,8 @@ public:
     void dump_lsmtere() const {
         tree_->dump();
     }
+    std::string encode() const{return tree_->encode();};
+    bool decode(const std::string& buf){ return tree_->decode(buf);};
 private:
     std::shared_ptr<Tree> tree_;
 };

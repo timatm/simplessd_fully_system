@@ -36,12 +36,14 @@ public:
     void insert_logRecord(uint64_t lbn);
     void remove_logRecord_head();
     int flush_logRecordList();
+    std::string encode() const;
+    bool decode(const std::string& buf);
     void clear();
     void dump() const;
-    std::deque<uint64_t> logRecordList;
-    uint64_t currentLogLBN = INVALIDLBN;
-    uint64_t nextLogLBN = INVALIDLBN;
-    uint64_t logOffset = 0;
+    std::deque<uint32_t> logRecordList;
+    uint32_t currentLogLBN = INVALIDLBN;
+    uint32_t nextLogLBN = INVALIDLBN;
+    uint32_t logOffset = 0;
 
 private:
     Persistence& persistence_;

@@ -10,6 +10,10 @@
 
 #include <vector>
 #include <iostream>
+
+#include <optional>
+#include <stdexcept>
+
 #include "log.hh"
 #include "mapping_table.hh"
 #include "persistence.hh"
@@ -22,7 +26,7 @@
 class IMS_interface{
 public:
 #if RUNTYPE_SIMPLESSD
-        SimpleSSD::Disk disk_;
+    SimpleSSD::Disk disk_;
 #else
     Disk disk_;
 #endif
@@ -34,12 +38,22 @@ public:
     int search_key(Key key);
     int allocate_block(uint64_t *);
     int write_log(uint64_t,uint8_t *buffer);
-    int read_log(uint64_t,uint8_t *buffer); 
+    int read_log(uint64_t,uint8_t *buffer);
+    int close_DB();
+    int open_DB(uint8_t* buffer, size_t buffer_size);
+    
+
     int init_IMS();
     int close_IMS();
     int reset_IMS();
+    int init_DB(uint8_t *buffer);
+    int dump_IMS();
     // super_page* get_super_page_old() { return sp_ptr_old_; }
     // super_page* get_super_page_new() { return sp_ptr_new_; }
+    Persistence* get_persistenceManager() {return persistenceManager_.get() ;}
+    Log* get_logManager() {return logManager_.get() ;}
+    LSMTree* get_lsmTree() {return lsmTree_.get() ;}
+    super_page* get_oldSuperPage() {return sp_ptr_old_;}
 
     void dump_mapping(){mappingTable_->dump_mapping(); }
     void dump_lbn_pool(){lbnPool_->dump_LBNPool();}
@@ -51,8 +65,8 @@ public:
         dump_log_mannger();
         dump_lsm_tree();
     }
-
-private:
+    
+    private:
     void reset_superPage(super_page*);
     std::shared_ptr<Tree> tree_;
     std::unique_ptr<Log> logManager_;

@@ -1,15 +1,32 @@
 #include "lsmtree.hh"
+struct FilenameLess {
+    bool operator()(const std::shared_ptr<TreeNode>& a,
+                    const std::shared_ptr<TreeNode>& b) const {
+        return a->filename > b->filename; 
+    }
+};
 
 
 std::queue<std::shared_ptr<TreeNode>> LSMTree::search_key(const Key& key) {
+    auto dummy = std::make_shared<TreeNode>("dummy", 0, key, key);
     std::queue<std::shared_ptr<TreeNode>> result;
-
-    for (int level = 0; level < MAX_LEVEL; ++level) {
+    std::set<std::shared_ptr<TreeNode>,FilenameLess> level0_candidates;
+    const auto& nodes = tree_->get_level_nodes(0);
+    for(const auto& node:nodes){
+        if (compareKey(node->rangeMin, key) <= 0 && 
+            compareKey(node->rangeMax, key) >= 0){
+            node->dump();
+            level0_candidates.insert(node);
+        }
+    }
+    for(const auto& candidate : level0_candidates){
+        result.push(candidate);
+    }
+    for (int level = 1; level < MAX_LEVEL; ++level) {
         const auto& nodes = tree_->get_level_nodes(level);
         if (nodes.empty()) continue;
 
-        // 為此 level 建 dummy node（key range 對齊）
-        auto dummy = std::make_shared<TreeNode>("dummy", level, key, key);
+        
         auto it = nodes.upper_bound(dummy);
 
         if (it != nodes.begin()) {
@@ -19,6 +36,7 @@ std::queue<std::shared_ptr<TreeNode>> LSMTree::search_key(const Key& key) {
 
             if (compareKey(candidate->rangeMin, key) <= 0 &&
                 compareKey(candidate->rangeMax, key) >= 0) {
+                candidate->dump();
                 result.push(candidate);
             }
         }

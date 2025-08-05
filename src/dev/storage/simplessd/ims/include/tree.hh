@@ -19,14 +19,6 @@ inline int compareKey(const Key& a, const Key& b) {
 }
 
 struct TreeNode : public std::enable_shared_from_this<TreeNode> {
-    std::string filename;
-    int levelInfo;
-    int channelInfo;
-    Key rangeMin;
-    Key rangeMax;
-
-    std::unordered_map<std::string, std::shared_ptr<TreeNode>> children;
-    std::vector<std::weak_ptr<TreeNode>> parent;
 
     TreeNode(std::string name, int level, int ch, const Key& min, const Key& max)
         : filename(std::move(name)),
@@ -39,6 +31,38 @@ struct TreeNode : public std::enable_shared_from_this<TreeNode> {
         : TreeNode(std::move(name), level, INVALIDCH, min, max) {}
 
     ~TreeNode() = default;
+
+    std::string filename;
+    int levelInfo;
+    int channelInfo;
+    Key rangeMin;
+    Key rangeMax;
+    std::unordered_map<std::string, std::shared_ptr<TreeNode>> children;
+    std::vector<std::weak_ptr<TreeNode>> parent;
+    void dump(int indent = 0, bool recursive = false) const {
+        auto pad = [indent]() { for (int i = 0; i < indent; ++i) std::cout << "  "; };
+
+        pad(); std::cout << "TreeNode {\n";
+        pad(); std::cout << "  filename    : " << filename << '\n';
+        pad(); std::cout << "  levelInfo   : " << levelInfo << '\n';
+        pad(); std::cout << "  channelInfo : " << channelInfo << '\n';
+
+        pad(); std::cout << "  rangeMin    : ";
+        rangeMin.dumpString();
+        pad(); std::cout << "  rangeMax    : ";
+        rangeMax.dumpString();
+
+        pad(); std::cout << "  children    : " << children.size() << '\n';
+        pad(); std::cout << "}\n";
+
+        if (recursive) {
+            for (const auto& [name, child] : children) {
+                if (child) {
+                    child->dump(indent + 1, true);
+                }
+            }
+        }
+    }
 };
 
 struct TreeNodeComparator {
@@ -58,6 +82,8 @@ struct TreeNodeComparator {
 
 class Tree {
 public:
+    std::string encode() const;
+    bool decode(const std::string& buf);
     int init_tree();
     void insert_node(std::shared_ptr<TreeNode> node);
     void remove_node(std::shared_ptr<TreeNode> node);

@@ -14,11 +14,12 @@ add_library(firmware_lib STATIC
     disk.cc
     IMS_interface.cc
     lbn_pool.cc
-    log.cc
+    ${CMAKE_SOURCE_DIR}/../include/log.cc
     mapping_table.cc
     persistence.cc
     ${CMAKE_SOURCE_DIR}/../include/tree.cc
     ${CMAKE_SOURCE_DIR}/../include/lsmtree.cc
+    ${CMAKE_SOURCE_DIR}/../include/def.cc
 )
 
 # 方便其他 CMakeLists 使用
