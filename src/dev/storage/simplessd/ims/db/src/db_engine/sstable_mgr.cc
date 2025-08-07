@@ -42,7 +42,6 @@ size_t HashModN(const InternalKey& ikey, size_t n) {
 
 char* SstableManager::keyPerPagePacking(const SkipList<Record, RecordComparator>& skiplist) {
     const size_t total_size = IMS_PAGE_NUM * IMS_PAGE_SIZE;
-    std::cout << skiplist.get_node_num() << std::endl;
     char* buffer = static_cast<char*>(allocateAligned(total_size));
     if (!buffer) throw std::runtime_error("Failed to allocate aligned buffer");
 

@@ -48,12 +48,12 @@ int IMS_interface::write_sstable(hostInfo *request, uint8_t *buffer) {
 
     auto mappingTable = mappingTable_->get_table();
     if (mappingTable.count(filename)) {
-        pr_info("ERROR: Mapping already exists, refusing to overwrite file: %s", filename.c_str());
+        pr_debug("ERROR: Mapping already exists, refusing to overwrite file: %s", filename.c_str());
         return OPERATION_FAILURE;
     }
 
     if (!buffer) {
-        pr_info("ERROR: Null buffer provided for write to file: %s", filename.c_str());
+        pr_debug("ERROR: Null buffer provided for write to file: %s", filename.c_str());
         return OPERATION_FAILURE;
     }
     // 建立 TreeNode 並插入
@@ -63,7 +63,7 @@ int IMS_interface::write_sstable(hostInfo *request, uint8_t *buffer) {
     // 找出該節點
     auto node = lsmTree_->find_node(filename, level, rangeMin, rangeMax);
     if (!node) {
-        pr_info("Find node is error, filename: %s ", filename.c_str());
+        pr_debug("Find node is error, filename: %s ", filename.c_str());
         return OPERATION_FAILURE;
     }
 
@@ -94,7 +94,7 @@ int IMS_interface::write_sstable(hostInfo *request, uint8_t *buffer) {
         lbn = lbnPool_->RRpolicy();
     }
     else{
-        pr_info("Level info is not correct (%d)", level);
+        pr_debug("Level info is not correct (%d)", level);
         return OPERATION_FAILURE;
     }
 
@@ -102,12 +102,12 @@ int IMS_interface::write_sstable(hostInfo *request, uint8_t *buffer) {
 
     if (lbn == INVALIDLBN) {
         lsmTree_->remove_sstable(node);
-        pr_info("Failed to allocate LBN for file: %s", filename.c_str());
+        pr_debug("Failed to allocate LBN for file: %s", filename.c_str());
         return OPERATION_FAILURE;
     }
 
     if (!node) {
-        pr_info("Find node is error, filename: %s ", filename.c_str());
+        pr_debug("Find node is error, filename: %s ", filename.c_str());
         return OPERATION_FAILURE;
     }
 
@@ -125,7 +125,7 @@ int IMS_interface::write_sstable(hostInfo *request, uint8_t *buffer) {
         mappingTable_->insert_mapping(filename, lbn);
     } else {
         lsmTree_->remove_sstable(node);
-        pr_info("Failed to write block to LBN %lu for file: %s", lbn, filename.c_str());
+        pr_debug("Failed to write block to LBN %lu for file: %s", lbn, filename.c_str());
         return OPERATION_FAILURE;
     }
     pr_info("Write success return");
@@ -139,18 +139,18 @@ int IMS_interface::read_sstable(hostInfo *request, uint8_t *buffer) {
     // 檢查 mapping table 是否有紀錄
     auto mappingTable = mappingTable_->get_table();
     if (mappingTable.count(filename) == 0) {
-        pr_info("ERROR: File %s not found in mapping table", filename.c_str());
+        pr_debug("ERROR: File %s not found in mapping table", filename.c_str());
         return OPERATION_FAILURE;
     }
 
     if (!buffer) {
-        pr_info("ERROR: Null buffer provided to read file: %s", filename.c_str());
+        pr_debug("ERROR: Null buffer provided to read file: %s", filename.c_str());
         return OPERATION_FAILURE;
     }
 
     auto it = mappingTable.find(filename);
     if (it == mappingTable.end()) {
-        pr_info("ERROR: File %s not found in mapping table", filename.c_str());
+        pr_debug("ERROR: File %s not found in mapping table", filename.c_str());
         request->lbn = INVALIDLBN;
         return OPERATION_FAILURE;
     }
@@ -164,7 +164,7 @@ int IMS_interface::read_sstable(hostInfo *request, uint8_t *buffer) {
     if (err == OPERATION_SUCCESS) {
         pr_info("Read data from LBN %lu for file: %s successfully", request->lbn, filename.c_str());
     } else {
-        pr_info("Failed to read block from LBN %lu for file: %s", request->lbn, filename.c_str());
+        pr_debug("Failed to read block from LBN %lu for file: %s", request->lbn, filename.c_str());
         return OPERATION_FAILURE;
     }
 
@@ -172,7 +172,7 @@ int IMS_interface::read_sstable(hostInfo *request, uint8_t *buffer) {
 }
 int IMS_interface::search_key(Key key) {
     if (key.key_size < 0) {
-        pr_info("ERROR: Invalid key size");
+        pr_debug("ERROR: Invalid key size");
         return OPERATION_FAILURE;
     }
 
@@ -180,7 +180,7 @@ int IMS_interface::search_key(Key key) {
     std::queue<std::shared_ptr<TreeNode>> candidates = lsmTree_->search_key(key);
 
     if (candidates.empty()) {
-        pr_info("Key not found in any SSTable");
+        pr_debug("Key not found in any SSTable");
         return OPERATION_FAILURE;
     }
 
@@ -200,13 +200,13 @@ int IMS_interface::search_key(Key key) {
 
 int IMS_interface::allocate_block(uint64_t *l) {
     if (l == nullptr) {
-        pr_info("Output pointer is null");
+        pr_debug("Output pointer is null");
         return OPERATION_FAILURE;
     }
 
     uint64_t lbn = lbnPool_->RRpolicy();
     if (lbn == INVALIDLBN) {
-        pr_info("Allocate value log block failed: no free block or policy issue");
+        pr_debug("Allocate value log block failed: no free block or policy issue");
         return OPERATION_FAILURE;
     }
     logManager_->insert_logRecord(lbn);
@@ -242,21 +242,21 @@ int IMS_interface::init_IMS() {
 
     uint8_t* buffer = (uint8_t*)malloc(IMS_PAGE_SIZE);
     if (!buffer) {
-        pr_info("Buffer malloc failed");
+        pr_debug("Buffer malloc failed");
         return OPERATION_FAILURE;
     }
 
     err = disk_.readPage(0, buffer);
     if (err == OPERATION_FAILURE) {
         free(buffer);
-        pr_info("Read super page failed");
+        pr_debug("Read super page failed");
         return OPERATION_FAILURE;
     }
 
     super_page* sp = (super_page*)buffer;
     if (sp == nullptr) {
         free(buffer);
-        pr_info("Super page pointer is nullptr");
+        pr_debug("Super page pointer is nullptr");
         return OPERATION_FAILURE;
     }
     std::vector<uint64_t> used_lbns;
@@ -278,7 +278,7 @@ int IMS_interface::init_IMS() {
         sp_ptr_old_->dump();
         err = mappingTable_->init_mapping_table(sp_ptr_old_->mapping_store, sp_ptr_old_->mapping_page_num);
         if (err != OPERATION_SUCCESS) {
-            pr_info("Initialize mapping table failed");
+            pr_debug("Initialize mapping table failed");
             free(buffer);
             return OPERATION_FAILURE;
         }
@@ -286,7 +286,7 @@ int IMS_interface::init_IMS() {
         pr_info("InitLogRecordList: logStoreLBN = %lu", sp_ptr_old_->log_store);
         err = logManager_->init_logRecordList(sp_ptr_old_->log_store, sp_ptr_old_->log_page_num);
         if (err != OPERATION_SUCCESS) {
-            pr_info("Initialize log record list failed");
+            pr_debug("Initialize log record list failed");
             free(buffer);
             return OPERATION_FAILURE;
         }
@@ -306,7 +306,7 @@ int IMS_interface::init_IMS() {
     }
     
     if ( (usedLBN) != sp_ptr_old_->usedLBN_num) {
-        pr_info("Initialize LBN pool failed");
+        pr_debug("Initialize LBN pool failed");
         free(buffer);
         return OPERATION_FAILURE;
     }
@@ -327,19 +327,19 @@ int IMS_interface::close_IMS() {
     auto mappingTable = mappingTable_->get_table();
     err = persistenceManager_->flushMappingTable(mappingTable);
     if (err != OPERATION_SUCCESS) {
-        pr_info("Flushing mapping table to disk failed");
+        pr_debug("Flushing mapping table to disk failed");
         return OPERATION_FAILURE;
     }
 
     err = logManager_->flush_logRecordList();
     if (err != OPERATION_SUCCESS) {
-        pr_info("Flushing log record list to disk failed");
+        pr_debug("Flushing log record list to disk failed");
         return OPERATION_FAILURE;
     }
 
     uint8_t* buffer = (uint8_t*)malloc(IMS_PAGE_SIZE);
     if (!buffer) {
-        pr_info("Allocating memory for super page buffer failed");
+        pr_debug("Allocating memory for super page buffer failed");
         return OPERATION_FAILURE;
     }
 
@@ -408,20 +408,20 @@ int IMS_interface::write_log(uint64_t lpn,uint8_t *buffer){
 
 int IMS_interface::read_log(uint64_t lpn,uint8_t *buffer){
     if (buffer == nullptr) {
-        pr_info("Read log failed: null request or buffer");
+        pr_debug("Read log failed: null request or buffer");
         return OPERATION_FAILURE;
     }
     int err = OPERATION_SUCCESS;
     err = get_persistenceManager()->readLog(lpn,buffer,IMS_PAGE_SIZE);
     if( err != OPERATION_SUCCESS){
-        pr_info("Read value log failed at LPN %lu", lpn);
+        pr_debug("Read value log failed at LPN %lu", lpn);
     }
     return err;
 }
 
 void IMS_interface::reset_superPage(super_page *sp) {
     if (sp == nullptr) {
-        pr_info("Super page pointer is null, cannot reset");
+        pr_debug("Super page pointer is null, cannot reset");
         return;
     }
     sp->magic = 0;
@@ -441,7 +441,7 @@ int IMS_interface::reset_IMS(){
     uint8_t *buffer = reinterpret_cast<uint8_t*>(&sp);
     int err = disk_.writePage(0, buffer);
     if (err != OPERATION_SUCCESS) {
-        pr_info("Writing super page to disk failed");
+        pr_debug("Writing super page to disk failed");
         free(buffer);
         return OPERATION_FAILURE;
     }

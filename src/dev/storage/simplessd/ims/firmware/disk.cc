@@ -61,7 +61,7 @@ int Disk::readPage(uint64_t lpn, uint8_t * buffer) {
 
 int Disk::writePage(uint64_t lpn,const uint8_t * buffer) {
     if (!file_) throw std::runtime_error("Disk not opened.");
-
+    // pr_info("Write LPN[%d] to disk",lpn);
     uint64_t offset = lpn * IMS_PAGE_SIZE;
     if (std::fseek(file_, offset, SEEK_SET) != 0) {
         throw std::runtime_error("Seek failed.");
@@ -74,7 +74,7 @@ int Disk::writePage(uint64_t lpn,const uint8_t * buffer) {
         perror("fwrite");
         throw std::runtime_error("Write error.");
     }
-    pr_info("Write page at LPN: %lu is success", lpn);
+    // pr_info("Write page at LPN: %lu is success", lpn);
     std::fflush(file_);
     return 0;
 }
@@ -87,9 +87,8 @@ int Disk::writeBlock(uint64_t lbn ,uint8_t *buffer) {
             uint8_t *page_ptr = buffer + i * IMS_PAGE_SIZE;
             // assert(reinterpret_cast<uintptr_t>(page_ptr) % 4096 == 0 && "buffer must be 4KB aligned");
 
-            lpn = lpn + 1;
             // pr_debug("Write block at page: %d LPN: %lu", i, lpn);
-            uint16_t written = writePage(lpn, page_ptr);
+            uint16_t written = writePage(lpn+i, page_ptr);
             if (written != 0) {
                 pr_info("[ERROR] write block failed at page: %d LPN: %lu", i, lpn);
             }
@@ -105,11 +104,10 @@ int Disk::readBlock(uint64_t lbn ,uint8_t *buffer) {
     uint64_t lpn = LBN2LPN(lbn);
     if (file_) {
         for (int i = 0; i < IMS_PAGE_NUM; i++) {
-        lpn = lpn +1;
         // pr_debug("Read block at page: %d LPN: %lu", i, lpn);
         uint8_t *page_ptr = buffer + i * IMS_PAGE_SIZE;
 
-        int read_result = readPage(lpn, page_ptr);
+        int read_result = readPage(lpn+i, page_ptr);
         if (read_result != 0) {
             pr_info("[ERROR] read block failed at page: %d LPN: %lu", i, lpn);
             break;

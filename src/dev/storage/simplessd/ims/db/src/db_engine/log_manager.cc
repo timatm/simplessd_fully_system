@@ -38,13 +38,13 @@ void LOG_MANAGER::flush_buffer()
     if (buffer_.size() < IMS_PAGE_SIZE) {
         buffer_.resize(IMS_PAGE_SIZE, '\0');
     }
-
     alignas(4096) static char aligned_page[IMS_PAGE_SIZE];
     std::memcpy(aligned_page, buffer_.data(), IMS_PAGE_SIZE);
 
     uint64_t lpn = static_cast<uint64_t>(LBN2LPN(currenet_lbn_) + page_offset_);
     pr_info("Flushing buffer to LPN: %lu", lpn);
-
+    printf("[FLUSH] th=%lu currentLPN=%u\n",
+       pthread_self(), lpn);
     if (nvme_.nvme_write_log(lpn, aligned_page) == COMMAND_FAILD) {
         std::cerr << "Failed to write log at LPN: " << lpn << '\n';
         return;
@@ -62,13 +62,15 @@ void LOG_MANAGER::flush_buffer()
 
 
 void LOG_MANAGER::writeLog(const Record& log)
-{
+{   
+    // log.Dump();
     const std::string encoded = log.Encode();
     uint32_t copied = 0;
     const uint32_t total = encoded.size();
-
+    // pr_info("Writing log size: %lu", total);
     while (copied < total) {
-        if (byte_offset_ == IMS_PAGE_SIZE) { 
+        if (byte_offset_ == IMS_PAGE_SIZE) {
+        // printf("[LOG] th=%lu byte_off=%u total=%u\n",pthread_self(), byte_offset_, total);
             flush_buffer();
         }
 
@@ -87,7 +89,7 @@ void LOG_MANAGER::writeLog(const Record& log)
 uint32_t LOG_MANAGER::findNextLPN(uint32_t lpn) const{
     uint32_t currentLBN = LPN2LBN(lpn);
     size_t pageOffset   = lpn - LBN2LPN(currentLBN);
-
+    pr_info("Current LBN: %u, Page Offset: %zu", currentLBN, pageOffset);
     if (pageOffset + 1 >= IMS_PAGE_NUM) {
         auto blkIt = std::find(logRecordBlock_.begin(), logRecordBlock_.end(), currentLBN);
         if (blkIt == logRecordBlock_.end() || ++blkIt == logRecordBlock_.end()) {
@@ -121,34 +123,54 @@ std::optional<Record> LOG_MANAGER::readLog(uint32_t lpn, uint32_t offset)
         std::cerr << "Failed to allocate read buffer." << std::endl;
         return std::nullopt;
     }
+    
     uint32_t ikey_sz = 0;
     uint32_t val_sz = 0;
+    
     size_t firstPageByte = IMS_PAGE_SIZE - offset;
-    constexpr size_t kHeader = sizeof(uint32_t) * 2; 
-    if(!readPage(curLPN,read_buffer)){
-        std::free(read_buffer);
-        return std::nullopt;
-    }
-    if(firstPageByte >= kHeader ){
-        result.append(read_buffer+offset,kHeader);
-        curOffset+= kHeader;
+    constexpr size_t kHeader = sizeof(uint32_t) * 2;
+
+
+    if(lpn == getLPN()){
+        result.append(buffer_.data() + curOffset,kHeader);
+        curOffset = offset + kHeader;
     }
     else{
-        result.append(read_buffer+offset,firstPageByte);
-        curLPN = findNextLPN(curLPN);
         if(!readPage(curLPN,read_buffer)){
             std::free(read_buffer);
             return std::nullopt;
         }
-        result.append(read_buffer,kHeader-firstPageByte);
-        curOffset = kHeader-firstPageByte;
+        if(firstPageByte >= kHeader ){
+            result.append(read_buffer+offset,kHeader);
+            curOffset = offset + kHeader;  
+        }
+        else{
+            result.append(read_buffer+offset,firstPageByte);
+            curLPN = findNextLPN(curLPN);
+            if(curLPN == getLPN()){
+                result.append(buffer_.data(), kHeader - firstPageByte);
+            }
+            else{
+                if(!readPage(curLPN,read_buffer)){
+                    std::free(read_buffer);
+                    return std::nullopt;
+                }
+                result.append(read_buffer,kHeader-firstPageByte);
+            }
+            curOffset = kHeader-firstPageByte;
+        }
     }
     memcpy(&ikey_sz,result.data(),sizeof(uint32_t));
     memcpy(&val_sz,result.data()+sizeof(uint32_t),sizeof(uint32_t));
     uint32_t blobSize = ikey_sz + val_sz;
+    if (ikey_sz > 64) {
+        pr_debug("Reading log at LPN: %u, Offset: %u, Blob Size: %u (Key size: %u,value size: %u)", lpn, offset, blobSize,ikey_sz,val_sz);
+        free(read_buffer);
+        return std::nullopt;   
+    }
     uint32_t copied = 0;
     while (copied < blobSize) {
-        if (curOffset == IMS_PAGE_SIZE) {       
+        if (curOffset == IMS_PAGE_SIZE && curLPN != getLPN()) {       
             curLPN = findNextLPN(curLPN);
             if(!readPage(curLPN, read_buffer)) {
                 std::free(read_buffer);
@@ -156,12 +178,17 @@ std::optional<Record> LOG_MANAGER::readLog(uint32_t lpn, uint32_t offset)
             }
             curOffset = 0;
         }
+        
 
         uint32_t room = IMS_PAGE_SIZE - curOffset;
         uint32_t n    = std::min(room, blobSize - copied);
-
-        result.append(read_buffer + curOffset, n);
-
+        if (curLPN == getLPN())
+        {
+            result.append(buffer_.data() + curOffset, n);
+        }
+        else{
+            result.append(read_buffer + curOffset, n);
+        }
         curOffset += n;
         copied     += n;
     }
@@ -177,6 +204,9 @@ std::optional<Record> LOG_MANAGER::readLog(uint32_t lpn, uint32_t offset)
 void LOG_MANAGER::getLPN(uint32_t& lpn, uint32_t& offset) const {
     lpn = LBN2LPN(currenet_lbn_) + page_offset_;
     offset = byte_offset_;
+}
+uint32_t LOG_MANAGER::getLPN() const {
+    return LBN2LPN(currenet_lbn_) + page_offset_;
 }
 
 void LOG_MANAGER::clearLog() {

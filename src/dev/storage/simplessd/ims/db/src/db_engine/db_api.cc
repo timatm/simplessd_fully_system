@@ -124,7 +124,6 @@ Status API::get(std::string key,std::string& value){
                     free(buffer);
                     return Status::NotFound("The key has been deleted");
                 }
-                getLogManager()->dump();
                 auto record = logManager_->readLog(lpn, offset);
                 record->Dump();
                 if(record.has_value()){

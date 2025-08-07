@@ -15,6 +15,7 @@ public:
     void writeLog(const Record& log);
     std::optional<Record> readLog(uint32_t lpn, uint32_t offset);
     void getLPN(uint32_t& current_lpn, uint32_t& byte_offset) const;
+    uint32_t getLPN() const;
     void setNextLBN(uint32_t next_lbn) { next_lbn_ = next_lbn; }
     void setCurrentLBN(uint32_t current_lbn) { currenet_lbn_ = current_lbn; }
     void setPageOffset(uint32_t page_offset) { page_offset_ = page_offset; }
