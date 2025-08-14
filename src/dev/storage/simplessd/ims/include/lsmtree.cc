@@ -51,7 +51,6 @@ std::vector<int> LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
     std::queue<std::shared_ptr<TreeNode>> Pqueue, Cqueue;
     std::unordered_set<TreeNode*> Pvisited, Cvisited;
 
-    // 處理 parent 節點
     for (auto& parent : node->parent) {
         if (auto sp = parent.lock()) {
             Pqueue.push(sp);
@@ -77,7 +76,6 @@ std::vector<int> LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
         }
     }
 
-    // 處理 child 節點
     for (auto& [_, child] : node->children) {
         Cqueue.push(child);
     }
@@ -103,7 +101,6 @@ std::vector<int> LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
         }
     }
 
-    // 加入同層相鄰節點資訊
     int level = node->levelInfo;
     if (level < 0 || level >= MAX_LEVEL) {
         pr_debug("Invalid node level: %d", level);
@@ -131,22 +128,18 @@ std::vector<int> LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
 
     return relate_ch_info;
 }
-// 插入一個 SSTable 對應的 TreeNode
 void LSMTree::insert_sstable(std::shared_ptr<TreeNode> node) {
     tree_->insert_node(node);
 }
 
-// 移除一個 SSTable 對應的 TreeNode
 void LSMTree::remove_sstable(std::shared_ptr<TreeNode> node) {
     tree_->remove_node(node);
 }
 
-// 搜尋特定完整資訊的 TreeNode
 std::shared_ptr<TreeNode> LSMTree::find_node(const std::string& filename, int level, const Key& min, const Key& max) {
     return tree_->find_node(filename, level, min, max);
 }
 
-// 搜尋僅由 filename 確認的 TreeNode
 std::shared_ptr<TreeNode> LSMTree::find_node(const std::string& filename) {
     return tree_->find_node(filename);
 }

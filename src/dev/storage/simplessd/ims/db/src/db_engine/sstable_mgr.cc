@@ -32,7 +32,7 @@ std::string SstableManager::packingTable(const SkipList<Record, RecordComparator
 
 
 // forward declare HashModN (assume in another file)
-size_t HashModN(const InternalKey& ikey, size_t n) {
+static size_t HashModN(const InternalKey& ikey, size_t n) {
     std::string_view data = ikey.Encode(); 
 
     std::hash<std::string_view> hasher;
@@ -165,7 +165,7 @@ void SstableManager::readSSTable(const std::string& filename,char *buffer) {
         std::cout << "Reading SSTable from: " << filename << std::endl;
 
         int err = nvme_.nvme_read_sstable(filename, buffer);
-        if (err == COMMAND_FAILD) {
+        if (err == COMMAND_FAILED) {
             std::cerr << "[Thread] Failed to read SSTable: " << filename << std::endl;
             std::free(buffer);
             return;
@@ -195,7 +195,7 @@ void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey
         std::cout << "[Thread] Entered thread task\n";
         int err = nvme_.nvme_write_sstable(info,  const_cast<char*>(buf.data()));
         std::cout << "[Thread] nvme_write_sstable returned " << err << std::endl;
-        if (err == COMMAND_FAILD) {
+        if (err == COMMAND_FAILED) {
             std::cerr << "[Thread] Failed to write SSTable: " << info.filename << std::endl;
             return;
         }

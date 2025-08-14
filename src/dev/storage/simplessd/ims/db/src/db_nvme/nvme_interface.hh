@@ -43,13 +43,14 @@ public:
     virtual int nvme_ims_close() = 0;
     // virtual int nvme_monitor_IMS(int monitor_type) = 0;
     // virtual void init_nmc_config(nmc_config_t *config) = 0;
-
+    virtual int nvme_write_metadata(uint64_t lpn,char *buffer,size_t size) = 0;
     virtual int nvme_open_DB(uint8_t* buffer) = 0;
     virtual int nvme_close_DB() = 0;
     virtual int nvme_write_log(uint64_t lpn, char* buffer) = 0;
     virtual int nvme_read_log(uint64_t lpn, char* buffer) = 0;
     virtual int nvme_allcate_lbn(char* buffer) = 0;
     virtual int nvme_dump_ims() = 0;
+    virtual int nvme_read_ssKeyRange(std::string, char* buffer) = 0;
 };
 
 #endif

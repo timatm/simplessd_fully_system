@@ -164,7 +164,7 @@ typedef enum{
 } STATUS_CODE;
 
 #define COMMAND_SUCCESS     0
-#define COMMAND_FAILD       1
+#define COMMAND_FAILED       1
 /* -------------------------------------------------------------------------- */
 /*                              public interfaces                             */
 /* -------------------------------------------------------------------------- */

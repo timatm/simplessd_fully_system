@@ -97,7 +97,7 @@ int nvme_ims_init(){
     else{
         pr("Init IMS failed");
         pr("error code: 0x%x", err);
-        err = COMMAND_FAILD;
+        err = COMMAND_FAILED;
     }
     return err;
 }
@@ -117,7 +117,7 @@ int nvme_ims_close(){
     else{
         pr("Close IMS failed");
         pr("error code: 0x%x", err);
-        err = COMMAND_FAILD;
+        err = COMMAND_FAILED;
     }
     return err;
 }
@@ -138,7 +138,7 @@ int nvme_monitor_IMS(int monitor_type){
             break;
         default:
             pr("Monitor does't have this subcommand :%d",monitor_type);
-            return COMMAND_FAILD;
+            return COMMAND_FAILED;
             break;
     }
     err = pass_io_command(config);
@@ -148,7 +148,7 @@ int nvme_monitor_IMS(int monitor_type){
     else{
         pr("Monitor IMS failed");
         pr("error code: 0x%x", err);
-        err = COMMAND_FAILD;
+        err = COMMAND_FAILED;
     }
     return err;
 }
@@ -157,7 +157,7 @@ int nvme_write_sstable(sstable_info info,char *buffer){
     
     if(buffer == nullptr){
         pr("Write sstable failed ,data buffer is nullptr");
-        return COMMAND_FAILD;
+        return COMMAND_FAILED;
     }
     int err;
     nmc_config_t config_obj;
@@ -192,7 +192,7 @@ int nvme_write_sstable(sstable_info info,char *buffer){
     else{
         pr("nvme write failed");
         pr("error code: 0x%x", err);
-        err = COMMAND_FAILD;
+        err = COMMAND_FAILED;
     }
     return err;
 }
@@ -201,7 +201,7 @@ int nvme_write_log(uint64_t lpn,char *buffer){
     
     if(buffer == nullptr){
         pr("Write sstable failed ,data buffer is nullptr");
-        return COMMAND_FAILD;
+        return COMMAND_FAILED;
     }
     int err;
     nmc_config_t config_obj;
@@ -224,16 +224,49 @@ int nvme_write_log(uint64_t lpn,char *buffer){
     else{
         pr("nvme write failed");
         pr("error code: 0x%x", err);
-        err = COMMAND_FAILD;
+        err = COMMAND_FAILED;
     }
     return err;
 }
 
 
+
+// int nvme_write_metadata(uint64_t lpn,char *buffer,size_t size){
+    
+//     if(buffer == nullptr){
+//         pr("Write metadata failed ,data buffer is nullptr");
+//         return COMMAND_FAILED;
+//     }
+//     int err;
+//     nmc_config_t config_obj;
+//     nmc_config_t *config = &config_obj;
+//     init_nmc_config(config); 
+    
+//     // config->dry = true;
+//     config->OPCODE = OPCODE_WRITE_LOG;
+//     config->data = buffer;
+//     config->data_len = DB_PAGE_SIZE;
+//     uint32_t lpn_dword[2] = {0};
+//     fill_uint64_to_dwords(lpn,lpn_dword);
+//     config->cdw02 = lpn_dword[0];
+//     config->cdw03 = lpn_dword[1];
+//     err = pass_io_command(config);
+//     if(err == STATUS_OPERATION_SUCCESS){
+//         pr("nvme write success");
+//         err = COMMAND_SUCCESS;
+//     }
+//     else{
+//         pr("nvme write failed");
+//         pr("error code: 0x%x", err);
+//         err = COMMAND_FAILED;
+//     }
+//     return err;
+// }
+
 int nvme_read_sstable(std::string filename,char *buffer){
     if(buffer == nullptr){
         pr("Write sstable failed ,data buffer is nullptr");
-        return COMMAND_FAILD;
+        return COMMAND_FAILED;
     }
     int err;
     nmc_config_t config_obj;
@@ -268,7 +301,7 @@ int nvme_read_sstable(std::string filename,char *buffer){
 int nvme_read_log(uint64_t lpn,char *buffer){
     if(buffer == nullptr){
         pr("Write sstable failed ,data buffer is nullptr");
-        return COMMAND_FAILD;
+        return COMMAND_FAILED;
     }
     int err;
     nmc_config_t config_obj;
@@ -326,7 +359,7 @@ void init_nmc_config(nmc_config_t *config){
 int nvme_allcate_lbn(char *buffer){
     if(buffer == nullptr){
         pr("Allcate LBN failed ,data buffer is nullptr");
-        return COMMAND_FAILD;
+        return COMMAND_FAILED;
     }
     int err;
     nmc_config_t config_obj;
@@ -355,7 +388,7 @@ int init_device(){
     nvme_fd = open(dev_path, O_RDWR);
     if (nvme_fd < 0) {
         perror("open nvme device");
-        return COMMAND_FAILD;
+        return COMMAND_FAILED;
     }
     return COMMAND_SUCCESS;
 }

@@ -1,56 +1,79 @@
 #include "read_cache.hh"
-#include <iostream>
-#include <string>
-#include <vector>
-#include <chrono>
-#include <thread>
+#include <cstdint>
 
-using cache::ReadCache;
 
-// 一個示範：Value=std::string（用預設 sizer：.size()）
-// 使用者可自訂容量（bytes）
-int main(int argc, char** argv) {
-    size_t capacity = 64 * 1024; // 預設 64KB
-    if (argc >= 2) {
-        capacity = std::stoull(argv[1]);
+ReadCache::ReadCache(size_t capacity){
+    capacity_ = capacity;
+};
+std::optional<std::set<std::string>> ReadCache::get(std::string& sstable){
+    std::lock_guard<std::mutex> lk(mu_);
+
+    auto it = cache_.find(sstable);
+    if( it != cache_.end()) {
+        lru_list_.erase(it->second.lru_it);
+        lru_list_.push_front(sstable);
+        it->second.lru_it = lru_list_.begin();
+        return it->second.value;
     }
-    std::cout << "[Demo] ReadCache capacity = " << capacity << " bytes\n";
+    return std::nullopt;
+}
 
-    ReadCache<std::string, std::string> rc(capacity);
 
-    auto loader = [](const std::string& key) -> std::string {
-        // 模擬從磁碟/裝置讀取：延遲 + 生成資料
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        return "VALUE_FOR_" + key; // 真實場景換成實際讀取
-    };
 
-    // 讀一些 key
-    for (int round = 0; round < 2; ++round) {
-        for (int i = 0; i < 10; ++i) {
-            std::string key = "k" + std::to_string(i);
-            auto before = std::chrono::steady_clock::now();
-            std::string val = rc.GetOrLoad(key, loader);
-            auto after = std::chrono::steady_clock::now();
+bool ReadCache::put(const std::string& sstable, const std::set<std::string>& value) {
+    std::lock_guard<std::mutex> lk(mu_);
 
-            auto us = std::chrono::duration_cast<std::chrono::microseconds>(after - before).count();
-            std::cout << "GetOrLoad(" << key << ") -> " << val
-                      << " | elapsed(us)=" << us << "\n";
-        }
-        std::cout << "Cache size(bytes)=" << rc.SizeBytes()
-                  << " / capacity=" << rc.CapacityBytes() << "\n";
+    auto it = cache_.find(sstable);
+    if (it != cache_.end()) {
+        it->second.value = value;                       
+        lru_list_.erase(it->second.lru_it);
+        lru_list_.push_front(sstable);
+        it->second.lru_it = lru_list_.begin();
+        return true;
     }
 
-    // 手動 Put/Erase 範例
-    rc.Put("big", std::string(32768, 'B')); // 32KB
-    std::cout << "After Put(big,32KB) size=" << rc.SizeBytes() << "\n";
+    if (capacity_ == 0) return false;
 
-    rc.Erase("k0");
-    std::cout << "After Erase(k0) size=" << rc.SizeBytes() << "\n";
+    if (cache_.size() >= capacity_) {
+        evict(); 
+    }
 
-    // 調整容量（若縮小會觸發逐出）
-    rc.SetCapacity(16 * 1024);
-    std::cout << "After SetCapacity(16KB) size=" << rc.SizeBytes()
-              << " / cap=" << rc.CapacityBytes() << "\n";
+    Node node;
+    node.value = value;
+    lru_list_.push_front(sstable);
+    node.lru_it = lru_list_.begin();
 
-    return 0;
+    cache_.emplace(sstable, std::move(node));
+    return true;
+}
+
+bool ReadCache::remove(const std::string& sstable){
+    std::lock_guard<std::mutex> lk(mu_);
+
+    auto it = cache_.find(sstable);
+    if (it != cache_.end()) {
+        lru_list_.erase(it->second.lru_it);
+        cache_.erase(it);
+        return true;
+    }
+    return false;
+}
+void ReadCache::evict(){
+    while (cache_.size() > capacity_) {
+        if (lru_list_.empty()) return;
+        auto it = std::prev(lru_list_.end());
+        const std::string& victim = *it;
+        cache_.erase(victim);
+        lru_list_.erase(it);
+    }
+
+    return;
+}
+void ReadCache::clear(){
+    while(!cache_.empty()){
+        auto it = cache_.begin();
+        lru_list_.erase(it->second.lru_it);
+        cache_.erase(it);
+    }
+    return;
 }

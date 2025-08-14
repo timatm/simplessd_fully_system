@@ -94,7 +94,7 @@ enum class SelectT {
 
 #define DISPATCH_POLICY 3 // 0: worst case, 1: RR, 2: level2CH, 3: my_policy
 #define MAX_LEVEL 7
-#define MAX_FILENAME_LENGTH 56 // SStable file name length
+// #define MAX_FILENAME_LENGTH 56 // SStable file name length
 #define MAGIC 0x900118FFFEEFFFEE
 
 
@@ -294,6 +294,8 @@ struct slotFormat {
 };
 static_assert(sizeof(slotFormat) == 64, "slotFormat must be 64 bytes");
 
+
+#define SLOT_SIZE sizeof(slotFormat)
 #define SLOT_NUM IMS_PAGE_SIZE/sizeof(slotFormat)
 struct pageFormat
 {
@@ -357,6 +359,28 @@ struct  DB_INIT {
     static std::optional<DB_INIT> decode(const std::string& buf);
 };
 
+// [search key setting]
+
+struct SearchPattern{
+    std::string sstable_name;  
+    uint32_t slot_index;
+    std::string encode() const;
+    static std::optional<SearchPattern> decode(const std::string& buf);
+    void dump() const; 
+};
+
+struct SearchPackage{
+    struct {
+        uint32_t magic;
+        uint32_t pattern_num;
+    } header;
+    std::vector<SearchPattern> searchPatterns;
+    std::string encode() const;
+    static std::optional<SearchPackage> decode(const std::string& buf);
+    void dump() const;
+};
+#define READ_CACHE_CAPACITY 20
 
 
+// [search_key setting end]
 #endif // __DEF_HH__

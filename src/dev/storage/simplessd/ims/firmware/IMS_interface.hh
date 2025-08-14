@@ -34,8 +34,12 @@ public:
     int rebuild_super_page();
     int write_sstable(hostInfo *request,uint8_t *buffer);
     int read_sstable(hostInfo *request ,uint8_t *buffer);
+    int read_ssKeyRange(hostInfo *request, uint8_t* buffer);
     // TODO need to finish
     int search_key(Key key);
+    int write_metadata(uint8_t *buffer, size_t size);
+
+
     int allocate_block(uint64_t *);
     int write_log(uint64_t,uint8_t *buffer);
     int read_log(uint64_t,uint8_t *buffer);

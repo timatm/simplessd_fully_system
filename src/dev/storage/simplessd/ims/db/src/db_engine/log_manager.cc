@@ -17,7 +17,7 @@ void LOG_MANAGER::allocate_lbn() {
         return;
     }
 
-    if (nvme_.nvme_allcate_lbn(buffer) == COMMAND_FAILD) {
+    if (nvme_.nvme_allcate_lbn(buffer) == COMMAND_FAILED) {
         std::cerr << "Failed to allocate LBN." << std::endl;
         free(buffer);
         return;
@@ -45,7 +45,7 @@ void LOG_MANAGER::flush_buffer()
     pr_info("Flushing buffer to LPN: %lu", lpn);
     printf("[FLUSH] th=%lu currentLPN=%u\n",
        pthread_self(), lpn);
-    if (nvme_.nvme_write_log(lpn, aligned_page) == COMMAND_FAILD) {
+    if (nvme_.nvme_write_log(lpn, aligned_page) == COMMAND_FAILED) {
         std::cerr << "Failed to write log at LPN: " << lpn << '\n';
         return;
     }
@@ -109,7 +109,7 @@ std::optional<Record> LOG_MANAGER::readLog(uint32_t lpn, uint32_t offset)
 {
     auto readPage = [&](uint32_t lpn,char* buffer) -> bool{
         int err = nvme_.nvme_read_log(lpn,buffer);
-        if(err == COMMAND_FAILD){
+        if(err == COMMAND_FAILED){
             pr_debug("NNMe read log is failed");
             return false;
         }

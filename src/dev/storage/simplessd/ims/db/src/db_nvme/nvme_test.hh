@@ -14,11 +14,13 @@ public:
     int nvme_open_DB(uint8_t *buffer) override;
     int nvme_close_DB() override;
 
+    int nvme_write_metadata(uint64_t lpn,char *buffer,size_t size) override;
+    
     int nvme_write_log(uint64_t lpn ,char *buffer) override;
     int nvme_read_log(uint64_t lpn ,char *buffer) override;
     int nvme_allcate_lbn(char *buffer) override;
     int nvme_dump_ims() override;
-
+    int nvme_read_ssKeyRange(std::string, char* buffer) override;
 private:
     IMS_interface ims;
 };

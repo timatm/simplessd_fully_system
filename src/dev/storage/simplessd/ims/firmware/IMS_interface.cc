@@ -170,6 +170,45 @@ int IMS_interface::read_sstable(hostInfo *request, uint8_t *buffer) {
 
     return err;
 }
+
+int IMS_interface::read_ssKeyRange(hostInfo *request, uint8_t* buffer){
+    int err = OPERATION_SUCCESS;
+    std::string filename = request->filename;
+
+    auto mappingTable = mappingTable_->get_table();
+    if (mappingTable.count(filename) == 0) {
+        pr_debug("ERROR: File %s not found in mapping table", filename.c_str());
+        return OPERATION_FAILURE;
+    }
+
+    if (!buffer) {
+        pr_debug("ERROR: Null buffer provided to read file: %s", filename.c_str());
+        return OPERATION_FAILURE;
+    }
+
+    auto it = mappingTable.find(filename);
+    if (it == mappingTable.end()) {
+        pr_debug("ERROR: File %s not found in mapping table", filename.c_str());
+        request->lbn = INVALIDLBN;
+        return OPERATION_FAILURE;
+    }
+
+    request->lbn = it->second;
+
+    if (ENABLE_DISK) {
+        err = persistenceManager_->readLog(LBN2LPN(request->lbn), buffer, IMS_PAGE_SIZE);
+    }
+
+    if (err == OPERATION_SUCCESS) {
+        pr_info("Read data from LBN %lu for file: %s successfully", request->lbn, filename.c_str());
+    } else {
+        pr_debug("Failed to read block from LBN %lu for file: %s", request->lbn, filename.c_str());
+        return OPERATION_FAILURE;
+    }
+
+    return err;
+}
+
 int IMS_interface::search_key(Key key) {
     if (key.key_size < 0) {
         pr_debug("ERROR: Invalid key size");
@@ -468,5 +507,20 @@ int IMS_interface::open_DB(uint8_t* buffer, size_t buffer_size) {
     if (result.size() > buffer_size) return OPERATION_FAILURE;  
     std::memcpy(buffer, result.data(), result.size());
 
+    return OPERATION_SUCCESS;
+}
+
+
+int write_metadata(uint8_t *buffer, size_t size){
+    if (buffer == nullptr || size == 0) {
+        pr_debug("Write metadata failed: null buffer or size is zero");
+        return OPERATION_FAILURE;
+    }
+
+    int err = OPERATION_SUCCESS;
+    if (err != OPERATION_SUCCESS) {
+        pr_debug("Write metadata failed at LPN %lu", lpn);
+        return OPERATION_FAILURE;
+    }
     return OPERATION_SUCCESS;
 }

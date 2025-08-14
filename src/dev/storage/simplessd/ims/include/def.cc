@@ -1,4 +1,6 @@
 #include "def.hh"
+#include <iostream>
+#include <iomanip>
 std::string DB_INIT::encode() {
     std::string buf;
     auto append_u32 = [&](uint32_t val) {
@@ -97,4 +99,121 @@ void DB_INIT::dump() const {
     }
 
     std::cout << "==================================\n";
+}
+
+static inline void append_u32_le(std::string& out, uint32_t v) {
+    out.push_back(static_cast<char>(v & 0xFF));
+    out.push_back(static_cast<char>((v >> 8) & 0xFF));
+    out.push_back(static_cast<char>((v >> 16) & 0xFF));
+    out.push_back(static_cast<char>((v >> 24) & 0xFF));
+}
+
+static inline uint32_t load_u32_le(const char* p) {
+    return  (static_cast<uint32_t>(static_cast<unsigned char>(p[0]))      ) |
+           ((static_cast<uint32_t>(static_cast<unsigned char>(p[1])) << 8 )) |
+           ((static_cast<uint32_t>(static_cast<unsigned char>(p[2])) << 16)) |
+           ((static_cast<uint32_t>(static_cast<unsigned char>(p[3])) << 24));
+}
+
+std::string SearchPattern::encode() const {
+    if (sstable_name.size() != 36) return {};
+    std::string buf;
+    buf.reserve(40);
+    buf.append(sstable_name);
+    append_u32_le(buf, slot_index);
+    return buf;
+}
+
+std::optional<SearchPattern> SearchPattern::decode(const std::string& buf) {
+    constexpr size_t kNameLen = 36;
+    constexpr size_t kTotal   = kNameLen + 4;
+    if (buf.size() != kTotal) return std::nullopt;
+
+    SearchPattern sp;
+    sp.sstable_name.assign(buf.data(), kNameLen);
+    sp.slot_index = load_u32_le(buf.data() + kNameLen);
+    return sp;
+}
+
+std::string SearchPackage::encode() const {
+    constexpr uint32_t kMagic = 0x31504753u; // 'S','G','P','1' (LE)
+    const uint32_t count = static_cast<uint32_t>(searchPatterns.size());
+
+    const size_t kPatternSize = 40;
+    std::string buf;
+    buf.reserve(8 + static_cast<size_t>(count) * kPatternSize);
+
+    // header
+    append_u32_le(buf, kMagic);
+    append_u32_le(buf, count);
+
+    // body
+    for (const auto& p : searchPatterns) {
+        auto encoded = p.encode();
+        if (encoded.size() != kPatternSize) return {};
+        buf.append(encoded.data(), encoded.size());
+    }
+    return buf;
+}
+
+std::optional<SearchPackage> SearchPackage::decode(const std::string& buf){
+    constexpr uint32_t kMagic = 0x31504753u;
+    constexpr size_t kHeader = 8;
+    constexpr size_t kPatternSize = 40;
+
+    if (buf.size() < kHeader) return std::nullopt;
+
+    size_t offset = 0;
+    const uint32_t magic = load_u32_le(buf.data() + offset); offset += 4;
+    const uint32_t count = load_u32_le(buf.data() + offset); offset += 4;
+
+    if (magic != kMagic) return std::nullopt;
+
+    const size_t body = buf.size() - offset;
+    if (body / kPatternSize < count) return std::nullopt;
+
+    SearchPackage spkg;
+    spkg.header.magic = magic;
+    spkg.header.pattern_num = count;
+
+    spkg.searchPatterns.reserve(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        auto pattern_buf = buf.substr(offset, kPatternSize);
+        auto pattern = SearchPattern::decode(pattern_buf);
+        if (!pattern) return std::nullopt;
+        spkg.searchPatterns.push_back(*pattern);
+        offset += kPatternSize;
+    }
+
+    return spkg;
+}
+
+
+
+void SearchPattern::dump() const {
+    std::cout << "SearchPattern {\n"
+              << "  sstable_name : \"" << sstable_name << "\"\n"
+              << "  slot_index   : " << slot_index << "\n"
+              << "}\n";
+}
+
+
+void SearchPackage::dump() const {
+    std::cout << "SearchPackage {\n"
+              << "  header.magic       : 0x" 
+              << std::hex << std::uppercase << header.magic 
+              << std::dec << "\n"
+              << "  header.pattern_num : " << header.pattern_num << "\n";
+
+    if (searchPatterns.empty()) {
+        std::cout << "  searchPatterns     : []\n";
+    } else {
+        std::cout << "  searchPatterns [\n";
+        for (size_t i = 0; i < searchPatterns.size(); ++i) {
+            std::cout << "    [" << i << "] ";
+            searchPatterns[i].dump(); // 呼叫 SearchPattern 的 dump()
+        }
+        std::cout << "  ]\n";
+    }
+    std::cout << "}\n";
 }
