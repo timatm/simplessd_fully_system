@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
+#include "internal_key.hh"
 
 std::string SstableManager::packingTable(const SkipList<Record, RecordComparator>& skiplist){
     std::string package;
@@ -29,16 +30,6 @@ std::string SstableManager::packingTable(const SkipList<Record, RecordComparator
     return package;
 }
 
-
-
-// forward declare HashModN (assume in another file)
-static size_t HashModN(const InternalKey& ikey, size_t n) {
-    std::string_view data = ikey.Encode(); 
-
-    std::hash<std::string_view> hasher;
-    size_t hash_value = hasher(data);
-    return hash_value % n;
-}
 
 char* SstableManager::keyPerPagePacking(const SkipList<Record, RecordComparator>& skiplist) {
     const size_t total_size = IMS_PAGE_NUM * IMS_PAGE_SIZE;
@@ -217,7 +208,151 @@ void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey
     std::cout << "[Main] Async write dispatched.\n";
 }
 
-
+// TODO
 void SstableManager::deleteSSTable(const std::string& filename) {
 
+}
+
+
+Status SstableIterator::Init(){
+    entries_.clear();
+    pos_ = 0;
+    sstable_mgr_->readSSTable(filename_,buf_);
+
+    st_ = Status::OK();
+    return st_; 
+}
+
+bool SstableIterator::Valid() const {
+    if (!st_.ok()) return false;
+    return (pos_ >= 0) && (pos_ < static_cast<int>(entries_.size()));
+}
+
+void SstableIterator::SeekToFirst() {
+    if (entries_.empty()) { pos_ = -1; return; }
+    pos_ = 0;
+}
+
+void SstableIterator::SeekToLast()  {
+    if (entries_.empty()) { pos_ = -1; return; }
+    pos_ = static_cast<int>(entries_.size()) - 1;
+}
+void SstableIterator::Seek(std::string_view internal_target) {
+    if (entries_.empty()) { pos_ = -1; return; }
+
+    // 预解码 target（仅在使用 icmp_ 时需要）
+    InternalKey target;
+    if (icmp_) {
+        target = InternalKey::Decode(internal_target.data());
+        // 如果 Decode 有失败分支，这里要设置 st_ 并 return
+    }
+
+    auto is_less = [&](std::string_view a_sv) -> bool {
+        if (icmp_) {
+            InternalKey ia = InternalKey::Decode(a_sv.data());
+            return (*icmp_)(ia, target);  // a < target ?
+        } else {
+            int c = std::memcmp(a_sv.data(), internal_target.data(),
+                                std::min(a_sv.size(), internal_target.size()));
+            if (c != 0) return c < 0;
+            return a_sv.size() < internal_target.size();
+        }
+    };
+
+    int l = 0, r = static_cast<int>(entries_.size()) - 1;
+    int ans = static_cast<int>(entries_.size());
+    while (l <= r) {
+        int m = (l + r) >> 1;
+        if (is_less(entry_key(entries_[m]))) {
+            l = m + 1;
+        } else {
+            ans = m;
+            r = m - 1;
+        }
+    }
+    pos_ = (ans == static_cast<int>(entries_.size())) ? -1 : ans;
+}
+
+
+
+void SstableIterator::Next() {
+    if (!Valid()) return;
+    ++pos_;
+    if (pos_ >= static_cast<int>(entries_.size())) pos_ = -1;
+}
+
+void SstableIterator::Prev() {
+    if (!Valid()) return;
+    --pos_;
+    if (pos_ < 0) pos_ = -1;
+}
+
+std::string_view SstableIterator::key() const {
+    if (!Valid()) return {};
+    return entry_key(entries_[pos_]);
+}
+
+
+std::string SstableIterator::value() const {
+    const auto& e = entries_[pos_];
+    InternalKey *ink_ptr = reinterpret_cast<InternalKey*>(buf_+e.key_off);
+    auto record = log_mgr_->readLog(ink_ptr->value_ptr.lpn,ink_ptr->value_ptr.offset);
+    if(record.has_value()){
+        return std::string_view(record.value());
+    }
+    return std::string_view(buf_ + e.val_off, e.val_len);
+}
+
+Status SstableIterator::status() const {
+    return st_;
+}
+
+
+std::vector<SstableIterator::EntryRef> SstableIterator::gen_sorted_view(){
+    std::vector<EntryRef> sorted_vec;
+    size_t slot_offset = 0;
+    if(!buf_){
+        return sorted_vec;
+    }
+    switch(static_cast<int>(type_)){
+        case static_cast<int>(PackingType::kKeyPerPage):
+            while( slot_offset < BLOCK_SIZE ){
+                InternalKey *ink_ptr = reinterpret_cast<InternalKey*>(buf_+slot_offset);
+                if(!ink_ptr->IsVaild()){
+                   break; 
+                }
+                EntryRef entry;
+                entry.key_off = slot_offset;
+                sorted_vec.push_back(entry);
+                slot_offset += IMS_PAGE_SIZE;
+            }
+            break;
+        case static_cast<int>(PackingType::kHash):
+            break;
+        
+        case static_cast<int>(PackingType::kKeyRange):
+            int row = 0 ,col = 0;
+            bool finished = true;
+            while(slot_offset < BLOCK_SIZE && finished){
+                while( row < IMS_PAGE_NUM){
+                    slot_offset = row * IMS_PAGE_SIZE + col * SLOT_SIZE;
+                    InternalKey *ink_ptr = reinterpret_cast<InternalKey*>(buf_+slot_offset);
+                    if(!ink_ptr->IsVaild()){
+                        finished = false;
+                        break; 
+                    }
+                    EntryRef entry;
+                    entry.key_off = slot_offset;
+                    sorted_vec.push_back(entry);
+                    ++row;
+                }
+                ++col;
+            }
+            break;
+        default:
+            pr_debug("Can't not generate sorted index");
+            break;
+    }
+
+    return sorted_vec;
 }

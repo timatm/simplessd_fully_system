@@ -7,6 +7,21 @@ InternalKey::InternalKey() {
     std::memset(this, 0, sizeof(InternalKey));
 }
 
+// InternalKey::InternalKey(const std::string_view user_key){
+//     assert(user_key.size() <= 40);
+//     key.key_size = static_cast<uint8_t>(user_key.size());
+//     std::memcpy(key.key, user_key.data(), key.key_size);
+//     std::memset(key.key + key.key_size, 0, 40 - key.key_size);
+// }
+
+InternalKey::InternalKey(const char* user_key,size_t size){
+    assert(size <= 40);
+    key.key_size = static_cast<uint8_t>(size);
+    std::memcpy(key.key, user_key, key.key_size);
+    std::memset(key.key + key.key_size, 0, 40 - key.key_size);
+}
+
+
 InternalKey::InternalKey(const std::string& user_key){
     assert(user_key.size() <= 40);
     key.key_size = static_cast<uint8_t>(user_key.size());
@@ -143,13 +158,17 @@ void InternalKey::dump() const {
     std::cout << "=========================\n";
 }
 
-bool InternalKey::operator()(const InternalKey& a,const InternalKey& b) const{
-uint8_t size = std::min(a.key.key_size,b.key.key_size);
-if(memcmp(a.key.key,b.key.key,size) != 0){
-    return a.key.key > b.key.key;
-}
-if(a.key.key_size != b.key.key_size){
-    return a.key.key_size > b.key.key_size;
-}
-return a.info.seq > b.info.seq;
+bool InternalKey::operator()(const InternalKey& a, const InternalKey& b) const {
+    int cmp = std::memcmp(a.key.key, b.key.key, std::min(a.key.key_size, b.key.key_size));
+    if (cmp != 0) return cmp < 0;
+    if (a.key.key_size != b.key.key_size) return a.key.key_size < b.key.key_size;
+    if (a.info.seq != b.info.seq) return a.info.seq > b.info.seq;  
+    return a.info.type > b.info.type;
+}                      
+
+bool InternalKey::IsVaild(){
+    if(info.type == UINT64_MAX){
+        return false;
+    }
+    return true;
 }

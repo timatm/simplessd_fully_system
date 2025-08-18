@@ -94,9 +94,12 @@ struct InternalKey {
 
     bool operator()(const InternalKey& a,const InternalKey& b) const;
     InternalKey();
+    // InternalKey(const std::string_view);
+    InternalKey(const char* user_key,size_t size);
     InternalKey(const std::string& user_key);
     InternalKey(const std::string& user_key, uint64_t seq, ValueType t);
     InternalKey(const std::string& user_key, uint32_t lpn,uint32_t offset,uint64_t seq, ValueType t);
+    bool IsVaild();
     std::string Encode() const;
     static InternalKey Decode(const std::string& buf);
     static InternalKey Decode(char* buf);

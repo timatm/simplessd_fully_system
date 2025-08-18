@@ -181,7 +181,6 @@ std::set<InternalKey ,SetComparator> API::parse_sstable(char* buffer) {
 
     while (offset + sizeof(InternalKey) <= BLOCK_SIZE) {
         InternalKey key;
-        // std::string buf(buffer ,BLOCK_SIZE);
         key = InternalKey::Decode( (buffer + offset));
         offset += sizeof(InternalKey);
         if(key.info.type == INVALID_KEY_TYPE){
@@ -372,23 +371,23 @@ Status API::range_query(std::string start_key, std::string end_key, std::set<std
     
     Key start(start_key);
     Key end(end_key);
-    auto sstables = lsmTree_->range_query(start, end);
+    auto sstables = lsmTree_->search_all_level(start, end);
     if (sstables.empty()) return Status::NotFound("No candidate SSTables for range query");
 
-    for (const auto& sstable : sstables) {
-        std::cout   << "Find SStable: " << sstable->filename << "  Key range [ " << sstable->rangeMin.toString() << " ~ "
-                    << sstable->rangeMax.toString() << " ]" <<std::endl;
-        char* buffer = (char*)allocateAligned(BLOCK_SIZE);
-        nvme_->nvme_read_sstable(sstable->filename, buffer);
-        getSSTable()->waitAllTasksDone();
-        auto keys = parse_sstable_page(buffer);
-        for (const auto& key : keys) {
-            if (key.UserKey() >= start_key && key.UserKey() <= end_key) {
-                result_set.insert(key.UserKey());
-            }
-        }
-        free(buffer);
-    }
+    // for (const auto& sstable : sstables) {
+    //     std::cout   << "Find SStable: " << sstable << "  Key range [ " << sstable->rangeMin.toString() << " ~ "
+    //                 << sstable->rangeMax.toString() << " ]" <<std::endl;
+    //     char* buffer = (char*)allocateAligned(BLOCK_SIZE);
+    //     nvme_->nvme_read_sstable(sstable->filename, buffer);
+    //     getSSTable()->waitAllTasksDone();
+    //     auto keys = parse_sstable_page(buffer);
+    //     for (const auto& key : keys) {
+    //         if (key.UserKey() >= start_key && key.UserKey() <= end_key) {
+    //             result_set.insert(key.UserKey());
+    //         }
+    //     }
+    //     free(buffer);
+    // }
     
     return Status::OK();
 }

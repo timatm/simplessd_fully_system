@@ -143,3 +143,18 @@ std::shared_ptr<TreeNode> LSMTree::find_node(const std::string& filename, int le
 std::shared_ptr<TreeNode> LSMTree::find_node(const std::string& filename) {
     return tree_->find_node(filename);
 }
+
+
+std::vector<std::vector<std::shared_ptr<TreeNode>>> LSMTree::search_all_level(const Key& queryMin, const Key& queryMax){
+    std::vector<std::vector<std::shared_ptr<TreeNode>>> result(MAX_LEVEL);
+    for(int level = 0;level < MAX_LEVEL;level++){
+        result[level] = tree_->search_overlap(level,queryMin,queryMax);
+    }
+    return result;
+}
+
+std::vector<std::shared_ptr<TreeNode>> LSMTree::search_one_level(int& level,const Key& queryMin, const Key& queryMax){
+    std::vector<std::shared_ptr<TreeNode>> result;
+    result = tree_->search_overlap(level,queryMin,queryMax);
+    return result;
+}

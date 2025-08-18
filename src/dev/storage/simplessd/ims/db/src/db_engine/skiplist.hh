@@ -6,6 +6,8 @@
 #include <memory>
 #include <random>
 #include <vector>
+#include <iostream>   // for std::cout
+#include <cstring>    // for std::memcmp
 
 template <typename Record, typename Comparator>
 class SkipList {
@@ -36,16 +38,28 @@ private:
     Comparator cmp_;
     mutable std::mt19937 gen_;
     mutable std::uniform_real_distribution<> dist_;
+
+    // 若你就是只服務擁有 InternalKey 的 Record，這個保留即可
     bool userKeyEqual(const InternalKey& a, const InternalKey& b);
+
     int RandomHeight();
     Node* CreateNode(const Record& record, int height);
-    Node* FindGreaterOrEqual(const Record& record, Node** prev = nullptr) const;
+
+    // 尋找 >= r 的第一個節點；prev（如提供）記錄各層最後一個 < r 的節點
+    Node* FindGreaterOrEqual(const Record& r, Node** prev = nullptr) const;
+
+    // 修正為以 Record 為比較基準的「嚴格小於 r 的最後一個節點」
+    Node* FindLessThan(const Record& r) const;
+
+    // 最後一個節點
+    Node* FindLast() const;
+
     bool Equal(const Record& a, const Record& b) const {
         return !cmp_(a, b) && !cmp_(b, a);
     }
 };
 
-// Node struct
+// ---------------- Node ----------------
 template <typename Record, typename Comparator>
 struct SkipList<Record, Comparator>::Node {
     Record record;
@@ -54,7 +68,7 @@ struct SkipList<Record, Comparator>::Node {
     Node(const Record& r, int height) : record(r), next(height, nullptr) {}
 };
 
-// Constructor
+// ---------------- Ctor/Dtor ----------------
 template <typename Record, typename Comparator>
 SkipList<Record, Comparator>::SkipList(Comparator cmp)
     : head_(new Node(Record(), kMaxHeight)),
@@ -63,7 +77,6 @@ SkipList<Record, Comparator>::SkipList(Comparator cmp)
       gen_(std::random_device{}()),
       dist_(0.0, 1.0) {}
 
-// Destructor
 template <typename Record, typename Comparator>
 SkipList<Record, Comparator>::~SkipList() {
     Node* node = head_;
@@ -74,7 +87,7 @@ SkipList<Record, Comparator>::~SkipList() {
     }
 }
 
-// Random height generator
+// ---------------- RandomHeight/CreateNode ----------------
 template <typename Record, typename Comparator>
 int SkipList<Record, Comparator>::RandomHeight() {
     int height = 1;
@@ -84,14 +97,20 @@ int SkipList<Record, Comparator>::RandomHeight() {
     return height;
 }
 
-// Create a new node
 template <typename Record, typename Comparator>
 typename SkipList<Record, Comparator>::Node*
 SkipList<Record, Comparator>::CreateNode(const Record& r, int height) {
     return new Node(r, height);
 }
 
-// Find greater or equal node
+// ---------------- Equal user key (專用於你的 Record/InternalKey) ----------------
+template <typename Record, typename Comparator>
+bool SkipList<Record, Comparator>::userKeyEqual(const InternalKey& a, const InternalKey& b) {
+    if (a.key.key_size != b.key.key_size) return false;
+    return std::memcmp(a.key.key, b.key.key, a.key.key_size) == 0;
+}
+
+// ---------------- FindGreaterOrEqual ----------------
 template <typename Record, typename Comparator>
 typename SkipList<Record, Comparator>::Node*
 SkipList<Record, Comparator>::FindGreaterOrEqual(const Record& r, Node** prev) const {
@@ -105,24 +124,18 @@ SkipList<Record, Comparator>::FindGreaterOrEqual(const Record& r, Node** prev) c
     return x->next[0];
 }
 
-template <typename Record, typename Comparator>
-bool SkipList<Record, Comparator>::userKeyEqual(const InternalKey& a, const InternalKey& b) {
-    if (a.key.key_size != b.key.key_size) return false;
-    return std::memcmp(a.key.key, b.key.key, a.key.key_size) == 0;
-}
-
-// Insert
+// ---------------- Insert ----------------
 template <typename Record, typename Comparator>
 void SkipList<Record, Comparator>::Insert(const Record& r) {
     Node* prev[kMaxHeight];
     Node* x = FindGreaterOrEqual(r, prev);
 
+    // 你的需求：同 user key 取更大 seq 的覆蓋
     if (x && userKeyEqual(x->record.internal_key, r.internal_key)) {
-        // 如果 user key 相同，且 r 的 sequence 較新，就更新
         if (r.internal_key.info.seq > x->record.internal_key.info.seq) {
             x->record = r;
         }
-        return;  // 更新完就不需要再插入新節點
+        return;
     }
 
     int height = RandomHeight();
@@ -140,22 +153,25 @@ void SkipList<Record, Comparator>::Insert(const Record& r) {
     }
 }
 
-
-// Contains
+// ---------------- Contains ----------------
 template <typename Record, typename Comparator>
 bool SkipList<Record, Comparator>::Contains(const Record& r) const {
     Node* x = FindGreaterOrEqual(r);
     return x && Equal(x->record, r);
 }
 
-// Iterator class
+// ---------------- Iterator ----------------
 template <typename Record, typename Comparator>
 class SkipList<Record, Comparator>::Iterator {
 public:
-    Iterator() : head_(nullptr), current_(nullptr), cmp_() {}
+    Iterator() : list_(nullptr), head_(nullptr), current_(nullptr), cmp_() {}
 
-    Iterator(Node* head, const Comparator& cmp)
-        : head_(head), current_(head->next[0]), cmp_(cmp) {}
+    // 改成帶 Self 指標，便於呼叫 FindLessThan/FindLast
+    explicit Iterator(const SkipList* list)
+        : list_(list),
+          head_(list->head_),
+          current_(list->head_->next[0]),
+          cmp_(list->cmp_) {}
 
     bool Valid() const { return current_ != nullptr; }
     const Record& record() const { return current_->record; }
@@ -164,33 +180,42 @@ public:
         if (Valid()) current_ = current_->next[0];
     }
 
-    void SeekToFirst() {
-        current_ = head_->next[0];
+    void Prev() {
+        if (!list_) return;
+        if (!Valid()) { 
+            current_ = list_->FindLast();
+            return;
+        }
+        current_ = list_->FindLessThan(current_->record);
+    }
+
+    void SeekToFirst() { current_ = head_->next[0]; }
+
+    void SeekToLast() {
+        if (!list_) return;
+        current_ = list_->FindLast();
     }
 
     void Seek(const Record& target) {
-        Node* x = head_;
-        for (int level = kMaxHeight - 1; level >= 0; --level) {
-            while (x->next[level] && cmp_(x->next[level]->record, target)) {
-                x = x->next[level];
-            }
-        }
-        current_ = x->next[0];
+        if (!list_) return;
+        current_ = list_->FindGreaterOrEqual(target, nullptr);
     }
 
 private:
+    const SkipList* list_;  // <== 新增：指向外部 SkipList，方便用其輔助函式
     Node* head_;
     Node* current_;
     Comparator cmp_;
 };
 
-
+// ---------------- GetIterator ----------------
 template <typename Record, typename Comparator>
 typename SkipList<Record, Comparator>::Iterator
 SkipList<Record, Comparator>::GetIterator() const {
-    return Iterator(head_, cmp_);
+    return Iterator(this);
 }
 
+// ---------------- Min/Max ----------------
 template <typename Record, typename Comparator>
 const Record* SkipList<Record, Comparator>::Min() const {
     Node* x = head_->next[0];
@@ -208,6 +233,7 @@ const Record* SkipList<Record, Comparator>::Max() const {
     return x != head_ ? &x->record : nullptr;
 }
 
+// ---------------- get_node_num/dump ----------------
 template <typename Record, typename Comparator>
 size_t SkipList<Record, Comparator>::get_node_num() const{
     size_t count = 0;
@@ -222,15 +248,39 @@ size_t SkipList<Record, Comparator>::get_node_num() const{
 
 template <typename Record, typename Comparator>
 void SkipList<Record, Comparator>::dump() const {
-    std::cout << "=== SkipList Dump (Total Nodes: " << get_node_num() << ") ===" << std::endl;
+    std::cout << "=== SkipList Dump (Total Nodes: " << get_node_num() << ") ===\n";
     Iterator it = GetIterator();
     it.SeekToFirst();
     while (it.Valid()) {
-        it.record().Dump();
+        it.record().Dump();  // 需確保 Record 有 Dump()
         it.Next();
     }
-    std::cout << "=== End of Dump ===" << std::endl;
+    std::cout << "=== End of Dump ===\n";
 }
 
+// ---------------- FindLessThan/FindLast（修正版） ----------------
+template <typename Record, typename Comparator>
+typename SkipList<Record, Comparator>::Node*
+SkipList<Record, Comparator>::FindLessThan(const Record& r) const {
+    Node* x = head_;
+    for (int level = max_height_ - 1; level >= 0; --level) {
+        while (x->next[level] && cmp_(x->next[level]->record, r)) {
+            x = x->next[level];
+        }
+    }
+    return (x == head_) ? nullptr : x;
+}
+
+template <typename Record, typename Comparator>
+typename SkipList<Record, Comparator>::Node*
+SkipList<Record, Comparator>::FindLast() const {
+    Node* x = head_;
+    for (int level = max_height_ - 1; level >= 0; --level) {
+        while (x->next[level]) {
+            x = x->next[level];
+        }
+    }
+    return (x == head_) ? nullptr : x;
+}
 
 #endif  // SIMPLE_SKIPLIST_H

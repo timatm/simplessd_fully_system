@@ -116,12 +116,13 @@ int MyNVMeDriver::nvme_read_ssKeyRange(std::string filename, char* buffer){
 
 
 
-int nvme_write_metadata(uint64_t lpn,char *buffer,size_t size){
+int MyNVMeDriver::nvme_write_metadata(uint64_t lpn,char *buffer,size_t size){
     if(buffer == nullptr){
         pr("Write metadata failed ,data buffer is nullptr");
         return COMMAND_FAILED;
     }
-    err = ims.read_sstable(&req,reinterpret_cast<uint8_t*>(buffer));
+    int err;
+    // int err = ims.read_sstable(&req,reinterpret_cast<uint8_t*>(buffer));
     if(err == STATUS_OPERATION_SUCCESS){
         pr("nvme write success");
         err = COMMAND_SUCCESS;

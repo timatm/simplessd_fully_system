@@ -8,6 +8,13 @@ Record::Record(const InternalKey& ikey, const std::string& val)
       value_size(static_cast<uint32_t>(val.size())),
       value(val) {}
 
+Record::Record(const InternalKey& ikey)
+    : internal_key_size(sizeof(ikey)),
+      internal_key(ikey),
+      value_size(0),
+      value() {}
+
+
 std::string Record::Encode() const {
     std::string buf;
     buf.reserve(sizeof(internal_key_size) + sizeof(value_size) +

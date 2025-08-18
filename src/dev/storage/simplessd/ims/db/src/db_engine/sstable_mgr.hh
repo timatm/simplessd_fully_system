@@ -17,10 +17,13 @@
 #include "thread.hh"
 #include "nvme_interface.hh"
 #include "lsmtree.hh"
+#include <string_view>
+#include "iterator.hh"
+#include "status.hh"
+#include "log_manager.hh"
 class SstableManager {
 public:
-    SstableManager() = default;
-    SstableManager(INVMEDriver& nvme,LSMTree& tree):nvme_(nvme) , lsmTree_(tree){}
+    SstableManager(INVMEDriver& nvme,LSMTree& tree):lsmTree_(tree) ,nvme_(nvme) {}
     ~SstableManager() = default;
     // TODO
     void init();
@@ -51,7 +54,54 @@ private:
     char* keyRangePacking(const SkipList<Record,RecordComparator> &skiplist);
 };
 
-static void* allocateAligned(size_t size) {
+class SstableIterator : public InternalIterator{
+public:
+    struct EntryRef {
+        uint32_t key_off;
+    };
+
+    SstableIterator(SstableManager& smgr,
+                    LOG_MANAGER& lmgr,
+                    const InternalKeyComparator* icmp,
+                    std::string filename)
+        : sstable_mgr_(&smgr),log_mgr_(&lmgr) ,icmp_(icmp), filename_(std::move(filename)) {}
+
+    Status Init();
+    bool Valid() const override;
+    void SeekToFirst() override;
+    void SeekToLast()  override;
+
+    void Seek(std::string_view internal_target) override;
+
+    void Next() override;
+    void Prev() override;
+
+    std::string_view key()   const override;
+    std::string value();
+
+    Status status() const override;
+
+    size_t num_entries() const ;
+
+private:
+    std::string_view entry_key(const EntryRef& e) const {
+        return std::string_view(buf_+ e.key_off, sizeof(InternalKey));
+    }
+    std::vector<EntryRef> gen_sorted_view();
+    std::string filename_;        
+    SstableManager* sstable_mgr_{nullptr};
+    LOG_MANAGER* log_mgr_{nullptr};
+    const InternalKeyComparator* icmp_{nullptr};
+    char* buf_;
+    std::vector<EntryRef> entries_;
+    int pos_ = -1;
+    Status st_;
+    PackingType type_;
+};
+
+
+
+static inline void* allocateAligned(size_t size) {
     void* ptr = nullptr;
     if (posix_memalign(&ptr, 4096, size) != 0 || ptr == nullptr) {
         throw std::bad_alloc();

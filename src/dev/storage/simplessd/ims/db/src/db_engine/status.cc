@@ -39,7 +39,13 @@ const char* Status::CopyState(const char* state) {
 Status Status::OK() {
     return Status();
 }
+Status Status::Empty() {
+    return Status(kEmpty,"");
+}
 
+Status Status::NotSupported(const std::string& msg) {
+    return Status(kNotSupported, msg);
+}
 Status Status::NotFound(const std::string& msg) {
     return Status(kNotFound, msg);
 }
@@ -62,6 +68,10 @@ bool Status::IsCorruption() const {
 
 bool Status::IsIOError() const {
     return state_ != nullptr && state_[0] == kIOError;
+}
+
+bool Status::IsEmpty() const {
+    return state_ != nullptr && state_[0] == kEmpty;
 }
 
 std::string Status::ToString() const {

@@ -9,12 +9,9 @@
 #include "skiplist.hh"
 #include "def.hh"
 #include "options.hh"
-struct RecordComparator {
-    bool operator()(const Record& a, const Record& b) const {
-        InternalKeyComparator cmp;
-        return cmp(a.internal_key, b.internal_key);
-    }
-};
+#include "iterator.hh"
+
+
 
 class MemTable {
 public:
@@ -30,9 +27,6 @@ public:
     InternalKey getMaxKey(){ return skiplist_.Max()->internal_key ;};
     void setPackingT(PackingType t){packing_type_ = static_cast<int>(t); }
 private:
-    // std::string keyPerPagePacking();
-    // std::string keyHashPacking();
-    // std::string keyRangePacking();
     SkipList<Record,RecordComparator> skiplist_;  // SkipList 儲存 Record
     uint32_t node_count_ = 0;              // SkipList 節點數
     size_t size_ = 0;                      // 估計記憶體大小
@@ -42,7 +36,42 @@ private:
     InternalKey maxRange_;
 };
 
-// 外部雜湊工具
+class MemTableIterator : public InternalIterator {
+public:
+    MemTableIterator(const std::shared_ptr<SkipList<Record, RecordComparator>>& list,
+                     const InternalKeyComparator* icmp);
+
+    bool Valid() const override;
+
+    void SeekToFirst() override;
+    void SeekToLast()  override;
+    void Seek(std::string_view internal_target) override;
+
+    void Next() override;
+    void Prev() override;
+
+    std::string_view key()   const override { return std::string_view(key_buf_); }
+    std::string_view value() const { return value_buf_; }
+
+    Status status() const override { return status_; }
+
+private:
+    void SyncKV();                   // 根據底層 iter 同步 key/value Slice
+
+private:
+    std::shared_ptr<SkipList<Record, RecordComparator>> list_;
+    typename SkipList<Record, RecordComparator>::Iterator it_;
+    const InternalKeyComparator* icmp_; 
+
+    std::string key_buf_;
+    std::string_view value_buf_;
+
+    Status status_{};
+};
+
+
+
+
 size_t HashModN(const InternalKey& ikey, size_t n);
 
 #endif

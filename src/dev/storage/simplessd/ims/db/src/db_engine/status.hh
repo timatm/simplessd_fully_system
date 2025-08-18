@@ -15,12 +15,13 @@ public:
     static Status NotFound(const std::string& msg);
     static Status Corruption(const std::string& msg);
     static Status IOError(const std::string& msg);
-
+    static Status NotSupported(const std::string& msg);
+    static Status Empty();
     bool ok() const { return (state_ == nullptr); }
     bool IsNotFound() const;
     bool IsCorruption() const;
     bool IsIOError() const;
-
+    bool IsEmpty() const;
     std::string ToString() const;
 
 private:
@@ -29,6 +30,8 @@ private:
         kNotFound = 1,
         kCorruption = 2,
         kIOError = 3,
+        kEmpty = 4,
+        kNotSupported = 5
     };
 
     Status(Code code, const std::string& msg);

@@ -20,6 +20,8 @@ public:
     void dump_lsmtere() const {
         tree_->dump();
     }
+    std::vector<std::vector<std::shared_ptr<TreeNode>>> search_all_level(const Key& queryMin, const Key& queryMax);
+    std::vector<std::shared_ptr<TreeNode>> search_one_level(int& level,const Key& queryMin, const Key& queryMax);
     std::string encode() const{return tree_->encode();};
     bool decode(const std::string& buf){ return tree_->decode(buf);};
 private:
@@ -27,4 +29,4 @@ private:
 };
 
 
-#endif
+#endif 

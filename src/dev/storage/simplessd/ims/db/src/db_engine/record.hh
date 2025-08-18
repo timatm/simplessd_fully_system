@@ -13,12 +13,20 @@ struct Record {
 
     Record() = default;
     Record(const InternalKey& ikey, const std::string& val);
+    Record(const InternalKey& ikey);
 
     std::string Encode() const;
     static Record Decode(const std::string& data);
     void Dump() const;
 };
 
+
+struct RecordComparator {
+    bool operator()(const Record& a, const Record& b) const {
+        InternalKeyComparator cmp;
+        return cmp(a.internal_key, b.internal_key);
+    }
+};
 #pragma pack(pop)
 
 #endif  // RECORD_HH
