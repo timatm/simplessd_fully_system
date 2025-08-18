@@ -8,6 +8,8 @@
 #include <unordered_map>
 #include <set>
 #include <memory>
+#include <string_view>
+
 #include "def.hh"
 #include "internal_key.hh"
 #include "skiplist.hh"
@@ -17,10 +19,20 @@
 #include "thread.hh"
 #include "nvme_interface.hh"
 #include "lsmtree.hh"
-#include <string_view>
 #include "iterator.hh"
 #include "status.hh"
 #include "log_manager.hh"
+
+
+static inline void* allocateAligned(size_t size) {
+    void* ptr = nullptr;
+    if (posix_memalign(&ptr, 4096, size) != 0 || ptr == nullptr) {
+        throw std::bad_alloc();
+    }
+    std::memset(ptr, 0, size);
+    return ptr;
+}
+
 class SstableManager {
 public:
     SstableManager(INVMEDriver& nvme,LSMTree& tree):lsmTree_(tree) ,nvme_(nvme) {}
@@ -60,11 +72,14 @@ public:
         uint32_t key_off;
     };
 
-    SstableIterator(SstableManager& smgr,
-                    LOG_MANAGER& lmgr,
+    SstableIterator(SstableManager* smgr,
+                    LOG_MANAGER* lmgr,
                     const InternalKeyComparator* icmp,
-                    std::string filename)
-        : sstable_mgr_(&smgr),log_mgr_(&lmgr) ,icmp_(icmp), filename_(std::move(filename)) {}
+                    std::string filename,
+                    PackingType type)
+        : sstable_mgr_(smgr),log_mgr_(lmgr) ,icmp_(icmp), filename_(std::move(filename)),type_(type) {
+            buf_ = static_cast<char*>(allocateAligned(BLOCK_SIZE));
+        }
 
     Status Init();
     bool Valid() const override;
@@ -77,11 +92,11 @@ public:
     void Prev() override;
 
     std::string_view key()   const override;
-    std::string value();
+    bool SupportsValueCopy() const override { return true; }
+    Status ReadValue(std::string& /*out*/) const override ;
 
     Status status() const override;
 
-    size_t num_entries() const ;
 
 private:
     std::string_view entry_key(const EntryRef& e) const {
@@ -101,12 +116,4 @@ private:
 
 
 
-static inline void* allocateAligned(size_t size) {
-    void* ptr = nullptr;
-    if (posix_memalign(&ptr, 4096, size) != 0 || ptr == nullptr) {
-        throw std::bad_alloc();
-    }
-    std::memset(ptr, 0, size);
-    return ptr;
-}
 #endif // __SSTABLE_MGR_HH__

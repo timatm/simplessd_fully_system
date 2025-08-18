@@ -99,7 +99,7 @@ struct InternalKey {
     InternalKey(const std::string& user_key);
     InternalKey(const std::string& user_key, uint64_t seq, ValueType t);
     InternalKey(const std::string& user_key, uint32_t lpn,uint32_t offset,uint64_t seq, ValueType t);
-    bool IsVaild();
+    bool IsValid();
     std::string Encode() const;
     static InternalKey Decode(const std::string& buf);
     static InternalKey Decode(char* buf);

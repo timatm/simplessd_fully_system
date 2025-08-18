@@ -51,14 +51,15 @@ public:
     void Prev() override;
 
     std::string_view key()   const override { return std::string_view(key_buf_); }
-    std::string_view value() const { return value_buf_; }
+    bool SupportsValueView() const override { return true; }
+    std::optional<std::string_view> value_view() const override{
+        return value_buf_.empty() ? std::nullopt : std::make_optional(value_buf_);
+    }
 
     Status status() const override { return status_; }
 
 private:
     void SyncKV();                   // 根據底層 iter 同步 key/value Slice
-
-private:
     std::shared_ptr<SkipList<Record, RecordComparator>> list_;
     typename SkipList<Record, RecordComparator>::Iterator it_;
     const InternalKeyComparator* icmp_; 

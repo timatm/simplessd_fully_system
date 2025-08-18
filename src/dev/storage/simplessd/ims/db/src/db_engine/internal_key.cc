@@ -166,7 +166,7 @@ bool InternalKey::operator()(const InternalKey& a, const InternalKey& b) const {
     return a.info.type > b.info.type;
 }                      
 
-bool InternalKey::IsVaild(){
+bool InternalKey::IsValid(){
     if(info.type == UINT64_MAX){
         return false;
     }

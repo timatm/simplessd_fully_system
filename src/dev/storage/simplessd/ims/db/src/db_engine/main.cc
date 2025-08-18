@@ -17,65 +17,156 @@
 //     std::memset(ptr, 0, size);
 //     return ptr;
 // }
-// int main() {
-//     API db;
-//     Status err = db.open();
-//     if(err.ok()) {
-//         db.dump_all();
-//         std::cout << "Database opened successfully.\n";
-//     } else {
-//         std::cerr << "Failed to open database: " << err.ToString() << "\n";
-//         return -1;
-//     }
+
+// main.cc – smoke test for SstableIterator
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+#include <vector>
+#include <optional>
+#include <iostream>
+
+// === 依你的專案調整這些 include ===
+#include "sstable_mgr.hh"      // 內含 SstableIterator / SstableManager（或等價標頭）
+#include "internal_key.hh"     // InternalKey / comparator
+#include "status.hh"
+
+// 小工具：把 InternalKey bytes 轉成可讀字串（依你實作調整）
+static std::string key_to_str(std::string_view ik_bytes) {
+    // 若你有 InternalKey::Decode(std::string_view)
+    InternalKey ik = InternalKey::Decode(ik_bytes.data());
+    return ik.UserKey();  // 你已有的 API
+}
+
+// 列印一段 range（前 N 筆）
+static void dump_first_n(SstableIterator& it, int n, const char* title) {
+    std::cout << "== " << title << " ==" << std::endl;
+    int cnt = 0;
+    for (it.SeekToFirst(); it.Valid() && cnt < n; it.Next(), ++cnt) {
+        auto ksv = it.key();
+        std::string ks = key_to_str(ksv);
+        std::string v;
+        Status s = it.ReadValue(v);   // 若該 iterator 支援 value
+        if (!s.ok()) v = "<ReadValue failed>";
+        std::cout << ks << " => " << v << "\n";
+    }
+    std::cout << "--------------\n";
+}
+
+// 逆向列印最後 N 筆
+static void dump_last_n(SstableIterator& it, int n, const char* title) {
+    std::cout << "== " << title << " ==" << std::endl;
+    int cnt = 0;
+    for (it.SeekToLast(); it.Valid() && cnt < n; it.Prev(), ++cnt) {
+        auto ksv = it.key();
+        std::string ks = key_to_str(ksv);
+        std::string v;
+        Status s = it.ReadValue(v);
+        if (!s.ok()) v = "<ReadValue failed>";
+        std::cout << ks << " => " << v << "\n";
+    }
+    std::cout << "--------------\n";
+}
+
+// 驗證 Seek：給定目標 key（user_key 字串），構造 InternalKey 目標並 Seek
+static void test_seek(SstableIterator& it, const std::string& user_key, const char* tag) {
+    // 依你的 InternalKey 編碼，構造「查找用」internal key（通常 seq=最大、type=Value）
+    InternalKey target(user_key);
+    target.info.seq = UINT32_MAX;  // 或你專案定義的「最大序號」
+    target.info.type = /*kTypeValue*/ 1;  // 視你專案定義
+
+    // 假設有 Encode() 回傳 bytes（string 或 string_view）
+    std::string target_bytes = std::string(target.Encode());
+    it.Seek(std::string_view(target_bytes.data(), target_bytes.size()));
+    std::cout << "[Seek " << tag << " \"" << user_key << "\"] => ";
+    if (it.Valid()) {
+        std::string ks = key_to_str(it.key());
+        std::string v;
+        Status s = it.ReadValue(v);
+        if (!s.ok()) v = "<ReadValue failed>";
+        std::cout << ks << " | " << v << "\n";
+    } else {
+        std::cout << "<Invalid>\n";
+    }
+}
+
+// 針對一個檔案（代表一張 SSTable）跑一輪完整 smoke test
+static void run_table_test(SstableManager* smgr,
+                           LOG_MANAGER*    lmgr,
+                           const InternalKeyComparator& icmp,
+                           const std::string& filename,
+                           PackingType type,
+                           const char* title)
+{
+    SstableIterator it(smgr, lmgr, &icmp, filename, type);
+
+    Status s = it.Init();
+    if (!s.ok()) {
+        std::cerr << "Init failed for " << filename << ": " << s.ToString() << "\n";
+        return;
+    }
+
+    // 基本遍歷
+    dump_first_n(it, 10, (std::string(title) + " | first 10").c_str());
+    dump_last_n(it, 10,  (std::string(title) + " | last 10").c_str());
+
+    // 多組 Seek 測試（你可依你的資料集調整鍵值）
+    // test_seek(it, "key0003", "exact");
+    // test_seek(it, "key00033", "ceil");
+    // test_seek(it, "zzz", "beyond-max");
+}
+
+
+
+int main() {
+    API db;
+    Status err = db.open();
+    if(err.ok()) {
+        // db.dump_all();
+        std::cout << "Database opened successfully.\n";
+    } else {
+        std::cerr << "Failed to open database: " << err.ToString() << "\n";
+        return -1;
+    }
     
-//     for (int i = 0; i < 1024; ++i) {
-//         std::string key = "key" + std::to_string(i);
-//         std::string value = "value" + std::to_string(i);
-//         Status s = db.put(key, value);
-//         if (!s.ok()) {
-//             std::cerr << "Put failed at index " << i << " with key: " << key << "\n";
-//         }
-//     }
-//     db.getSSTable()->waitAllTasksDone();
-//     db.getLogManager()->flush_buffer();
-//     // db.nvme_->nvme_dump_ims();
-//     // for (int i = 0; i < 129; ++i) {
-//     //     std::string key = "key2";
-//     //     std::string value = "value" + std::to_string(i);
-//     //     Status s = db.put(key, value);
-//     //     if (!s.ok()) {
-//     //         std::cerr << "Put failed at index " << i << " with key: " << key << "\n";
-//     //     }
-//     // }
+    for (int i = 0; i < 1024; ++i) {
+        std::string key = "key" + std::to_string(i);
+        std::string value = "value" + std::to_string(i);
+        Status s = db.put(key, value);
+        if (!s.ok()) {
+            std::cerr << "Put failed at index " << i << " with key: " << key << "\n";
+        }
+    }
+    db.getSSTable()->waitAllTasksDone();
+    // db.getLogManager()->flush_buffer();
+    // db.nvme_->nvme_dump_ims();
 
 
-
-//     // std::cout << "Inserted 129 key-value pairs successfully.\n";
-//     // db.getSSTable()->waitAllTasksDone();
-//     // db.dump_memtable();
-//     // db.nvme_->nvme_dump_ims();
-
-
-//     // db.dump_lsmtree();
-//     // char * buffer = (char *)allocateAligned(BLOCK_SIZE);
+    // std::cout << "Inserted 129 key-value pairs successfully.\n";
+    // db.getSSTable()->waitAllTasksDone();
+    db.dump_memtable();
+    db.dump_lsmtree();
+    InternalKeyComparator icmp;
+    // char * buffer = (char *)allocateAligned(BLOCK_SIZE);
+    run_table_test(db.getSSTable(), db.getLogManager(), icmp, "00000000000000000000000000000000000",   PackingType::kKeyPerPage, "KeyPerPage");
 
 
+    // std::string search_value;
+    // std::optional<Record> result = db.getLogManager()->readLog(640,0);
+    // if(result.has_value()){
+    //     result->Dump();
+    // } else {
+    //     std::cout << "No record found at LPN 640, offset 0\n";
+    // }
+    // db.get("key20", search_value);
+    // std::cout << search_value << std::endl;
 
-//     std::string search_value;
-//     std::optional<Record> result = db.getLogManager()->readLog(640,0);
-//     if(result.has_value()){
-//         result->Dump();
-//     } else {
-//         std::cout << "No record found at LPN 640, offset 0\n";
-//     }
-//     // db.get("key20", search_value);
-//     // std::cout << search_value << std::endl;
 
-
-//    // // free(buffer);
-//     // return 0;
+   // // free(buffer);
+    // return 0;
  
-// }
+}
 
 
 
@@ -115,162 +206,3 @@
  
 // }
 
-
-#include <iostream>
-#include <memory>
-#include <string>
-#include <vector>
-#include <optional>
-#include <cassert>
-
-// ======= 假设你已有这些头文件/类型 =======
-// 实际请替换为你的工程内的头档
-#include "memtable.hh"        // 含 MemTable 定义
-#include "skiplist.hh"        // 含 SkipList<Record, RecordComparator>
-#include "record.hh"          // 含 Record 定义
-#include "slice.hh"           // 如果 InternalKey / Slice 需要
-#include "status.hh"          // Status
-#include "db_api.hh"          // 如果有需要
-// ==========================================
-
-// 用来打印一条 Record（依你的 Record/Key API 调整）
-static void PrintKV(const std::string_view internal_user_key,
-                    const std::string_view value) {
-    std::cout << "  key=" << internal_user_key << "  value=" << value << "\n";
-}
-
-// 简单辅助：构造 InternalKey 与 Record（依你的构造函数调整）
-// 在 main() 一开始建立一个池，持久保存 key 的 storage
-
-
-int main() {
-    std::cout << "=== MemTable / MemTableIterator 功能測試 ===\n";
-
-    // 1) 建立 MemTable，先測空表的 iterator 行為
-    MemTable mt;
-
-    // aliasing shared_ptr：不擁有，僅包裝 MemTable 內部的 skiplist_
-    // 注意：GetSkipList() 回的是 const&，Iterator 通常需要非 const
-    // 這裡做 const_cast 僅作測試用途
-    auto* raw_ptr = const_cast<SkipList<Record, RecordComparator>*>(&mt.GetSkipList());
-    std::shared_ptr<SkipList<Record, RecordComparator>> list_sp(raw_ptr, [](auto*){/* no-op */});
-
-    // 你的比較器目前沒有被 iterator 使用，但還是傳一個指標（可為 nullptr）
-    InternalKeyComparator icmp;  // 假設有預設建構；若沒有，傳 nullptr 也行
-    MemTableIterator it(list_sp, &icmp);
-
-    // 空表測試
-    std::cout << "\n[空表測試]\n";
-    std::cout << "Valid() 初始 = " << (it.Valid() ? "true" : "false") << "\n";
-    it.SeekToFirst();
-    std::cout << "SeekToFirst -> Valid() = " << (it.Valid() ? "true" : "false") << "\n";
-    it.SeekToLast();
-    std::cout << "SeekToLast  -> Valid() = " << (it.Valid() ? "true" : "false") << "\n";
-    it.Seek("k10");
-    std::cout << "Seek('k10') -> Valid() = " << (it.Valid() ? "true" : "false") << "\n";
-
-    // 2) 插入一些資料
-    std::cout << "\n[插入資料]\n";
-    // std::vector<std::pair<std::string,std::string>> kvs = {
-    //     {"k01","v01"}, {"k03","v03"}, {"k02","v02"},
-    //     {"k10","v10"}, {"k07","v07"}, {"k20","v20"},
-    // };
-    Record ik1(InternalKey("k01",1,ValueType::kTypeValue));
-    Record ik2(InternalKey("k03",2,ValueType::kTypeValue));
-    Record ik3(InternalKey("k02",3,ValueType::kTypeValue));
-    Record ik4(InternalKey("k10",4,ValueType::kTypeValue));
-    Record ik5(InternalKey("k07",5,ValueType::kTypeValue));
-    Record ik6(InternalKey("k20",6,ValueType::kTypeValue));
-    ik1.value = "v01";
-    ik2.value = "v03";
-    ik3.value = "v02";
-    ik4.value = "v10";
-    ik5.value = "v07";
-    ik6.value = "v20";
-    mt.Put(ik1);
-    mt.Put(ik2);
-    mt.Put(ik3);
-    mt.Put(ik4);
-    mt.Put(ik5);
-    mt.Put(ik6);
-    // for (auto& [k, v] : kvs) {
-    //     InternalKey ik(k);
-    //     Record r(ik);
-    //     r.value = v;
-    //     mt.Put(r);
-    //     std::cout << "Put(" << k << ", " << v << ")\n";
-    // }
-
-    // 3) 驗證 MemTable::Get()
-    std::cout << "\n[Get() 測試]\n";
-    auto check_get = [&](const std::string& k) {
-        auto v = mt.Get(k);
-        std::cout << "Get(" << k << ") -> ";
-        if (v.has_value()) std::cout << *v << "\n";
-        else std::cout << "(not found)\n";
-    };
-    check_get("k01");
-    check_get("k02");
-    check_get("k07");
-    check_get("k09"); // 不存在
-    check_get("k20");
-
-    // 4) 重新建立 iterator（也可以沿用）
-    MemTableIterator it2(list_sp, &icmp);
-
-    // 5) 正向遍歷：SeekToFirst -> Next
-    std::cout << "\n[正向遍歷 SeekToFirst/Next]\n";
-    it2.SeekToFirst();
-    while (it2.Valid()) {
-        PrintKV(it2.key(), it2.value());
-        it2.Next();
-    }
-    std::cout << "(到尾端) Valid() = " << (it2.Valid() ? "true" : "false") << "\n";
-
-    // 6) 反向遍歷：SeekToLast -> Prev
-    std::cout << "\n[反向遍歷 SeekToLast/Prev]\n";
-    it2.SeekToLast();
-    while (it2.Valid()) {
-        PrintKV(it2.key(), it2.value());
-        it2.Prev();
-    }
-    std::cout << "(到頭端) Valid() = " << (it2.Valid() ? "true" : "false") << "\n";
-
-    // 7) Seek 定位測試
-    std::cout << "\n[Seek 定位測試]\n";
-    auto try_seek = [&](std::string target) {
-        it2.Seek(target);
-        std::cout << "Seek('" << target << "'): ";
-        if (it2.Valid()) {
-            std::cout << "命中/或下界 -> ";
-            PrintKV(it2.key(), it2.value());
-        } else {
-            std::cout << "無效（可能 target 大於最大鍵）\n";
-        }
-    };
-    try_seek("k00"); // 小於最小鍵
-    try_seek("k01"); // 等於某鍵
-    try_seek("k04"); // 介於 k03 與 k07 之間，看你的 Seek 是下界則應到 k07
-    try_seek("k99"); // 大於最大鍵，應該 Invalid
-
-    // 8) Min / Max Key（如果你的 getMinKey/getMaxKey 沒有處理空表，請自行加上判斷）
-    std::cout << "\n[Min/Max Key 測試]\n";
-    try {
-        auto mink = mt.getMinKey(); // 若空表會崩，這裡目前非空
-        auto maxk = mt.getMaxKey();
-        std::cout << "MinKey = " << mink.UserKey() << "\n";
-        std::cout << "MaxKey = " << maxk.UserKey() << "\n";
-    } catch (...) {
-        std::cout << "getMinKey/getMaxKey 可能在空表時崩潰，請改為回傳 std::optional\n";
-    }
-
-    // 9) ApproximateMemoryUsage / memTableIsFull / Dump（如有）
-    std::cout << "\n[其他 API]\n";
-    std::cout << "ApproximateMemoryUsage() = " << mt.ApproximateMemoryUsage() << " bytes (大略)\n";
-    std::cout << "memTableIsFull() = " << (mt.memTableIsFull() ? "true" : "false") << "\n";
-    std::cout << "Dump():\n";
-    mt.Dump();
-
-    std::cout << "\n=== 測試完成 ===\n";
-    return 0;
-}

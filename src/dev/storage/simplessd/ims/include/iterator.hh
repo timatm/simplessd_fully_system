@@ -26,7 +26,6 @@ public:
     virtual bool SupportsValueView() const { return false; }
     virtual std::optional<std::string_view> value_view() const { return std::nullopt; }
 
-    // 可选能力：拥有权拷贝
     virtual bool SupportsValueCopy() const { return false; }
     virtual Status ReadValue(std::string& /*out*/) const {
         return Status::NotSupported("iterator does not support value");

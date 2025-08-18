@@ -19,6 +19,7 @@ API::API(){
     logManager_ = std::make_unique<LOG_MANAGER>(*nvme_);
     global_seq_ = 0;
     sstableManager_ = std::make_unique<SstableManager>(*nvme_,*lsmTree_);
+    
 }
 Status API::open() {
     pr_info("Opening database...");
@@ -191,7 +192,22 @@ std::set<InternalKey ,SetComparator> API::parse_sstable(char* buffer) {
 
     return keys;
 }
-
+void API::dump_system() {
+    std::cout << "Dumping system information..." << std::endl;
+    std::cout << "SSD config:" << std::endl;
+    std::cout   << "channel num: " << CHANNEL_NUM
+                << ", plane num: " << PLANE_NUM
+                << ", die num: " << DIE_NUM
+                << ", package num: " << PACKAGE_NUM
+                << ", block num: " << BLOCK_NUM
+                << ", page num: " << IMS_PAGE_NUM
+                << ", page size: " << IMS_PAGE_SIZE
+                << std::endl;
+    std::cout << "DB config:" << std::endl;
+    std::cout << "Global sequence number: " << global_seq_.load() << std::endl;
+    std::cout << "SSD simulator type:" << ( NVME_DRIVER == 0 ? "My sim" : "SimpleSSD sim" )<< std::endl;
+    std::cout << "SStable packing strategy: " << std::endl;
+}
 
 
 void API::dump_memtable() {

@@ -31,6 +31,7 @@ public:
     Status search(std::string key ,std::string& vlaue);
     Status range_query(std::string start_key, std::string end_key, std::set<std::string>& result_set);
 
+    void dump_system();
     void dump_memtable();
     void dump_lsmtree();
     void dump_log_manager();

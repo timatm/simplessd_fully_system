@@ -7,5 +7,5 @@ enum class PackingType {
 };
 
 
-#define PACKING_T (PackingType::kKeyPerPage)
+#define PACKING_T (PackingType::kKeyRange)
 #endif  // __OPTIONS__HH__

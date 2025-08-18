@@ -519,7 +519,6 @@ int write_metadata(uint8_t *buffer, size_t size){
 
     int err = OPERATION_SUCCESS;
     if (err != OPERATION_SUCCESS) {
-        pr_debug("Write metadata failed at LPN %lu");
         return OPERATION_FAILURE;
     }
     return OPERATION_SUCCESS;
