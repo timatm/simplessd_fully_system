@@ -59,10 +59,6 @@ struct Key {
         std::memcpy(result.key, data + 1, 40);
         return result;
     }
-
-    std::string to_string() const {
-        return std::string(reinterpret_cast<const char*>(key), key_size);
-    }
 };
 
 #pragma pack(push,1)

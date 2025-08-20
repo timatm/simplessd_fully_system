@@ -153,7 +153,7 @@ std::vector<std::vector<std::shared_ptr<TreeNode>>> LSMTree::search_all_level(co
     return result;
 }
 
-std::vector<std::shared_ptr<TreeNode>> LSMTree::search_one_level(int& level,const Key& queryMin, const Key& queryMax){
+std::vector<std::shared_ptr<TreeNode>> LSMTree::search_one_level(int level,const Key& queryMin, const Key& queryMax){
     std::vector<std::shared_ptr<TreeNode>> result;
     result = tree_->search_overlap(level,queryMin,queryMax);
     return result;

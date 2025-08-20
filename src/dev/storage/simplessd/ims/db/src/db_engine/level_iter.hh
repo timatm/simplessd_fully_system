@@ -102,7 +102,7 @@ private:
     bool   overlap_with_range_with_target_(const L0FileMeta& fm, std::string_view target) const;
 
     // 從你的系統取 L0 檔案清單（在 .cc 實作）
-    bool   LoadL0Metas_(LSMTree* tree, std::vector<L0FileMeta>& out);
+    bool   LoadL0Metas_();
 
     // 把 opts_ 轉成 canonical internal bounds（若已是 InternalKey 就直接沿用）
     void   build_bounds_from_opts_();

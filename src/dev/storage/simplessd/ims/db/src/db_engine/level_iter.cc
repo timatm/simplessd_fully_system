@@ -4,22 +4,23 @@
 static constexpr size_t kIKeySize = sizeof(InternalKey);
 
 // ---- ctor ----
-Level0Iterator::Level0Iterator(SstableManager& smgr,
-                                         LOG_MANAGER&    lmgr,
-                                         const InternalKeyComparator* icmp,
-                                         LSMTree&        tree,
-                                         Options         opts)
+Level0Iterator::Level0Iterator( SstableManager& smgr,
+                                LOG_MANAGER&    lmgr,
+                                const InternalKeyComparator* icmp,
+                                LSMTree&        tree,
+                                Options         opts)
     : smgr_(&smgr), lmgr_(&lmgr), icmp_(icmp), tree_(&tree), opts_(std::move(opts)),
       heap_(HeapCmp{icmp_, &children_}) {}
 
 // ---- public ----
 Status Level0Iterator::Init() {
     st_ = Status::OK();
-    metas_.clear(); children_.clear();
+    metas_.clear();
+    children_.clear();
     clear_heap_();
     curr_idx_ = static_cast<size_t>(-1);
-
-    if (!LoadL0Metas_(tree_, metas_)) {
+    build_bounds_from_opts_();
+    if (!LoadL0Metas_()) {
         st_ = Status::IOError("LoadL0Metas failed");
         return st_;
     }
@@ -30,7 +31,7 @@ Status Level0Iterator::Init() {
     heap_ = Heap(HeapCmp{icmp_, &children_});
 
     // 建立 canonical internal bounds
-    build_bounds_from_opts_();
+    
 
     // 一次性開所有檔案
     if (auto s = open_all_children_(); !s.ok()) {
@@ -154,8 +155,7 @@ Status Level0Iterator::open_all_children_() {
     for (size_t i = 0; i < children_.size(); ++i) {
         auto& ch = children_[i];
         if (ch.opened) continue;
-        auto it = std::make_unique<SstableIterator>(*smgr_, *lmgr_, icmp_, ch.meta.filename);
-        // 可選：it->SetPackingType(ch.meta.packing);
+        auto it = std::make_unique<SstableIterator>(*smgr_, *lmgr_, icmp_, ch.meta.filename,PACKING_T);
         auto s = it->Init();
         if (!s.ok()) return s;
         ch.it = std::move(it);
@@ -294,8 +294,6 @@ void Level0Iterator::build_bounds_from_opts_() {
     canon_lower_.reset();
     canon_upper_.reset();
 
-    // 這裡假設 opts_.lower / opts_.upper 已是 InternalKey(64B) 的編碼；
-    // 若你那邊是 UserKey，請在呼叫此 iterator 前轉成 InternalKey 哨兵再塞進 Options。
     if (opts_.lower) {
         assert(opts_.lower->size() == kIKeySize);
         canon_lower_ = *opts_.lower;
@@ -307,10 +305,22 @@ void Level0Iterator::build_bounds_from_opts_() {
 }
 
 // ---- Metadata loading (請接你們系統) ----
-bool Level0Iterator::LoadL0Metas_(LSMTree* tree, std::vector<L0FileMeta>& out) {
-    (void)tree; (void)out;
-    // TODO: 填入 L0 檔案列表，包含：
-    //   filename, min_key(64B), max_key(64B), entries, file_id[, packing]
-    // return true on success.
-    return false;
+bool Level0Iterator::LoadL0Metas_() {
+    if (!canon_lower_.has_value() || !canon_upper_.has_value()) {
+        return false;
+    }
+    InternalKey lower{}, upper{};
+    std::memcpy(&lower, canon_lower_->data(), kIKeySize);
+    std::memcpy(&upper, canon_upper_->data(), kIKeySize);
+    assert(canon_lower_->size() == kIKeySize && canon_upper_->size() == kIKeySize);
+    auto sstables = tree_->search_one_level(0, lower.key, upper.key);
+    for(auto &sstable : sstables) {
+        L0FileMeta meta;
+        meta.filename = sstable->filename;
+        meta.min_key = InternalKey(sstable->rangeMin.toString(),0,ValueType::kTypeValue).Encode();
+        meta.max_key = InternalKey(sstable->rangeMax.toString(),UINT64_MAX,ValueType::kTypeValue).Encode();
+        meta.file_id = sstable->filename;
+        metas_.push_back(meta);
+    }
+    return true;
 }
