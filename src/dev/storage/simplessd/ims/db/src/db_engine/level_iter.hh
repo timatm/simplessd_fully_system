@@ -64,7 +64,7 @@ public:
     std::string_view key() const;
     Status ReadValue(std::string& out) const;
     Status status() const;
-
+    
 private:
     struct Child {
         L0FileMeta meta{};
@@ -106,7 +106,7 @@ private:
 
     // 把 opts_ 轉成 canonical internal bounds（若已是 InternalKey 就直接沿用）
     void   build_bounds_from_opts_();
-
+    
 private:
     SstableManager* smgr_;
     LOG_MANAGER*    lmgr_;

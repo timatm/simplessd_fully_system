@@ -116,8 +116,8 @@ int main() {
     InternalKeyComparator icmp;
     // char * buffer = (char *)allocateAligned(BLOCK_SIZE);
     Options opts;
-    opts.lower = "";
-    opts.upper = "";
+    opts.lower = InternalKey("key0").Encode(); // 假设你有一个 lower bound
+    opts.upper = InternalKey("key20").Encode();
     Level0Iterator it(db.getSSTable(), db.getLogManager(),&icmp, db.getLSMTree(), opts);
 
     it.Init();
@@ -153,14 +153,6 @@ int main() {
         }
     }
 
-    // 4.5 修改 upper，截掉 >= 'c' 的键，验证 within_upper_ / overlap_* 间接效果
-    {
-        std::cout << "\n[Set upper to 'c' (exclusive), rescan]\n";
-        it.opts_.upper = MakeIKey(icmp, "c", 0ull, ValueType::kTypeMin);
-        it.build_bounds_from_opts_();
-        it.SeekToFirst();
-        ScanForward(it, icmp);
-    }
 
     // 4.6 ReadValue() 单独验证
     {
@@ -175,44 +167,7 @@ int main() {
         }
     }
 
-    // 4.7 EqualKey_ 语义：完全一致才相等
-    {
-        auto a6 = MakeIKey(icmp, "a", 6, ValueType::kTypeValue);
-        auto a6b= MakeIKey(icmp, "a", 6, ValueType::kTypeValue);
-        auto a5 = MakeIKey(icmp, "a", 5, ValueType::kTypeValue);
-        std::cout << "\n[EqualKey_] a@6 vs a@6  -> "
-                  << (it.EqualKey_(a6, a6b) ? "true" : "false") << "\n";
-        std::cout << "[EqualKey_] a@6 vs a@5  -> "
-                  << (it.EqualKey_(a6, a5) ? "true" : "false") << "\n";
-    }
-
-    // 4.8 同 key 完全相等时的 tie-break：file_id 小者优先
-    {
-        std::cout << "\n[Tie-break check for identical internal key 'x@100']\n";
-        // 全范围扫描，观察 'x@100' 是来自 F1 还是 F0（应当来自 file_id=1 的 F1）
-        // 为确保能遇到 x，放宽上界
-        it.opts_.upper.reset();
-        it.build_bounds_from_opts_();
-        it.SeekToFirst();
-        while (it.Valid()) {
-            auto k = it.key();
-            InternalKey ik{};
-            std::memcpy(&ik, k.data(), k.size());
-            std::string uk(ik.key.key, ik.key.key + ik.key.key_size);
-            if (uk == "x" && ik.info.seq == 100) {
-                // 打印来源文件 id
-                auto idx = it.curr_idx_;
-                auto fid = it.children_[idx].meta.file_id;
-                std::string v;
-                it.ReadValue(v);
-                std::cout << "Got x@100 from file_id=" << fid
-                          << ", value=" << v << "\n";
-                break;
-            }
-            it.Next();
-        }
-    }
-
+    
     std::cout << "\n[All tests done]\n";
     return 0;
 

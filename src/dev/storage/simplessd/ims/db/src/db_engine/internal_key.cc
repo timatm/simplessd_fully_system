@@ -93,6 +93,15 @@ InternalKey InternalKey::Decode(const std::string& buf) {
     return ik;
 }
 
+// bool InternalKey::Decode(std::string_view bytes) {
+//     // 先解析 user key 部分……
+//     // 然后读出 8B tag（LE）：
+//     uint64_t tag = DecodeFixed64(ptr);  // 按小端
+//     info.type = static_cast<uint8_t>(tag & 0xFF);
+//     info.seq  = tag >> 8;
+//     return true;
+// }
+
 InternalKey InternalKey::Decode(char* buf) {
 
     InternalKey ik{};

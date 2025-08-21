@@ -158,7 +158,7 @@ Status Level0Iterator::open_all_children_() {
     for (size_t i = 0; i < children_.size(); ++i) {
         auto& ch = children_[i];
         if (ch.opened) continue;
-        auto it = std::make_unique<SstableIterator>(*smgr_, *lmgr_, icmp_, ch.meta.filename,PACKING_T);
+        auto it = std::make_unique<SstableIterator>(smgr_, lmgr_, icmp_, ch.meta.filename,PACKING_T);
         auto s = it->Init();
         if (!s.ok()) return s;
         ch.it = std::move(it);
