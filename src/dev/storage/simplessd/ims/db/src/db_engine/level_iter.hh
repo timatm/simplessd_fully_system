@@ -46,10 +46,10 @@ static_assert(sizeof(InternalKey) == 64, "InternalKey must be 64B");
 // ==============================
 class Level0Iterator {
 public:
-    Level0Iterator( SstableManager& smgr,
-                    LOG_MANAGER&    lmgr,
+    Level0Iterator( SstableManager* smgr,
+                    LOG_MANAGER*    lmgr,
                     const InternalKeyComparator* icmp,
-                    LSMTree&        tree,
+                    LSMTree*        tree,
                     Options         opts);
 
     // 基本 API

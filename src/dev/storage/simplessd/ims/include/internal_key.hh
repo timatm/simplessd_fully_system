@@ -10,8 +10,10 @@
 #include <iomanip>
 // 8-bit type enum
 enum class ValueType : uint8_t {
-    kTypeDeletion = 0x0,
-    kTypeValue = 0x1,
+    kTypeMin        = 0x0,
+    kTypeDeletion   = 0x1,
+    kTypeValue      = 0x2,
+    kTypeMax        = 0x3
 };
 struct Key {
     uint8_t key_size;

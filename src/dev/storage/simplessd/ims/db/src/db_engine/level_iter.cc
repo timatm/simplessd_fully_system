@@ -1,15 +1,18 @@
 #include "level_iter.hh"
 #include <algorithm>
+#include <limits>      // std::numeric_limits
+#include <stdexcept>   // std::invalid_argument
+#include <cstdint>     // uint64_t（若未在别处包含）
 
 static constexpr size_t kIKeySize = sizeof(InternalKey);
 
 // ---- ctor ----
-Level0Iterator::Level0Iterator( SstableManager& smgr,
-                                LOG_MANAGER&    lmgr,
+Level0Iterator::Level0Iterator( SstableManager* smgr,
+                                LOG_MANAGER*    lmgr,
                                 const InternalKeyComparator* icmp,
-                                LSMTree&        tree,
+                                LSMTree*        tree,
                                 Options         opts)
-    : smgr_(&smgr), lmgr_(&lmgr), icmp_(icmp), tree_(&tree), opts_(std::move(opts)),
+    : smgr_(smgr), lmgr_(lmgr), icmp_(icmp), tree_(tree), opts_(std::move(opts)),
       heap_(HeapCmp{icmp_, &children_}) {}
 
 // ---- public ----
@@ -304,23 +307,37 @@ void Level0Iterator::build_bounds_from_opts_() {
     }
 }
 
+uint64_t to_u64_stoull(const std::string& s, int base = 10) {
+    size_t pos = 0;
+    uint64_t v = std::stoull(s, &pos, base); // base=10；若想自动识别 0x 前缀，用 base=0
+    if (pos != s.size()) throw std::invalid_argument("trailing chars");
+    return v;
+}
+
+
 // ---- Metadata loading (請接你們系統) ----
 bool Level0Iterator::LoadL0Metas_() {
+    metas_.clear();
     if (!canon_lower_.has_value() || !canon_upper_.has_value()) {
+        return false;
+    }
+    if (canon_lower_->size() != kIKeySize || canon_upper_->size() != kIKeySize) {
         return false;
     }
     InternalKey lower{}, upper{};
     std::memcpy(&lower, canon_lower_->data(), kIKeySize);
     std::memcpy(&upper, canon_upper_->data(), kIKeySize);
-    assert(canon_lower_->size() == kIKeySize && canon_upper_->size() == kIKeySize);
     auto sstables = tree_->search_one_level(0, lower.key, upper.key);
-    for(auto &sstable : sstables) {
+    for(auto sstable : sstables) {
         L0FileMeta meta;
         meta.filename = sstable->filename;
-        meta.min_key = InternalKey(sstable->rangeMin.toString(),0,ValueType::kTypeValue).Encode();
-        meta.max_key = InternalKey(sstable->rangeMax.toString(),UINT64_MAX,ValueType::kTypeValue).Encode();
-        meta.file_id = sstable->filename;
+        meta.min_key = InternalKey(sstable->rangeMin.toString(),0,ValueType::kTypeMin).Encode();
+        meta.max_key = InternalKey(sstable->rangeMax.toString(),std::numeric_limits<uint64_t>::max(),ValueType::kTypeMax).Encode();
+        if (meta.min_key.size() != kIKeySize || meta.max_key.size() != kIKeySize) return false;
+        meta.file_id = to_u64_stoull(sstable->filename);
         metas_.push_back(meta);
     }
     return true;
 }
+
+
