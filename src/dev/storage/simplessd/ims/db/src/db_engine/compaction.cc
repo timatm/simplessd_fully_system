@@ -4,14 +4,10 @@
 #include <cstring>
 
 
-CompactionRunner::CompactionRunner(API *db,const InternalKeyComparator* icmp,CompactionPlan config){
-    smgr_ = db->getSSTable();
-    lmgr_ = db->getLogManager();
-    tree_ = db->getLSMTree();
-    icmp_ = icmp;
-    nums_ = 0;
-    packType_ = db->getPackType();
-    config_ = config;
+CompactionRunner::CompactionRunner(API *db,const InternalKeyComparator* icmp,CompactionPlan config)
+    : smgr_(db->getSSTable()), lmgr_(db->getLogManager()), tree_(db->getLSMTree()), icmp_(icmp),
+    nums_(0), packType_(db->getPackType()), config_(config){
+
     Options option;
     
     option.lower = config_.lower;
@@ -28,6 +24,24 @@ CompactionRunner::CompactionRunner(API *db,const InternalKeyComparator* icmp,Com
     if (packType_ == PackingType::kHash) hash_num_.assign(SLOT_NUM, 0);
 }
 
+CompactionRunner::CompactionRunner(SstableManager *smgr,LogManager *lmgr,LSMTree* tree,const InternalKeyComparator* icmp,PackingType type,CompactionPlan config)
+    : smgr_(smgr), lmgr_(lmgr), tree_(tree), icmp_(icmp),
+    nums_(0), packType_(type), config_(config){
+    Options option;
+    
+    option.lower = config_.lower;
+    option.upper = config_.upper;
+    if(config.src_level == 0){
+        srcLevelIter_ = std::make_unique<Level0Iterator>(smgr_,lmgr_,icmp_,tree_,option);
+    }
+    if(config.src_level > 0 && config.src_level < MAX_LEVEL){
+        srcLevelIter_ = std::make_unique<LevelNIterator>(smgr_,lmgr_,icmp_,tree_,config_.src_level,option);
+    }
+    dstLevelIter_ = std::make_unique<LevelNIterator>(smgr_,lmgr_,icmp_,tree_,config_.dst_level,option);
+    while(!sortedList_.empty()) sortedList_.pop();
+    hash_num_.clear();
+    if (packType_ == PackingType::kHash) hash_num_.assign(SLOT_NUM, 0);
+}
 
 bool CompactionRunner::same_user_key(std::string_view a, std::string_view b) {
     InternalKey ia{}, ib{};
@@ -142,5 +156,6 @@ Status CompactionRunner::Run() {
         while (!sortedList_.empty()) sortedList_.pop();
         nums_ = 0;
     }
+    smgr_->waitAllTasksDone();
     return Status::OK();
 }

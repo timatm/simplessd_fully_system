@@ -3,6 +3,8 @@
 #include "nvme_test.hh"
 #include "IMS_interface.hh"
 #include "lsmtree.hh"
+#include "options.hh"
+#include "compaction.hh"
 API::API(){
     tree_ = std::make_shared<Tree>();
     lsmTree_ = std::make_unique<LSMTree>(tree_);
@@ -16,10 +18,10 @@ API::API(){
     packing_ = PACKING_T;
     memtable_ = std::make_unique<MemTable>();
     immutable_memtable_ = nullptr;
-    logManager_ = std::make_unique<LOG_MANAGER>(*nvme_);
+    logManager_ = std::make_unique<LogManager>(*nvme_);
     global_seq_ = 0;
     sstableManager_ = std::make_unique<SstableManager>(*nvme_,*lsmTree_);
-    
+    compaction_key_list_.resize(MAX_LEVEL);
 }
 Status API::open() {
     pr_info("Opening database...");
@@ -80,6 +82,7 @@ Status API::put(std::string key ,std::string value){
         sstableManager_->writeSSTable(0, immutable_memtable_->getMinKey(), immutable_memtable_->getMaxKey(), buffer);
 
     }
+    compaction();
     uint32_t lpn = 0;
     uint32_t offset = 0;
     getLogManager()->getLPN(lpn, offset);
@@ -406,4 +409,98 @@ Status API::range_query(std::string start_key, std::string end_key, std::set<std
     // }
     
     return Status::OK();
+}
+
+
+Status API::removeSSable(std::shared_ptr<TreeNode> rm){
+    std::string filename = rm->filename;
+    getSSTable()->eraseSSTable(filename);
+    getLSMTree()->remove_sstable(rm);
+    return Status::OK();
+}
+
+
+void API::compaction(){
+    if(getLSMTree()->get_level_num(0) >= LEVEL0_MAX){
+        pr_info("Compaction triggered at Level 0");
+        auto node = getLSMTree()->findLevel0Older();
+        if(node != nullptr){
+            auto srcNodes = getLSMTree()->search_one_level(0,node->rangeMin,node->rangeMax);
+            auto dstNodes = getLSMTree()->search_one_level(1,node->rangeMin,node->rangeMax);
+            InternalKey minKey(node->rangeMin.toString(),0,ValueType::kTypeMin);
+            InternalKey maxKey(node->rangeMax.toString(),UINT64_MAX,ValueType::kTypeMax);
+            CompactionPlan com(0,1,minKey.Encode(),maxKey.Encode());
+            CompactionRunner compaction(sstableManager_.get(),logManager_.get(),lsmTree_.get(),&icmp_,packing_,com);
+            Status s = compaction.Run();
+            if(s.ok()){
+                set_compaction_key_list(maxKey,0);
+                for(auto rm : dstNodes) removeSSable(rm);
+                for(auto rm : srcNodes) removeSSable(rm);
+            }
+            else{
+                pr_debug("Compaction in level0 fail");
+                return;
+            }
+        }
+    }
+    for(int level = 1;level < MAX_LEVEL;level++){
+        if(compactionTrigger(level)){
+            pr_info("Compaction triggered at Level %d",level);
+            auto key = compaction_key_list_[level];
+            if(key == std::nullopt){
+                auto firstNode = getLSMTree()->getLevelFirstNode(level);
+                if (!firstNode) continue;
+                key = InternalKey(firstNode->rangeMin.toString(),0,ValueType::kTypeMin);
+            }
+
+            auto srcNode = getLSMTree()->getNextNode(level,key->UserKey());
+            if(srcNode != nullptr){
+                auto dstNodes = getLSMTree()->search_one_level(level+1,srcNode->rangeMin,srcNode->rangeMax);
+                InternalKey minKey(srcNode->rangeMin.toString(),0,ValueType::kTypeMin);
+                InternalKey maxKey(srcNode->rangeMax.toString(),UINT64_MAX,ValueType::kTypeMax);
+                CompactionPlan com(level,level+1,minKey.Encode(),maxKey.Encode());
+                CompactionRunner compaction(sstableManager_.get(),logManager_.get(),lsmTree_.get(),&icmp_,packing_,com);
+                Status s = compaction.Run();
+                if(s.ok()){
+                    set_compaction_key_list(maxKey,level);
+                    for(auto rm : dstNodes) removeSSable(rm);
+                    removeSSable(srcNode);
+                }
+            }
+        }
+    }
+}
+
+bool API::compactionTrigger(int level){
+    if(level < 0 || level >= MAX_LEVEL) throw std::out_of_range("Level out of range");
+    switch (level){
+        case 0: return getLSMTree()->get_level_num(0) >= LEVEL0_MAX;
+        case 1: return getLSMTree()->get_level_num(1) >= LEVEL1_MAX;
+        case 2: return getLSMTree()->get_level_num(2) >= LEVEL2_MAX;
+        case 3: return getLSMTree()->get_level_num(3) >= LEVEL3_MAX;
+        case 4: return getLSMTree()->get_level_num(4) >= LEVEL4_MAX;
+        case 5: return getLSMTree()->get_level_num(5) >= LEVEL5_MAX;
+        case 6: return getLSMTree()->get_level_num(6) >= LEVEL6_MAX;
+        default: return false;
+    }
+}
+
+
+void API::init_compaction_key_list(){
+    compaction_key_list_.clear();
+    for(int i = 0 ; i < MAX_LEVEL ; i++){
+        auto node = getLSMTree()->getLevelFirstNode(i);
+        if(node == nullptr){
+            compaction_key_list_.push_back(std::nullopt);
+            continue;
+        }
+        InternalKey min(node->rangeMin.toString(),0,ValueType::kTypeMin);
+        compaction_key_list_.push_back(min);
+    }
+}
+void API::set_compaction_key_list(InternalKey key , int level){
+    if(level < 0 || level >= MAX_LEVEL){
+        throw std::out_of_range("Level out of range");
+    }
+    compaction_key_list_[level] = key;
 }

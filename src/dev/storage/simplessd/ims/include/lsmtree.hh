@@ -1,12 +1,15 @@
 #ifndef __TABLE_MANAGER__HH__
 #define __TABLE_MANAGER__HH__
 
+#include <string>
+#include <vector>
 #include "tree.hh"
 
 class LSMTree {
 public:
-    explicit LSMTree(std::shared_ptr<Tree> tree)
-        : tree_(std::move(tree)) {}
+    explicit LSMTree(std::shared_ptr<Tree> tree): tree_(std::move(tree)) {
+        level_num_.resize(MAX_LEVEL, 0);
+    }
     LSMTree(){
         tree_ = std::make_shared<Tree>();
     }
@@ -24,8 +27,17 @@ public:
     std::vector<std::shared_ptr<TreeNode>> search_one_level(int level,const Key& queryMin, const Key& queryMax);
     std::string encode() const{return tree_->encode();};
     bool decode(const std::string& buf){ return tree_->decode(buf);};
+    uint32_t get_level_num(int level) const {
+        if (level < 0 || level >= MAX_LEVEL) return 0;
+        return level_num_[level];
+    }
+
+    std::shared_ptr<TreeNode> findLevel0Older();
+    std::shared_ptr<TreeNode> getLevelFirstNode(int level) const ;
+    std::shared_ptr<TreeNode> getNextNode(int level, Key input) const;
 private:
     std::shared_ptr<Tree> tree_;
+    std::vector<uint32_t> level_num_;
 };
 
 

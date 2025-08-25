@@ -47,7 +47,7 @@ static_assert(sizeof(InternalKey) == 64, "InternalKey must be 64B");
 class Level0Iterator :public InternalIterator{
 public:
     Level0Iterator( SstableManager* smgr,
-                    LOG_MANAGER*    lmgr,
+                    LogManager*    lmgr,
                     const InternalKeyComparator* icmp,
                     LSMTree*        tree,
                     Options         opts);
@@ -108,7 +108,7 @@ private:
     
 private:
     SstableManager* smgr_;
-    LOG_MANAGER*    lmgr_;
+    LogManager*    lmgr_;
     const InternalKeyComparator* icmp_;
     LSMTree*        tree_;
     Options         opts_;
@@ -133,7 +133,7 @@ private:
 class LevelNIterator :public InternalIterator{
 public:
     LevelNIterator( SstableManager* smgr,
-    LOG_MANAGER* lmgr,
+    LogManager* lmgr,
     const InternalKeyComparator* icmp,
     LSMTree* tree,
     int level, // 1..6
@@ -204,7 +204,7 @@ private:
 
 private:
     SstableManager* smgr_;
-    LOG_MANAGER* lmgr_;
+    LogManager* lmgr_;
     const InternalKeyComparator* icmp_;
     LSMTree* tree_;
     const int level_; // 1..6

@@ -8,6 +8,7 @@ public:
 
     int nvme_write_sstable(sstable_info ,char *buffer) override;
     int nvme_read_sstable(std::string ,char *buffer) override;
+    int nvme_erase_sstable(std::string) override ;
     int nvme_ims_init() override;
     int nvme_ims_close() override;
 

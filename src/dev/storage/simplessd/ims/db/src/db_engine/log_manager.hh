@@ -7,10 +7,10 @@
 #include "record.hh"
 #include "nvme_interface.hh"
 #include <optional>
-class LOG_MANAGER {
+class LogManager {
 public:
-    LOG_MANAGER(INVMEDriver& nvme);
-    ~LOG_MANAGER() = default;
+    LogManager(INVMEDriver& nvme);
+    ~LogManager() = default;
     //TODO
     void writeLog(const Record& log);
     std::optional<Record> readLog(uint32_t lpn, uint32_t offset);

@@ -8,7 +8,7 @@ static constexpr size_t kIKeySize = sizeof(InternalKey);
 
 // ---- ctor ----
 Level0Iterator::Level0Iterator( SstableManager* smgr,
-                                LOG_MANAGER*    lmgr,
+                                LogManager*    lmgr,
                                 const InternalKeyComparator* icmp,
                                 LSMTree*        tree,
                                 Options         opts)
@@ -355,7 +355,7 @@ bool Level0Iterator::LoadL0Metas_() {
 
 
 LevelNIterator::LevelNIterator( SstableManager* smgr,
-                                LOG_MANAGER*    lmgr,
+                                LogManager*    lmgr,
                                 const InternalKeyComparator* icmp,
                                 LSMTree*        tree,
                                 int             level,

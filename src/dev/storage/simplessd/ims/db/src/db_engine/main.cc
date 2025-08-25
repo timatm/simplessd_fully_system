@@ -84,7 +84,6 @@ static void ScanBackward(Level0Iterator& it, const InternalKeyComparator& icmp) 
     }
 }
 
-
 int main() {
     API db;
     Status err = db.open();
@@ -113,79 +112,115 @@ int main() {
     // db.getSSTable()->waitAllTasksDone();
     db.dump_memtable();
     db.dump_lsmtree();
-    InternalKeyComparator icmp;
-    // char * buffer = (char *)allocateAligned(BLOCK_SIZE);
-    Options opts;
-    opts.lower = InternalKey("key100").Encode(); // 假设你有一个 lower bound
-    opts.upper = InternalKey("key150").Encode();
-    Level0Iterator it(db.getSSTable(), db.getLogManager(),&icmp, db.getLSMTree(), opts);
-
-    it.Init();
-    // 4) 覆盖所有公开方法
-
-    // 4.1 SeekToFirst + Forward
-    it.SeekToFirst();
-    CHECK(it.status().ok());
-    ScanForward(it, icmp);
-
-    // 4.2 SeekToLast + Backward
-    it.SeekToLast();
-    CHECK(it.status().ok());
-    ScanBackward(it, icmp);
-
-    // 4.3 Seek 到 >= 'b' 的位置，再 Forward
-    {
-        auto tgt = MakeIKey(icmp, "key120", 0ull, ValueType::kTypeMin);
-        std::cout << "\n[Seek to >= 'key120', then forward]\n";
-        it.Seek(tgt);
-        ScanForward(it, icmp);
-    }
-
-    // 4.4 Prev()：从当前起向前走 3 步，验证重建逻辑
-    {
-        auto cur = MakeIKey(icmp, "c", 0ull, ValueType::kTypeMin);
-        it.Seek(cur);
-        if (!it.Valid()) it.SeekToLast();
-        std::cout << "\n[From current, Prev() 3 steps]\n";
-        for (int t = 0; t < 3 && it.Valid(); ++t) {
-            PrettyPrintIKey(icmp, it.key()); std::cout << "\n";
-            it.Prev();
-        }
-    }
+    std::string value;
+    db.get("key123",value);
+    std::cout << value;
+}
 
 
-    // 4.6 ReadValue() 单独验证
-    {
-        it.SeekToFirst();
-        if (it.Valid()) {
-            std::string v;
-            auto s = it.ReadValue(v);
-            CHECK(s.ok());
-            std::cout << "\n[ReadValue] ";
-            PrettyPrintIKey(icmp, it.key());
-            std::cout << " -> " << v << "\n";
-        }
-    }
+
+
+// int main() {
+//     API db;
+//     Status err = db.open();
+//     if(err.ok()) {
+//         // db.dump_all();
+//         std::cout << "Database opened successfully.\n";
+//     } else {
+//         std::cerr << "Failed to open database: " << err.ToString() << "\n";
+//         return -1;
+//     }
+    
+//     for (int i = 0; i < 1024; ++i) {
+//         std::string key = "key" + std::to_string(i);
+//         std::string value = "value" + std::to_string(i);
+//         Status s = db.put(key, value);
+//         if (!s.ok()) {
+//             std::cerr << "Put failed at index " << i << " with key: " << key << "\n";
+//         }
+//     }
+//     db.getSSTable()->waitAllTasksDone();
+//     // db.getLogManager()->flush_buffer();
+//     // db.nvme_->nvme_dump_ims();
+
+
+//     // std::cout << "Inserted 129 key-value pairs successfully.\n";
+//     // db.getSSTable()->waitAllTasksDone();
+//     db.dump_memtable();
+//     db.dump_lsmtree();
+//     InternalKeyComparator icmp;
+//     // char * buffer = (char *)allocateAligned(BLOCK_SIZE);
+//     Options opts;
+//     opts.lower = InternalKey("key100").Encode(); // 假设你有一个 lower bound
+//     opts.upper = InternalKey("key150").Encode();
+//     Level0Iterator it(db.getSSTable(), db.getLogManager(),&icmp, db.getLSMTree(), opts);
+
+//     it.Init();
+//     // 4) 覆盖所有公开方法
+
+//     // 4.1 SeekToFirst + Forward
+//     it.SeekToFirst();
+//     CHECK(it.status().ok());
+//     ScanForward(it, icmp);
+
+//     // 4.2 SeekToLast + Backward
+//     it.SeekToLast();
+//     CHECK(it.status().ok());
+//     ScanBackward(it, icmp);
+
+//     // 4.3 Seek 到 >= 'b' 的位置，再 Forward
+//     {
+//         auto tgt = MakeIKey(icmp, "key120", 0ull, ValueType::kTypeMin);
+//         std::cout << "\n[Seek to >= 'key120', then forward]\n";
+//         it.Seek(tgt);
+//         ScanForward(it, icmp);
+//     }
+
+//     // 4.4 Prev()：从当前起向前走 3 步，验证重建逻辑
+//     {
+//         auto cur = MakeIKey(icmp, "c", 0ull, ValueType::kTypeMin);
+//         it.Seek(cur);
+//         if (!it.Valid()) it.SeekToLast();
+//         std::cout << "\n[From current, Prev() 3 steps]\n";
+//         for (int t = 0; t < 3 && it.Valid(); ++t) {
+//             PrettyPrintIKey(icmp, it.key()); std::cout << "\n";
+//             it.Prev();
+//         }
+//     }
+
+
+//     // 4.6 ReadValue() 单独验证
+//     {
+//         it.SeekToFirst();
+//         if (it.Valid()) {
+//             std::string v;
+//             auto s = it.ReadValue(v);
+//             CHECK(s.ok());
+//             std::cout << "\n[ReadValue] ";
+//             PrettyPrintIKey(icmp, it.key());
+//             std::cout << " -> " << v << "\n";
+//         }
+//     }
 
     
-    std::cout << "\n[All tests done]\n";
-    return 0;
+//     std::cout << "\n[All tests done]\n";
+//     return 0;
 
-    // std::string search_value;
-    // std::optional<Record> result = db.getLogManager()->readLog(640,0);
-    // if(result.has_value()){
-    //     result->Dump();
-    // } else {
-    //     std::cout << "No record found at LPN 640, offset 0\n";
-    // }
-    // db.get("key20", search_value);
-    // std::cout << search_value << std::endl;
+//     // std::string search_value;
+//     // std::optional<Record> result = db.getLogManager()->readLog(640,0);
+//     // if(result.has_value()){
+//     //     result->Dump();
+//     // } else {
+//     //     std::cout << "No record found at LPN 640, offset 0\n";
+//     // }
+//     // db.get("key20", search_value);
+//     // std::cout << search_value << std::endl;
 
 
-   // // free(buffer);
-    // return 0;
+//    // // free(buffer);
+//     // return 0;
  
-}
+// }
 
 
 

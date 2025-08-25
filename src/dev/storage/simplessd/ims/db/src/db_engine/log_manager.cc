@@ -7,10 +7,10 @@
 #include <algorithm>
 #include <memory>
 #include <optional>
-LOG_MANAGER::LOG_MANAGER(INVMEDriver& nvme)
+LogManager::LogManager(INVMEDriver& nvme)
     : next_lbn_(0), currenet_lbn_(0), page_offset_(0), byte_offset_(0) ,nvme_(nvme) {}
 
-void LOG_MANAGER::allocate_lbn() {
+void LogManager::allocate_lbn() {
     char *buffer = (char*)calloc(sizeof(uint32_t), 1);
     if (!buffer) {
         std::cerr << "Buffer is null, cannot allocate LBN." << std::endl;
@@ -31,7 +31,7 @@ void LOG_MANAGER::allocate_lbn() {
     free(buffer);
 }
 
-void LOG_MANAGER::flush_buffer()
+void LogManager::flush_buffer()
 {
     if (byte_offset_ == 0) return;             
 
@@ -61,7 +61,7 @@ void LOG_MANAGER::flush_buffer()
 
 
 
-void LOG_MANAGER::writeLog(const Record& log)
+void LogManager::writeLog(const Record& log)
 {   
     // log.Dump();
     const std::string encoded = log.Encode();
@@ -86,7 +86,7 @@ void LOG_MANAGER::writeLog(const Record& log)
     }
 }
 
-uint32_t LOG_MANAGER::findNextLPN(uint32_t lpn) const{
+uint32_t LogManager::findNextLPN(uint32_t lpn) const{
     uint32_t currentLBN = LPN2LBN(lpn);
     size_t pageOffset   = lpn - LBN2LPN(currentLBN);
     pr_info("Current LBN: %u, Page Offset: %zu", currentLBN, pageOffset);
@@ -105,7 +105,7 @@ uint32_t LOG_MANAGER::findNextLPN(uint32_t lpn) const{
 }
 
 
-std::optional<Record> LOG_MANAGER::readLog(uint32_t lpn, uint32_t offset)
+std::optional<Record> LogManager::readLog(uint32_t lpn, uint32_t offset)
 {
     auto readPage = [&](uint32_t lpn,char* buffer) -> bool{
         int err = nvme_.nvme_read_log(lpn,buffer);
@@ -201,22 +201,22 @@ std::optional<Record> LOG_MANAGER::readLog(uint32_t lpn, uint32_t offset)
 
 
 
-void LOG_MANAGER::getLPN(uint32_t& lpn, uint32_t& offset) const {
+void LogManager::getLPN(uint32_t& lpn, uint32_t& offset) const {
     lpn = LBN2LPN(currenet_lbn_) + page_offset_;
     offset = byte_offset_;
 }
-uint32_t LOG_MANAGER::getLPN() const {
+uint32_t LogManager::getLPN() const {
     return LBN2LPN(currenet_lbn_) + page_offset_;
 }
 
-void LOG_MANAGER::clearLog() {
+void LogManager::clearLog() {
     logRecordBlock_.clear();
     currenet_lbn_ = 0;
     next_lbn_ = 1;
     page_offset_ = 0;
     byte_offset_ = 0;
 }
-bool LOG_MANAGER::decode(const std::string& buf) {
+bool LogManager::decode(const std::string& buf) {
     if (buf.size() % 4 != 0) return false;
     logRecordBlock_.clear();
 
@@ -232,8 +232,8 @@ bool LOG_MANAGER::decode(const std::string& buf) {
 
 
 
-void LOG_MANAGER::dump() const {
-    std::cout << "========== LOG_MANAGER Dump ==========\n";
+void LogManager::dump() const {
+    std::cout << "========== LogManager Dump ==========\n";
     std::cout << "Current LBN     : " << currenet_lbn_ << "\n";
     std::cout << "Next LBN        : " << next_lbn_ << "\n";
     std::cout << "Page Offset     : " << page_offset_ << "\n";

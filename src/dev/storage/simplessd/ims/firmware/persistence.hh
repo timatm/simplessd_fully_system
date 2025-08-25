@@ -25,6 +25,7 @@ public:
     int flushMappingTable(const std::unordered_map<std::string, uint64_t>& mappingTable);
     int readMappingTable(uint64_t lpn, uint8_t* buffer, size_t size);
     int flushSStable(uint64_t lbn, uint8_t* buffer, size_t size);
+    int eraseSStable(uint64_t lbn);
     int readSStable(uint64_t lbn, uint8_t* buffer, size_t size);
     int readSStablePage(uint64_t lpn, uint8_t* buffer, size_t size);
     int readLog(uint64_t lpn, uint8_t* buffer, size_t size);

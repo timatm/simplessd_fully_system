@@ -130,10 +130,14 @@ std::vector<int> LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
 }
 void LSMTree::insert_sstable(std::shared_ptr<TreeNode> node) {
     tree_->insert_node(node);
+    int level = node->levelInfo;
+    level_num_[level]++;
 }
 
 void LSMTree::remove_sstable(std::shared_ptr<TreeNode> node) {
     tree_->remove_node(node);
+    int level = node->levelInfo;
+    level_num_[level]--;
 }
 
 std::shared_ptr<TreeNode> LSMTree::find_node(const std::string& filename, int level, const Key& min, const Key& max) {
@@ -157,4 +161,41 @@ std::vector<std::shared_ptr<TreeNode>> LSMTree::search_one_level(int level,const
     std::vector<std::shared_ptr<TreeNode>> result;
     result = tree_->search_overlap(level,queryMin,queryMax);
     return result;
+}
+
+std::shared_ptr<TreeNode> LSMTree::getLevelFirstNode(int level) const {
+    const auto& nodes = tree_->get_level_nodes(level);
+    if (!nodes.empty()) {
+        return *nodes.begin();
+    }
+    return nullptr;
+}
+
+std::shared_ptr<TreeNode> LSMTree::getNextNode(int level, Key input) const{
+    const auto& nodes = tree_->get_level_nodes(level);
+    if (nodes.empty()) {
+        throw std::runtime_error("Level is empty");
+    }
+
+    auto dummy = std::make_shared<TreeNode>("dummy", level, input, input);
+    auto it = nodes.upper_bound(dummy);
+
+    if (it != nodes.end()) {
+        return *it;
+    }
+    return *nodes.begin();
+}
+
+std::shared_ptr<TreeNode> LSMTree::findLevel0Older(){
+    const auto& nodes = tree_->get_level_nodes(0);
+    if (nodes.empty()) {
+        return nullptr;
+    }
+    auto oldest = *nodes.begin();
+    for (const auto& node : nodes) {
+        if (node->filename < oldest->filename) {
+            oldest = node;
+        }
+    }
+    return oldest;
 }

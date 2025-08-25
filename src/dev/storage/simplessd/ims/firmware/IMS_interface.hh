@@ -34,6 +34,7 @@ public:
     int rebuild_super_page();
     int write_sstable(hostInfo *request,uint8_t *buffer);
     int read_sstable(hostInfo *request ,uint8_t *buffer);
+    int erase_sstable(hostInfo *request);
     int read_ssKeyRange(hostInfo *request, uint8_t* buffer);
     // TODO need to finish
     int search_key(Key key);

@@ -356,13 +356,13 @@ void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey
 }
 
 // TODO
-void SstableManager::deleteSSTable(const std::string& filename) {
-
+void SstableManager::eraseSSTable(const std::string& filename) {
+    if(filename.empty()){
+        pr_debug("DeleteSSTable filename is empty");
+        return;
+    }
+    int err = nvme_.nvme_erase_sstable(filename);
 }
-
-// 假设：InternalKey 固定 64B
-static constexpr size_t kIKeySize = sizeof(InternalKey);
-static_assert(sizeof(InternalKey) == 64, "InternalKey must be 64B");
 
 // ---------------- Init ----------------
 Status SstableIterator::Init() {

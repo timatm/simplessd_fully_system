@@ -19,8 +19,9 @@
 static_assert(sizeof(InternalKey) == 64, "InternalKey must be fixed 64B for this scaffold");
 
 struct CompactionPlan {
-    int src_level = 0;
-    int dst_level = 1;
+    CompactionPlan(int src,int dst,std::string l,std::string u):src_level(src),dst_level(dst),lower(l),upper(u){};
+    int src_level;
+    int dst_level;
     std::optional<std::string> lower;
     std::optional<std::string> upper;
 };
@@ -31,10 +32,10 @@ struct CompactionPlan {
 class CompactionRunner {
 public:
     CompactionRunner(API *db,const InternalKeyComparator* icmp,CompactionPlan config);
-
+    CompactionRunner(SstableManager *smgr,LogManager *lmgr,LSMTree *tree,const InternalKeyComparator* icmp,PackingType type,CompactionPlan config);
     // 執行 compaction，回傳新檔 metas 與統計資訊。
     Status Run();
-
+    
 private:
     // 2-way merge （左：src iterator，右：dst iterator），輸出到多個檔
 
@@ -45,7 +46,7 @@ private:
 
 private:
     SstableManager* smgr_;
-    LOG_MANAGER* lmgr_;
+    LogManager* lmgr_;
     LSMTree* tree_;
     const InternalKeyComparator* icmp_;
     size_t nums_;

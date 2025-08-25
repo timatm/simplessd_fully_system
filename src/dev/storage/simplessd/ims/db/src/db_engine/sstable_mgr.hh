@@ -41,7 +41,7 @@ public:
     void init();
     void readSSTable(const std::string& filename,char *buffer);
     void writeSSTable(uint8_t level,InternalKey minKey ,InternalKey maxKey,std::string sstable_buffer);
-    void deleteSSTable(const std::string& filename);
+    void eraseSSTable(const std::string& filename);
     std::string packingTable(const SkipList<Record,RecordComparator> &skiplist);
 
     std::string packingTable(std::queue<std::string> sortedLsit);
@@ -79,7 +79,7 @@ public:
     };
 
     SstableIterator(SstableManager* smgr,
-                    LOG_MANAGER* lmgr,
+                    LogManager* lmgr,
                     const InternalKeyComparator* icmp,
                     std::string filename,
                     PackingType type)
@@ -111,7 +111,7 @@ private:
     std::vector<EntryRef> gen_sorted_view();
     std::string filename_;        
     SstableManager* sstable_mgr_{nullptr};
-    LOG_MANAGER* log_mgr_{nullptr};
+    LogManager* log_mgr_{nullptr};
     const InternalKeyComparator* icmp_{nullptr};
     char* buf_;
     std::vector<EntryRef> entries_;

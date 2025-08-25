@@ -171,6 +171,16 @@ int IMS_interface::read_sstable(hostInfo *request, uint8_t *buffer) {
     return err;
 }
 
+int IMS_interface::erase_sstable(hostInfo *request){
+    int err = OPERATION_SUCCESS;
+    std::string filename = request->filename;
+    auto lbn = mappingTable_->getLBN(filename);
+    err = persistenceManager_->eraseSStable(lbn);
+    if(err == OPERATION_SUCCESS){
+        mappingTable_->remove_mapping(filename);
+    }
+}
+
 int IMS_interface::read_ssKeyRange(hostInfo *request, uint8_t* buffer){
     int err = OPERATION_SUCCESS;
     std::string filename = request->filename;

@@ -39,6 +39,7 @@ public:
     // virtual int pass_io_command(nmc_config_t *config) = 0;
     virtual int nvme_write_sstable(sstable_info, char* buffer) = 0;
     virtual int nvme_read_sstable(std::string, char* buffer) = 0;
+    virtual int nvme_erase_sstable(std::string) = 0;
     virtual int nvme_ims_init() = 0;
     virtual int nvme_ims_close() = 0;
     // virtual int nvme_monitor_IMS(int monitor_type) = 0;

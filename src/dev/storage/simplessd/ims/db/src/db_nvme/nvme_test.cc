@@ -73,6 +73,17 @@ int MyNVMeDriver::nvme_read_log(uint64_t lpn,char *buffer){
     return err;
 }
 
+int MyNVMeDriver::nvme_erase_sstable(std::string filename){
+    if(filename.empty()){
+        pr("Write metadata failed ,data buffer is nullptr");
+        return COMMAND_FAILED;
+    }
+    int err;
+    hostInfo req(filename);
+    err = ims.erase_sstable(&req);
+    return err;
+}
+
 int MyNVMeDriver::nvme_dump_ims(){
     int err;
     err = ims.dump_IMS();
@@ -134,3 +145,4 @@ int MyNVMeDriver::nvme_write_metadata(uint64_t lpn,char *buffer,size_t size){
     }
     return err;
 }
+

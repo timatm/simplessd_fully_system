@@ -180,3 +180,21 @@ int Persistence::writeLog(uint64_t lpn,uint8_t *buffer,size_t size){
     }
     return OPERATION_SUCCESS;
 }
+
+
+int Persistence::eraseSStable(uint64_t lbn){
+    int err;
+    if(!ENABLE_DISK){
+        return OPERATION_SUCCESS;
+    }
+    if(!pDisk_->file_){
+        pr_debug("Disk does't open");
+        return OPERATION_FAILURE;
+    }
+    std::string buffer(BLOCK_SIZE, static_cast<char>(0xFF));
+    err = pDisk_->writeBlock(lbn, reinterpret_cast<uint8_t *>(buffer.data()));
+    if(!err){
+        return err;
+    }
+    return err;
+}
