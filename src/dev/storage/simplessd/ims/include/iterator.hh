@@ -10,11 +10,16 @@ class InternalIterator {
 public:
     virtual ~InternalIterator() = default;
 
+    virtual Status Init() = 0;
     virtual bool Valid() const = 0;
+
+    // 定位到第一個 ≥ lower 的 key
     virtual void SeekToFirst() = 0;
+
+    // 定位到最後一個 < upper 的 key
     virtual void SeekToLast()  = 0;
 
-    // target 是 "internal key 的編碼" 視圖（user_key + seq/type）
+    // 定位到第一個 ≥ target 的 key
     virtual void Seek(std::string_view internal_target) = 0;
 
     virtual void Next() = 0;

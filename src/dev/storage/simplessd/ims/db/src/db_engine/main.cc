@@ -116,8 +116,8 @@ int main() {
     InternalKeyComparator icmp;
     // char * buffer = (char *)allocateAligned(BLOCK_SIZE);
     Options opts;
-    opts.lower = InternalKey("key0").Encode(); // 假设你有一个 lower bound
-    opts.upper = InternalKey("key20").Encode();
+    opts.lower = InternalKey("key100").Encode(); // 假设你有一个 lower bound
+    opts.upper = InternalKey("key150").Encode();
     Level0Iterator it(db.getSSTable(), db.getLogManager(),&icmp, db.getLSMTree(), opts);
 
     it.Init();
@@ -135,8 +135,8 @@ int main() {
 
     // 4.3 Seek 到 >= 'b' 的位置，再 Forward
     {
-        auto tgt = MakeIKey(icmp, "b", 0ull, ValueType::kTypeMin);
-        std::cout << "\n[Seek to >= 'b', then forward]\n";
+        auto tgt = MakeIKey(icmp, "key120", 0ull, ValueType::kTypeMin);
+        std::cout << "\n[Seek to >= 'key120', then forward]\n";
         it.Seek(tgt);
         ScanForward(it, icmp);
     }

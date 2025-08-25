@@ -41,6 +41,7 @@ public:
     LOG_MANAGER* getLogManager(){return logManager_.get();}
     SstableManager* getSSTable(){return sstableManager_.get();}
     LSMTree* getLSMTree(){return lsmTree_.get();}
+    PackingType getPackType(){return packing_;}
     std::set<InternalKey,SetComparator> parse_sstable(char *);
 
     std::set<std::string> read_key_range(const std::string& filename);

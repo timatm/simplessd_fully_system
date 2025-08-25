@@ -17,6 +17,7 @@ void MemTable::Put(const Record &rec) {
     hash_num_[HashModN(rec.internal_key, hash_num_.size())]++;
 }
 
+
 std::optional<std::string> MemTable::Get(const std::string& user_key) const {
     SkipList<Record, RecordComparator>::Iterator iter = skiplist_.GetIterator();
     InternalKey lookup(user_key, UINT64_MAX, ValueType::kTypeValue); 
@@ -104,6 +105,11 @@ MemTableIterator::MemTableIterator(
     key_buf_.clear();
     value_buf_ = {};
 }
+Status MemTableIterator::Init(){
+    SeekToFirst();
+}
+
+
 
 bool MemTableIterator::Valid() const {
     return it_.Valid();

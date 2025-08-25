@@ -135,7 +135,7 @@ bool InternalKeyComparator::operator()(const InternalKey& a, const InternalKey& 
             return a.key.key_size < b.key.key_size;
         if (a.info.seq != b.info.seq)
             return a.info.seq > b.info.seq;  // higher seq first
-        return a.info.type > b.info.type;    // higher type wins
+        return a.info.type < b.info.type;    // tombstone first
     }
     return cmp < 0;
 }

@@ -41,6 +41,7 @@ public:
     MemTableIterator(const std::shared_ptr<SkipList<Record, RecordComparator>>& list,
                      const InternalKeyComparator* icmp);
 
+    Status Init() override;
     bool Valid() const override;
 
     void SeekToFirst() override;

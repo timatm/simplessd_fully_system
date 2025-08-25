@@ -44,14 +44,13 @@ static_assert(sizeof(InternalKey) == 64, "InternalKey must be 64B");
 // ==============================
 //          Iterator
 // ==============================
-class Level0Iterator {
+class Level0Iterator :public InternalIterator{
 public:
     Level0Iterator( SstableManager* smgr,
                     LOG_MANAGER*    lmgr,
                     const InternalKeyComparator* icmp,
                     LSMTree*        tree,
                     Options         opts);
-
     // 基本 API
     Status Init();                    // 一次性開啟所有 L0 檔案
     bool   Valid() const;
@@ -126,4 +125,109 @@ private:
     std::string_view key_;
     size_t          curr_idx_{static_cast<size_t>(-1)}; // ReadValue 時的真實來源 child
     Status          st_{Status::OK()};
+};
+
+
+
+
+class LevelNIterator :public InternalIterator{
+public:
+    LevelNIterator( SstableManager* smgr,
+    LOG_MANAGER* lmgr,
+    const InternalKeyComparator* icmp,
+    LSMTree* tree,
+    int level, // 1..6
+    Options opts);
+
+
+    // 基本 API（語義與 Level0Iterator 相同）
+    Status Init();
+    bool Valid() const;
+    void SeekToFirst();
+    void SeekToLast();
+    void Seek(std::string_view internal_target);
+    void Next();
+    void Prev();
+
+
+    std::string_view key() const;
+    Status ReadValue(std::string& out) const;
+    Status status() const;
+
+
+    // 設定同時最大開檔數（預設 64）。可在 Init() 前設定。
+    void set_max_open_children(size_t n) { max_open_children_ = (n == 0 ? 1 : n); }
+
+
+private:
+    struct Child {
+        L0FileMeta meta{};
+        std::unique_ptr<SstableIterator> it;
+        bool opened{false};
+    };
+
+    // ---- 內部 helper ----
+    void reset_view_(); // 重置當前狀態
+    bool within_upper_(std::string_view k) const;
+    bool ge_lower_(std::string_view k) const;
+    bool LessKey_(std::string_view a, std::string_view b) const;
+    bool LessKey_(const std::string& a, const std::string& b) const;
+
+
+    // 把 opts_ 轉成 canonical internal bounds（若已是 InternalKey 就直接沿用）
+    void build_bounds_from_opts_();
+
+
+    // 從系統讀取某 level 的 metas（依 lower/upper 篩選）；同時會排序 metas_ by min_key
+    bool LoadLevelMetas_();
+
+
+    // 針對某個 child ，根據 lower/upper 把 iterator 放到「第一個可用」位置
+    bool position_child_to_first_(size_t i); // 用在 SeekToFirst/換檔往前
+    bool position_child_to_last_(size_t i); // 用在 SeekToLast/換檔往後
+    bool position_child_to_target_ge_(size_t i, std::string_view target); // 用在 Seek(target)
+
+
+    // 在 metas_ 中找到「第一個可能 ≥ lower」的檔案索引（若無 lower 就回傳 0）
+    size_t find_first_file_ge_lower_() const;
+    // 在 metas_ 中找到「最後一個可能 < upper」的檔案索引（若無 upper 就回傳 metas_.size()-1）
+    size_t find_last_file_lt_upper_() const;
+    // 針對 target 找到可能包含 target 的檔案（min_key ≤ target ≤ max_key）不存在則回 metas_.size()
+    size_t find_file_for_target_(std::string_view target) const;
+
+
+    // ---- Lazy open + LRU 關檔 ----
+    Status ensure_child_open_(size_t i);
+    void lru_touch_(size_t i);
+    void lru_evict_if_needed_();
+
+
+private:
+    SstableManager* smgr_;
+    LOG_MANAGER* lmgr_;
+    const InternalKeyComparator* icmp_;
+    LSMTree* tree_;
+    const int level_; // 1..6
+    Options opts_;
+
+
+    std::vector<L0FileMeta> metas_; // 該 level 的檔案（已依 min_key 排序）
+    std::vector<Child> children_;
+
+
+    // canonical internal bounds（半開區間 [lower, upper)），固定 64B internal-key 編碼
+    std::optional<std::string> canon_lower_;
+    std::optional<std::string> canon_upper_;
+
+
+    // 當前檔與 key 檢視
+    size_t cur_file_{static_cast<size_t>(-1)};
+    std::string_view key_;
+    bool has_top_{false};
+    Status st_{Status::OK()};
+
+
+    // Lazy open + LRU
+    size_t max_open_children_{64};
+    std::deque<size_t> open_lru_;
 };

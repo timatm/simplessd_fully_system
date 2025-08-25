@@ -71,7 +71,7 @@ Status API::put(std::string key ,std::string value){
         immutable_memtable_ = std::move(memtable_);
         memtable_ = std::make_unique<MemTable>();
         
-        std::string buffer( sstableManager_->packingTable(immutable_memtable_->GetSkipList()) );
+        std::string buffer (sstableManager_->packingTable(immutable_memtable_->GetSkipList()));
         assert(buffer.size() == BLOCK_SIZE);
         if (buffer.empty()) {
             std::cerr << "[ERROR] packingTable returned empty buffer!" << std::endl;

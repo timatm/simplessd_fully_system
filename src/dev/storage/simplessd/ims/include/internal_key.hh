@@ -85,8 +85,8 @@ struct InternalKey {
     union {
         uint8_t raw[8];
         struct {
-            uint64_t seq  : 56;
             uint64_t type : 8;
+            uint64_t seq  : 56;
         };
     } info;
 

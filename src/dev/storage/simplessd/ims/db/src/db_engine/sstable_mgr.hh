@@ -43,6 +43,8 @@ public:
     void writeSSTable(uint8_t level,InternalKey minKey ,InternalKey maxKey,std::string sstable_buffer);
     void deleteSSTable(const std::string& filename);
     std::string packingTable(const SkipList<Record,RecordComparator> &skiplist);
+
+    std::string packingTable(std::queue<std::string> sortedLsit);
     void setSequenceNumber(uint32_t seq) {
         sequenceNumber_ = seq;
     }
@@ -64,6 +66,10 @@ private:
     char* keyPerPagePacking(const SkipList<Record,RecordComparator> &skiplist);
     char* keyHashPacking(const SkipList<Record,RecordComparator> &skiplist);
     char* keyRangePacking(const SkipList<Record,RecordComparator> &skiplist);
+
+    char* keyPerPagePacking(std::queue<std::string> sortedLsit);
+    char* keyHashPacking(std::queue<std::string> sortedLsit);
+    char* keyRangePacking(std::queue<std::string> sortedLsit);
 };
 
 class SstableIterator : public InternalIterator{

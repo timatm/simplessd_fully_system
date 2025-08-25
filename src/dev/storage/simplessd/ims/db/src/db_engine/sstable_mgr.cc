@@ -29,6 +29,25 @@ std::string SstableManager::packingTable(const SkipList<Record, RecordComparator
     }
     return package;
 }
+std::string SstableManager::packingTable(std::queue<std::string> sortedLsit){
+    std::string package;
+    switch (packing_type_)
+    {
+        case 0:
+            package = std::string(keyPerPagePacking(sortedLsit), BLOCK_SIZE);
+            break;
+        case 1:
+            package = std::string(keyHashPacking(sortedLsit),BLOCK_SIZE);
+            break;
+        case 2:
+            package = std::string(keyRangePacking(sortedLsit),BLOCK_SIZE);
+            break;
+        default:
+            break;
+    }
+    return package;
+}
+
 
 
 char* SstableManager::keyPerPagePacking(const SkipList<Record, RecordComparator>& skiplist) {
@@ -133,6 +152,134 @@ char* SstableManager::keyRangePacking(const SkipList<Record, RecordComparator>& 
 
     return buffer;
 }
+
+
+static constexpr size_t kIKeySize = sizeof(InternalKey);
+
+char* SstableManager::keyPerPagePacking(std::queue<std::string> sortedList) {
+    const size_t total_size = IMS_PAGE_NUM * IMS_PAGE_SIZE;
+    if (IMS_PAGE_SIZE < kIKeySize) {
+        throw std::runtime_error("IMS_PAGE_SIZE is smaller than InternalKey size (64B)");
+    }
+
+    char* buffer = static_cast<char*>(allocateAligned(total_size));
+    if (!buffer) throw std::runtime_error("Failed to allocate aligned buffer");
+
+    // 可選：預設填充 0xFF
+    std::memset(buffer, 0xFF, total_size);
+
+    size_t page = 0;
+    while (!sortedList.empty()) {
+        if (page >= IMS_PAGE_NUM) {
+            free(buffer);
+            throw std::runtime_error("Too many records for fixed page count (IMS_PAGE_NUM)");
+        }
+
+        const std::string& enc = sortedList.front();
+        if (enc.size() != kIKeySize) {
+            free(buffer);
+            throw std::runtime_error("Queue element must be exactly 64 bytes (InternalKey)");
+        }
+
+        char* dst = buffer + page * IMS_PAGE_SIZE;
+        std::memcpy(dst, enc.data(), enc.size());
+
+        ++page;
+        sortedList.pop();
+    }
+
+    return buffer;
+}
+
+char* SstableManager::keyHashPacking(std::queue<std::string> sortedList) {
+    const size_t slots_per_page = IMS_PAGE_SIZE / sizeof(InternalKey);
+    if (slots_per_page == 0) {
+        throw std::runtime_error("IMS_PAGE_SIZE too small for at least one InternalKey slot");
+    }
+    const size_t total_slots = IMS_PAGE_NUM * slots_per_page;
+    const size_t block_size  = total_slots * sizeof(InternalKey);
+
+    char* buffer = static_cast<char*>(allocateAligned(block_size));
+    if (!buffer) throw std::runtime_error("Failed to allocate aligned buffer");
+    // 重要：清 0 讓 key_size==0 當作「空槽」判斷
+    std::memset(buffer, 0, block_size);
+
+    while (!sortedList.empty()) {
+        const std::string& enc = sortedList.front();
+        if (enc.size() != kIKeySize) {
+            free(buffer);
+            throw std::runtime_error("Queue element must be exactly 64 bytes (InternalKey)");
+        }
+
+        InternalKey key{};
+        std::memcpy(&key, enc.data(), kIKeySize);
+
+        // 與你原本版本一致：用相同的雜湊定位「欄位/槽」
+        // 若你只有 HashModN(InternalKey,size_t)，這裡會直接沿用：
+        size_t slot_idx = HashModN(key, slots_per_page);
+
+        bool placed = false;
+        for (size_t pg = 0; pg < IMS_PAGE_NUM; ++pg) {
+            const size_t idx    = pg * slots_per_page + slot_idx;
+            InternalKey*  cell  = reinterpret_cast<InternalKey*>(buffer) + idx;
+            if (cell->key.key_size == 0) {
+                *cell = key;
+                placed = true;
+                break;
+            }
+        }
+
+        if (!placed) {
+            free(buffer);
+            throw std::runtime_error("Hash block full, cannot place key");
+        }
+
+        sortedList.pop();
+    }
+
+    return buffer;
+}
+
+char* SstableManager::keyRangePacking(std::queue<std::string> sortedList) {
+    const size_t slots_per_page = IMS_PAGE_SIZE / sizeof(InternalKey);
+    if (slots_per_page == 0) {
+        throw std::runtime_error("IMS_PAGE_SIZE too small for at least one InternalKey slot");
+    }
+    const size_t total_slots = IMS_PAGE_NUM * slots_per_page;
+    const size_t block_size  = total_slots * sizeof(InternalKey);
+
+    char* buffer = static_cast<char*>(allocateAligned(block_size));
+    if (!buffer) throw std::bad_alloc();
+    // 可選：非必要，但清 0 方便除錯
+    std::memset(buffer, 0, block_size);
+
+    // 與舊邏輯一致：column-major（先同 slot 橫跨所有 page，再到下一個 slot）
+    for (size_t slot = 0; slot < slots_per_page; ++slot) {
+        for (size_t page = 0; page < IMS_PAGE_NUM; ++page) {
+            if (sortedList.empty()) break;
+
+            const std::string& enc = sortedList.front();
+            if (enc.size() != kIKeySize) {
+                free(buffer);
+                throw std::runtime_error("Queue element must be exactly 64 bytes (InternalKey)");
+            }
+
+            const size_t flat_index = page * slots_per_page + slot;
+            InternalKey* cell = reinterpret_cast<InternalKey*>(buffer) + flat_index;
+
+            // 直接寫入 InternalKey
+            std::memcpy(cell, enc.data(), kIKeySize);
+
+            sortedList.pop();
+        }
+        if (sortedList.empty()) break;
+    }
+
+    return buffer;
+}
+
+
+
 
 std::string SstableManager::generateFilename(uint32_t seq) {
     constexpr size_t max_digits = sizeof(mappingEntry{}.fileName) - 1;
