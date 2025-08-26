@@ -5,6 +5,7 @@
 #include "lsmtree.hh"
 #include "options.hh"
 #include "compaction.hh"
+#include "range_query.hh"
 API::API(){
     tree_ = std::make_shared<Tree>();
     lsmTree_ = std::make_unique<LSMTree>(tree_);
@@ -380,36 +381,65 @@ Status API::search(std::string key ,std::string& value){
     return Status::OK();
 }
 
-Status API::range_query(std::string start_key, std::string end_key, std::set<std::string>& result_set){
-    if(start_key.empty() || end_key.empty()){
-        return Status::IOError("Start or end key string is empty");
+Status API::range_query(std::string start_key,
+                        std::string end_key,
+                        std::set<std::string>& result_set) {
+    if (start_key.empty() || end_key.empty()) {
+        return Status::InvalidArgument("Start or end key string is empty");
     }
-    if(start_key > end_key){
-        return Status::IOError("Start key cannot be greater than end key");
+    if (start_key > end_key) {
+        return Status::InvalidArgument("Start key cannot be greater than end key");
     }
-    
-    Key start(start_key);
-    Key end(end_key);
-    auto sstables = lsmTree_->search_all_level(start, end);
-    if (sstables.empty()) return Status::NotFound("No candidate SSTables for range query");
 
-    // for (const auto& sstable : sstables) {
-    //     std::cout   << "Find SStable: " << sstable << "  Key range [ " << sstable->rangeMin.toString() << " ~ "
-    //                 << sstable->rangeMax.toString() << " ]" <<std::endl;
-    //     char* buffer = (char*)allocateAligned(BLOCK_SIZE);
-    //     nvme_->nvme_read_sstable(sstable->filename, buffer);
-    //     getSSTable()->waitAllTasksDone();
-    //     auto keys = parse_sstable_page(buffer);
-    //     for (const auto& key : keys) {
-    //         if (key.UserKey() >= start_key && key.UserKey() <= end_key) {
-    //             result_set.insert(key.UserKey());
-    //         }
-    //     }
-    //     free(buffer);
-    // }
-    
+    // 1) 準備 [lower, upper) 的 InternalKey（已編碼）
+    const std::string lower =InternalKey(start_key, 0, ValueType::kTypeMin).Encode();
+    const std::string upper =InternalKey(end_key, UINT64_MAX, ValueType::kTypeMax).Encode();
+
+    // 2) 準備 MemTable iter（擁有權移交給 QueryIterator）
+    std::unique_ptr<MemTableIterator> memIter;
+    std::unique_ptr<MemTableIterator> immuteIter;
+
+    if (memtable_) {
+        // 假設 GetSkipList() 回傳的是 shared_ptr<SkipList<...>>
+        // 且 MemTableIterator(list, const InternalKeyComparator*) 簽名成立
+        memIter = std::make_unique<MemTableIterator>(memtable_->GetSkipList(), &icmp_);
+    }
+    if (immutable_memtable_) {
+        immuteIter = std::make_unique<MemTableIterator>(immutable_memtable_->GetSkipList(), &icmp_);
+    }
+ 
+    QueryIterator it(getSSTable(),
+                     getLogManager(),
+                     getLSMTree(),
+                     &icmp_,         // 若 icmp_ 本來就是指標，這裡改成 icmp_
+                     std::move(memIter),
+                     std::move(immuteIter));
+
+    // 5) 設定區間 + Init
+    it.SetInternalRange(lower, upper);
+    Status s = it.Init();
+    if (!s.ok()) return s;
+
+    // 6) 迭代：decode internal key -> user key；收集到 result_set
+    for (; it.Valid(); it.Next()) {
+        // 取 value（可選；你的 child iter 要支援 copy）
+        std::string val;
+        Status sv = it.ReadValue(val);
+        // if (!sv.ok() && !sv.IsNotSupported()) {
+        //     return sv;  // 某 child 不支援 value copy 也沒關係，NotSupported 可忽略
+        // }
+        if (!sv.ok()) {
+            std::cout << sv.ToString() << std::endl;
+            return sv;  // 某 child 不支援 value copy 也沒關係，NotSupported 可忽略
+        }
+        InternalKey ik = InternalKey::Decode(it.key().data());
+
+        std::cout << "KEY: " << ik.UserKey() << " -> VAL: " << val << "\n";
+    }
+
     return Status::OK();
 }
+
 
 
 Status API::removeSSable(std::shared_ptr<TreeNode> rm){

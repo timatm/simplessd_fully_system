@@ -299,18 +299,24 @@ void SstableManager::readSSTable(const std::string& filename,char *buffer) {
         return;
     }
 
-    thread_pool_.Submit([filename, buffer, this]() {
-        std::cout << "Reading SSTable from: " << filename << std::endl;
+    // thread_pool_.Submit([filename, buffer, this]() {
+    //     std::cout << "Reading SSTable from: " << filename << std::endl;
 
-        int err = nvme_.nvme_read_sstable(filename, buffer);
-        if (err == COMMAND_FAILED) {
-            std::cerr << "[Thread] Failed to read SSTable: " << filename << std::endl;
-            std::free(buffer);
-            return;
-        }
-        std::cout << "[Thread] Read success: " << filename << std::endl;
-    });
-
+    //     int err = nvme_.nvme_read_sstable(filename, buffer);
+    //     if (err == COMMAND_FAILED) {
+    //         std::cerr << "[Thread] Failed to read SSTable: " << filename << std::endl;
+    //         std::free(buffer);
+    //         return;
+    //     }
+    //     std::cout << "[Thread] Read success: " << filename << std::endl;
+    // });
+    int err = nvme_.nvme_read_sstable(filename, buffer);
+    if (err == COMMAND_FAILED) {
+        std::cerr << "[Thread] Failed to read SSTable: " << filename << std::endl;
+        std::free(buffer);
+        return;
+    }
+    std::cout << "[Thread] Read success: " << filename << std::endl;
     std::cout << "[Main] Async read dispatched.\n";
 }
 

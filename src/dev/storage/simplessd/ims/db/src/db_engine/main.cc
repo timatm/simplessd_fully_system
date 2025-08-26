@@ -106,15 +106,27 @@ int main() {
     db.getSSTable()->waitAllTasksDone();
     // db.getLogManager()->flush_buffer();
     // db.nvme_->nvme_dump_ims();
-
+    InternalKeyComparator icmp;
 
     // std::cout << "Inserted 129 key-value pairs successfully.\n";
     // db.getSSTable()->waitAllTasksDone();
     db.dump_memtable();
     db.dump_lsmtree();
     std::string value;
-    db.get("key123",value);
-    std::cout << value;
+    std::set<std::string> result;
+    // Options opt;
+    // opt.lower = InternalKey("key0",0,ValueType::kTypeMin).Encode();
+    // opt.upper = InternalKey("key500",0,ValueType::kTypeMax).Encode();
+    // LevelNIterator it(db.getSSTable(),db.getLogManager(),&icmp,db.getLSMTree(),1,opt);
+    // it.Init();
+    // while(it.Valid()){
+    //     InternalKey k = InternalKey::Decode(it.key().data());
+    //     std::string val;
+    //     it.ReadValue(val);
+    //     std::cout << "KEY:" << k.UserKey() << "  VAL:" << val << std::endl;
+    //     it.Next();
+    // }
+    db.range_query("key0","key999",result);
 }
 
 

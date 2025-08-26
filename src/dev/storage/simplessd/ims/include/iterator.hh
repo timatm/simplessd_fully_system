@@ -25,7 +25,8 @@ public:
     virtual void Next() = 0;
     virtual void Prev() = 0;
 
-    virtual std::string_view key()   const = 0;  // internal key (encoded)
+    // internal key (encoded)
+    virtual std::string_view key()   const = 0; 
 
     virtual Status status() const = 0;
     virtual bool SupportsValueView() const { return false; }

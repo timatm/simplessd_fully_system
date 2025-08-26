@@ -23,6 +23,7 @@ public:
     size_t ApproximateMemoryUsage() const;
     bool memTableIsFull();
     const SkipList<Record, RecordComparator>& GetSkipList() const { return skiplist_; }
+
     InternalKey getMinKey(){ return skiplist_.Min()->internal_key ;};
     InternalKey getMaxKey(){ return skiplist_.Max()->internal_key ;};
     void setPackingT(PackingType t){packing_type_ = static_cast<int>(t); }
@@ -36,10 +37,23 @@ private:
     InternalKey maxRange_;
 };
 
+
+
 class MemTableIterator : public InternalIterator {
 public:
     MemTableIterator(const std::shared_ptr<SkipList<Record, RecordComparator>>& list,
-                     const InternalKeyComparator* icmp);
+                     const InternalKeyComparator* icmp)
+    : list_(list.get()), holder_(list), it_(list_->GetIterator()), icmp_(icmp) {
+        key_buf_.clear();
+        value_buf_ = {};
+    }
+
+    MemTableIterator(const SkipList<Record, RecordComparator>& list,
+                     const InternalKeyComparator* icmp)
+    : list_(&list), it_(list_->GetIterator()), icmp_(icmp) {
+        key_buf_.clear();
+        value_buf_ = {};
+    }
 
     Status Init() override;
     bool Valid() const override;
@@ -56,19 +70,24 @@ public:
     std::optional<std::string_view> value_view() const override{
         return value_buf_.empty() ? std::nullopt : std::make_optional(value_buf_);
     }
+    
+    bool SupportsValueCopy() const override { return true; }
+    Status ReadValue(std::string& /*out*/) const override ;
+
 
     Status status() const override { return status_; }
 
 private:
-    void SyncKV();                   // 根據底層 iter 同步 key/value Slice
-    std::shared_ptr<SkipList<Record, RecordComparator>> list_;
+    void SyncKV();
+    const SkipList<Record, RecordComparator>* list_{nullptr};
+    std::shared_ptr<SkipList<Record, RecordComparator>> holder_;
+
     typename SkipList<Record, RecordComparator>::Iterator it_;
-    const InternalKeyComparator* icmp_; 
+    const InternalKeyComparator* icmp_{nullptr};
 
-    std::string key_buf_;
+    std::string      key_buf_;
     std::string_view value_buf_;
-
-    Status status_{};
+    Status           status_{Status::OK()};
 };
 
 

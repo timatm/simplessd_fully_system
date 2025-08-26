@@ -95,18 +95,9 @@ size_t HashModN(const InternalKey& ikey, size_t n) {
 
 
 
-MemTableIterator::MemTableIterator(
-    const std::shared_ptr<SkipList<Record, RecordComparator>>& list,
-    const InternalKeyComparator* icmp)
-: list_(list)
-, it_(list_->GetIterator()) 
-, icmp_(icmp) {
-    
-    key_buf_.clear();
-    value_buf_ = {};
-}
 Status MemTableIterator::Init(){
     SeekToFirst();
+    return Status::OK();
 }
 
 
@@ -150,6 +141,14 @@ void MemTableIterator::SyncKV() {
     }
     const Record& r = it_.record();
 
-    key_buf_ = r.internal_key.UserKey();
+    key_buf_ = r.internal_key.Encode();
     value_buf_ = r.value;
+}
+
+Status MemTableIterator::ReadValue(std::string& out) const {
+    if (!Valid()) {
+        return Status::Corruption("MemTableIterator not valid");
+    }
+    out = value_buf_;
+    return Status::OK();
 }

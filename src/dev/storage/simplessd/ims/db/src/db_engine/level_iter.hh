@@ -52,17 +52,18 @@ public:
                     LSMTree*        tree,
                     Options         opts);
     // 基本 API
-    Status Init();                    // 一次性開啟所有 L0 檔案
-    bool   Valid() const;
-    void   SeekToFirst();
-    void   SeekToLast();
-    void   Seek(std::string_view internal_target);
-    void   Next();
-    void   Prev();
+    Status Init() override;                    // 一次性開啟所有 L0 檔案
+    bool   Valid() const override;
+    void   SeekToFirst() override;
+    void   SeekToLast() override;
+    void   Seek(std::string_view internal_target) override;
+    void   Next() override;
+    void   Prev() override;
 
-    std::string_view key() const;
-    Status ReadValue(std::string& out) const;
-    Status status() const;
+    std::string_view key() const override;
+    bool SupportsValueCopy() const override { return true; }
+    Status ReadValue(std::string& out) const override;
+    Status status() const override;
     
 private:
     struct Child {
@@ -108,9 +109,9 @@ private:
     
 private:
     SstableManager* smgr_;
-    LogManager*    lmgr_;
-    const InternalKeyComparator* icmp_;
+    LogManager*     lmgr_;
     LSMTree*        tree_;
+    const InternalKeyComparator* icmp_;
     Options         opts_;
 
     std::vector<L0FileMeta> metas_;
@@ -141,18 +142,19 @@ public:
 
 
     // 基本 API（語義與 Level0Iterator 相同）
-    Status Init();
-    bool Valid() const;
-    void SeekToFirst();
-    void SeekToLast();
-    void Seek(std::string_view internal_target);
-    void Next();
-    void Prev();
+    Status Init() override;
+    bool Valid() const override;
+    void SeekToFirst() override;
+    void SeekToLast() override;
+    void Seek(std::string_view internal_target) override;
+    void Next() override;
+    void Prev() override;
 
 
-    std::string_view key() const;
-    Status ReadValue(std::string& out) const;
-    Status status() const;
+    std::string_view key() const override;
+    bool SupportsValueCopy() const override { return true; };
+    Status ReadValue(std::string& out) const override;
+    Status status() const override;
 
 
     // 設定同時最大開檔數（預設 64）。可在 Init() 前設定。
@@ -204,9 +206,9 @@ private:
 
 private:
     SstableManager* smgr_;
-    LogManager* lmgr_;
-    const InternalKeyComparator* icmp_;
-    LSMTree* tree_;
+    LogManager*     lmgr_;
+    const InternalKeyComparator *icmp_;
+    LSMTree*        tree_;
     const int level_; // 1..6
     Options opts_;
 

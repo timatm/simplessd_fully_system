@@ -43,6 +43,10 @@ Status Status::Empty() {
     return Status(kEmpty,"");
 }
 
+Status Status::InvalidArgument(const std::string& msg) {
+    return Status(kInvalidArgument, msg);
+}
+
 Status Status::NotSupported(const std::string& msg) {
     return Status(kNotSupported, msg);
 }
@@ -72,6 +76,11 @@ bool Status::IsIOError() const {
 
 bool Status::IsEmpty() const {
     return state_ != nullptr && state_[0] == kEmpty;
+}
+
+
+bool Status::IsNotSupported() const {
+    return state_ != nullptr && state_[0] == kNotSupported;
 }
 
 std::string Status::ToString() const {
