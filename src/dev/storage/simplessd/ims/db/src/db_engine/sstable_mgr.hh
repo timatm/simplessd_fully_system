@@ -33,16 +33,29 @@ static inline void* allocateAligned(size_t size) {
     return ptr;
 }
 
+using OnWriteDone = std::function<void(const sstable_info& info)>;
+using OnWriteFail = std::function<void(const sstable_info& info, int err)>;
+
 class SstableManager {
 public:
     SstableManager(INVMEDriver& nvme,LSMTree& tree):lsmTree_(tree) ,nvme_(nvme) {}
     ~SstableManager() = default;
     // TODO
+    static constexpr size_t kAlign     = 4096;             // 4KB
+    static constexpr size_t kTableSize = BLOCK_SIZE;
+
+
+    
+    static AlignedBuf MakeAlignedBlockSize();
+
+    // 主要 API：回傳「對齊且固定 2MB」的打包結果
+    AlignedBuf packingTable(const SkipList<Record, RecordComparator>& skiplist) const;
+
     void init();
     void readSSTable(const std::string& filename,char *buffer);
-    void writeSSTable(uint8_t level,InternalKey minKey ,InternalKey maxKey,std::string sstable_buffer);
+    void writeSSTable(uint8_t level,InternalKey minKey ,InternalKey maxKey,AlignedBuf sstable_buffer,bool);
     void eraseSSTable(const std::string& filename);
-    std::string packingTable(const SkipList<Record,RecordComparator> &skiplist);
+    // std::string packingTable(const SkipList<Record,RecordComparator> &skiplist);
 
     std::string packingTable(std::queue<std::string> sortedLsit);
     void setSequenceNumber(uint32_t seq) {
@@ -54,22 +67,52 @@ public:
     void waitAllTasksDone() {
         thread_pool_.WaitForAll();
     }
+
+    void set_on_write_done(OnWriteDone cb) { on_write_done_ = std::move(cb); }
+    void set_on_write_fail(OnWriteFail cb) { on_write_fail_ = std::move(cb); }
+
 private:
-    int packing_type_ = static_cast<int>(PackingType::kKeyPerPage);
     ThreadPool thread_pool_{1};
     LSMTree& lsmTree_;
     mutable std::mutex tree_mutex_;
     INVMEDriver& nvme_;
     std::atomic<uint32_t> sequenceNumber_ = 0; // Sequence number for SSTables
     std::unordered_map<std::string, std::shared_ptr<std::deque<InternalKey>>> keyRangeMap; // sstable name -> key range per slot
+
+    OnWriteDone on_write_done_;
+    OnWriteFail on_write_fail_;
+
+private:
     std::string generateFilename(uint32_t seq);
     char* keyPerPagePacking(const SkipList<Record,RecordComparator> &skiplist);
     char* keyHashPacking(const SkipList<Record,RecordComparator> &skiplist);
     char* keyRangePacking(const SkipList<Record,RecordComparator> &skiplist);
 
-    char* keyPerPagePacking(std::queue<std::string> sortedLsit);
-    char* keyHashPacking(std::queue<std::string> sortedLsit);
-    char* keyRangePacking(std::queue<std::string> sortedLsit);
+    AlignedBuf keyPerPagePacking(const SkipList<Record, RecordComparator>& skiplist) const;
+    AlignedBuf keyHashPacking   (const SkipList<Record, RecordComparator>& skiplist) const;
+    AlignedBuf keyRangePacking  (const SkipList<Record, RecordComparator>& skiplist) const;
+
+    static inline void append_bytes(AlignedBuf& buf, size_t& off, const void* src, size_t len) {
+        if (off + len > buf.size) {
+            throw std::runtime_error("append_bytes OOB: off=" + std::to_string(off) +
+                                     " len=" + std::to_string(len) +
+                                     " cap=" + std::to_string(buf.size));
+        }
+        std::memcpy(buf.data() + off, src, len);
+        off += len;
+    }
+
+    // char* keyPerPagePacking(std::queue<std::string> sortedLsit);
+    // char* keyHashPacking(std::queue<std::string> sortedLsit);
+    // char* keyRangePacking(std::queue<std::string> sortedLsit);
+
+    AlignedBuf keyPerPagePacking(std::queue<std::string> sortedLsit);
+    AlignedBuf keyHashPacking(std::queue<std::string> sortedLsit);
+    AlignedBuf keyRangePacking(std::queue<std::string> sortedLsit);
+
+    void  notify_done(const sstable_info& info) noexcept;
+    void  notify_fail(const sstable_info& info, int err) noexcept;
+    PackingType packing_type_ = PACKING_T; 
 };
 
 class SstableIterator : public InternalIterator{

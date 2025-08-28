@@ -122,6 +122,8 @@ InternalKey InternalKey::Decode(char* buf) {
 
     return ik;
 }
+
+
 // Extract user key string
 std::string InternalKey::UserKey() const {
     return std::string(reinterpret_cast<const char*>(key.key), key.key_size);

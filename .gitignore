@@ -40,6 +40,8 @@ compile_flags.txt
 
 *cfg
 /src/dev/storage/simplessd/ims/db/build
+/src/dev/storage/simplessd/ims/db/build-asan/
+
 /src/dev/storage/simplessd/ims/db/libnvme
 disk.bin
 *.img

@@ -102,7 +102,7 @@ Status CompactionRunner::Run() {
             InternalKey min = InternalKey::Decode(sortedList_.front());
             InternalKey max = InternalKey::Decode(sortedList_.back());
             std::string buf = smgr_->packingTable(sortedList_);
-            smgr_->writeSSTable(config_.dst_level,min,max,buf);
+            smgr_->writeSSTable(config_.dst_level,min,max,buf,false);
             while (!sortedList_.empty()) sortedList_.pop();
             nums_ = 0;
             if (packType_ == PackingType::kHash) std::fill(hash_num_.begin(), hash_num_.end(), 0);
@@ -152,7 +152,7 @@ Status CompactionRunner::Run() {
         InternalKey min = InternalKey::Decode(sortedList_.front());
         InternalKey max = InternalKey::Decode(sortedList_.back());
         std::string buf = smgr_->packingTable(sortedList_);
-        smgr_->writeSSTable(config_.dst_level,min,max,buf);
+        smgr_->writeSSTable(config_.dst_level,min,max,buf,false);
         while (!sortedList_.empty()) sortedList_.pop();
         nums_ = 0;
     }

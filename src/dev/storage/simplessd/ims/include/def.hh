@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <memory>
 // [SSD setting start]
 
 #define CHANNEL_NUM 4
@@ -79,6 +80,15 @@ enum class SelectT {
 // Enable NVMe driver = 0 / 1  (my NVMe driver) / (simplessd NVMe driver)
 #define NVME_DRIVER 0
 
+
+struct AlignedBuf {
+    std::unique_ptr<void, void(*)(void*)> ptr{nullptr, &::free};
+    size_t size  = 0;    // 一定是 kTableSize
+    size_t align = 0;    // 一定是 kAlign
+
+    char* data() const{ return static_cast<char*>(ptr.get()); }
+    explicit operator bool() const { return ptr != nullptr; }
+};
 
 
 // [DB setting end]

@@ -11,35 +11,187 @@
 #include <stdexcept>
 #include "internal_key.hh"
 
-std::string SstableManager::packingTable(const SkipList<Record, RecordComparator>& skiplist){
-    std::string package;
-    switch (packing_type_)
-    {
-        case 0:
-            package = std::string(keyPerPagePacking(skiplist), BLOCK_SIZE);
-            break;
-        case 1:
-            package = std::string(keyHashPacking(skiplist),BLOCK_SIZE);
-            break;
-        case 2:
-            package = std::string(keyRangePacking(skiplist),BLOCK_SIZE);
-            break;
-        default:
-            break;
-    }
-    return package;
+
+AlignedBuf SstableManager::MakeAlignedBlockSize() {
+    void* p = nullptr;
+    // 也可用 aligned_alloc(kAlign, kTableSize)；posix_memalign 更通用
+    int rc = ::posix_memalign(&p, kAlign, kTableSize);
+    if (rc != 0 || p == nullptr) throw std::bad_alloc();
+    std::memset(p, 0xFF, kTableSize);
+    return AlignedBuf{ std::unique_ptr<void, void(*)(void*)>(p, &::free), kTableSize, kAlign };
 }
+
+AlignedBuf SstableManager::packingTable(const SkipList<Record, RecordComparator>& skiplist) const {
+    switch (packing_type_) {
+        case PackingType::kKeyPerPage:
+            return keyPerPagePacking(skiplist);
+        case PackingType::kHash:
+            return keyHashPacking(skiplist);
+        case PackingType::kKeyRange:
+            return keyRangePacking(skiplist);
+        default:
+            pr_debug("PackingTable type is error");
+            return {};
+    }
+}
+
+// ———— 下面三個 packer：示範骨架（把你原本寫入邏輯搬進來） ————
+// 假設：
+// - AlignedBuf 有 data()/size 成員；MakeAlignedBlockSize() 會回傳 4096 對齊、大小 = IMS_PAGE_NUM*IMS_PAGE_SIZE 的緩衝
+// - InternalKey::Encode() 產生的長度 <= IMS_PAGE_SIZE（你原本就檢查了）
+// - HashModN(const InternalKey&, size_t) 已存在
+// - InternalKey 具備成員 key.key_size（0 表示空槽；和你原本 hash 版本一致）
+
+// 小工具：邊界檢查寫入
+static inline void write_bytes_at(AlignedBuf& buf, size_t off, const void* src, size_t len) {
+    if (off + len > buf.size) {
+        throw std::runtime_error("write_bytes_at OOB: off=" + std::to_string(off) +
+                                 " len=" + std::to_string(len) +
+                                 " cap=" + std::to_string(buf.size));
+    }
+    std::memcpy(buf.data() + off, src, len);
+}
+
+// 小工具：把區間填成某個 byte 值
+static inline void fill_bytes_at(AlignedBuf& buf, size_t off, uint8_t val, size_t len) {
+    if (off + len > buf.size) {
+        throw std::runtime_error("fill_bytes_at OOB: off=" + std::to_string(off) +
+                                 " len=" + std::to_string(len) +
+                                 " cap=" + std::to_string(buf.size));
+    }
+    std::memset(buf.data() + off, val, len);
+}
+
+AlignedBuf SstableManager::keyPerPagePacking(const SkipList<Record, RecordComparator>& skiplist) const {
+    // 總大小 = IMS_PAGE_NUM * IMS_PAGE_SIZE（等於你原本 total_size）
+    AlignedBuf out = MakeAlignedBlockSize();
+
+    auto it = skiplist.GetIterator();
+    it.SeekToFirst();
+
+    size_t page = 0;
+    while (it.Valid()) {
+        if (page >= IMS_PAGE_NUM) {
+            throw std::runtime_error("Too many records for fixed page count (IMS_PAGE_NUM)");
+        }
+        const InternalKey key = it.record().internal_key;
+        const std::string enc = key.Encode();
+        if (enc.size() != sizeof(InternalKey)) {
+            throw std::runtime_error("Encoded key size is error");
+        }
+        const size_t page_off = page * IMS_PAGE_SIZE;
+        write_bytes_at(out, page_off, enc.data(), enc.size());
+        ++page;
+        it.Next();
+    }
+
+    return out;
+}
+
+AlignedBuf SstableManager::keyHashPacking(const SkipList<Record, RecordComparator>& skiplist) const {
+    // 按你原本算法：slots_per_page = IMS_PAGE_SIZE / sizeof(InternalKey)
+    // 總 slot = IMS_PAGE_NUM * slots_per_page，總 bytes = total_slots * sizeof(InternalKey)
+    // 而 IMS_PAGE_NUM*IMS_PAGE_SIZE == total_slots*sizeof(InternalKey)（等價）
+    AlignedBuf out = MakeAlignedBlockSize();
+
+    const size_t slots_per_page = IMS_PAGE_SIZE / sizeof(InternalKey);
+    const size_t total_slots    = IMS_PAGE_NUM * slots_per_page;
+
+    auto it = skiplist.GetIterator();
+    it.SeekToFirst();
+
+    while (it.Valid()) {
+        const InternalKey& key = it.record().internal_key;
+        const size_t slot_idx  = HashModN(key, slots_per_page);
+        bool placed = false;
+
+        for (size_t pg = 0; pg < IMS_PAGE_NUM; ++pg) {
+            const size_t idx    = pg * slots_per_page + slot_idx;
+            const size_t offset = idx * sizeof(InternalKey);
+            if (idx >= total_slots) {
+                throw std::runtime_error("Index overflow in keyHashPacking");
+            }
+
+            auto* ptr = reinterpret_cast<InternalKey*>(out.data() + offset);
+            if (ptr->info.type == 0xFF) {
+                *ptr = key;
+                placed = true;
+                break;
+            }
+        }
+
+        if (!placed) {
+            throw std::runtime_error("Hash block full, cannot place key");
+        }
+
+        it.Next();
+    }
+
+    return out;
+}
+
+AlignedBuf SstableManager::keyRangePacking(const SkipList<Record, RecordComparator>& skiplist) const {
+    AlignedBuf out = MakeAlignedBlockSize();
+
+    const size_t slots_per_page = IMS_PAGE_SIZE / sizeof(InternalKey);
+    const size_t total_slots    = IMS_PAGE_NUM * slots_per_page;
+
+    auto iter = skiplist.GetIterator();
+    iter.SeekToFirst();
+
+    for (size_t slot = 0; slot < slots_per_page; ++slot) {
+        for (size_t page = 0; page < IMS_PAGE_NUM; ++page) {
+            if (!iter.Valid()) break;
+
+            const size_t flat_index = page * slots_per_page + slot;
+            if (flat_index >= total_slots) {
+                throw std::runtime_error("Index overflow in keyRangePacking");
+            }
+
+            const size_t offset = flat_index * sizeof(InternalKey);
+            auto* ptr = reinterpret_cast<InternalKey*>(out.data() + offset);
+            *ptr = iter.record().internal_key;
+
+            iter.Next();
+        }
+        if (!iter.Valid()) break;
+    }
+
+    return out;
+}
+
+
+
+
+// std::string SstableManager::packingTable(const SkipList<Record, RecordComparator>& skiplist){
+//     std::string package;
+//     switch (packing_type_)
+//     {
+//         case PackingType::kKeyPerPage:
+//             package = std::string(keyPerPagePacking(skiplist), BLOCK_SIZE);
+//             break;
+//         case PackingType::kHash:
+//             package = std::string(keyHashPacking(skiplist),BLOCK_SIZE);
+//             break;
+//         case PackingType::kKeyRange:
+//             package = std::string(keyRangePacking(skiplist),BLOCK_SIZE);
+//             break;
+//         default:
+//             break;
+//     }
+//     return package;
+// }
 std::string SstableManager::packingTable(std::queue<std::string> sortedLsit){
     std::string package;
     switch (packing_type_)
     {
-        case 0:
+        case PackingType::kKeyPerPage:
             package = std::string(keyPerPagePacking(sortedLsit), BLOCK_SIZE);
             break;
-        case 1:
+        case PackingType::kHash:
             package = std::string(keyHashPacking(sortedLsit),BLOCK_SIZE);
             break;
-        case 2:
+        case PackingType::kKeyRange:
             package = std::string(keyRangePacking(sortedLsit),BLOCK_SIZE);
             break;
         default:
@@ -321,8 +473,8 @@ void SstableManager::readSSTable(const std::string& filename,char *buffer) {
 }
 
 
-void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey maxKey, std::string sstable_buffer) {
-    if (sstable_buffer.empty()) {
+void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey maxKey, AlignedBuf sstable_buffer,bool clearImmuteTable) {
+    if (sstable_buffer.ptr == nullptr) {
         std::cerr << "SSTable buffer cannot be null" << std::endl;
         return;
     }
@@ -335,9 +487,9 @@ void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey
     std::cout << "Dispatching write for SSTable: " << filename << std::endl;
     info.dump();
 
-    thread_pool_.Submit([info, buf = std::move(sstable_buffer), this]() {
+    thread_pool_.Submit([info, buf = std::move(sstable_buffer), clearImmuteTable,this]() {
         std::cout << "[Thread] Entered thread task\n";
-        int err = nvme_.nvme_write_sstable(info,  const_cast<char*>(buf.data()));
+        int err = nvme_.nvme_write_sstable(info,buf.data());
         std::cout << "[Thread] nvme_write_sstable returned " << err << std::endl;
         if (err == COMMAND_FAILED) {
             std::cerr << "[Thread] Failed to write SSTable: " << info.filename << std::endl;
@@ -353,8 +505,10 @@ void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey
             std::unique_lock<std::mutex> lock(tree_mutex_);
             lsmTree_.insert_sstable(node);
         }
-        
 
+        if (clearImmuteTable) {
+            notify_done(info);
+        }
         std::cout << "SStable(" << info.filename << ") written successfully.\n";
     });
 
@@ -378,7 +532,7 @@ Status SstableIterator::Init() {
     // 让 readSSTable 读满一个块；失败时返回错误
     // 例如：Status readSSTable(const std::string&, char*& out_buf); 保障 out_buf 指向 BLOCK_SIZE 的内存
     sstable_mgr_->readSSTable(filename_, buf_);
-    sstable_mgr_->waitAllTasksDone();
+    // sstable_mgr_->waitAllTasksDone();
     if (buf_ == nullptr) {
         return Status::IOError("Failed to read SSTable: " + filename_); 
     }
@@ -520,3 +674,26 @@ std::string_view SstableIterator::key() const {
 }
 
 Status SstableIterator::status() const { return st_; }
+
+
+void SstableManager::notify_done(const sstable_info& info) noexcept {
+    if (!on_write_done_) return;
+    try {
+        on_write_done_(info);
+    } catch (const std::exception& e) {
+        std::cerr << "[SstableManager] on_write_done_ threw: " << e.what() << "\n";
+    } catch (...) {
+        std::cerr << "[SstableManager] on_write_done_ threw unknown exception\n";
+    }
+}
+
+void SstableManager::notify_fail(const sstable_info& info, int err) noexcept {
+    if (!on_write_fail_) return;
+    try {
+        on_write_fail_(info, err);
+    } catch (const std::exception& e) {
+        std::cerr << "[SstableManager] on_write_fail_ threw: " << e.what() << "\n";
+    } catch (...) {
+        std::cerr << "[SstableManager] on_write_fail_ threw unknown exception\n";
+    }
+}

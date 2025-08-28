@@ -95,7 +95,7 @@ int main() {
         return -1;
     }
     
-    for (int i = 0; i < 1024; ++i) {
+    for (int i = 0; i < 1000 ; ++i) {
         std::string key = "key" + std::to_string(i);
         std::string value = "value" + std::to_string(i);
         Status s = db.put(key, value);
@@ -126,9 +126,23 @@ int main() {
     //     std::cout << "KEY:" << k.UserKey() << "  VAL:" << val << std::endl;
     //     it.Next();
     // }
-    db.range_query("key0","key999",result);
+    // db.range_query("key0","key999",result);
+    
+    std::cout << "Iterator traverse is done"<< std::endl;
 }
 
+
+
+// SstableIterator it(db.getSSTable(),db.getLogManager(),&icmp,"00000000000000000000000000000000010",db.getPackType());
+//     it.Init();
+//     it.SeekToFirst();
+//     while(it.Valid()){
+//         InternalKey k = InternalKey::Decode(it.key().data());
+//         std::string val;
+//         it.ReadValue(val);
+//         std::cout << "KEY:" << k.UserKey() << "  VAL:" << val << std::endl;
+//         it.Next();
+//     }
 
 
 

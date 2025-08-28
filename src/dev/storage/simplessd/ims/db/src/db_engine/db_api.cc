@@ -23,6 +23,14 @@ API::API(){
     global_seq_ = 0;
     sstableManager_ = std::make_unique<SstableManager>(*nvme_,*lsmTree_);
     compaction_key_list_.resize(MAX_LEVEL);
+
+    sstableManager_->set_on_write_done([this](const sstable_info& info) {
+        this->OnSSTableFlushed(info);
+    });
+    sstableManager_->set_on_write_fail([this](const sstable_info& info, int err) {
+        this->OnSSTableWriteFailed(info, err);
+    });
+
 }
 Status API::open() {
     pr_info("Opening database...");
@@ -67,21 +75,30 @@ Status API::open() {
 
 
 Status API::put(std::string key ,std::string value){
-    if (!memtable_) {
-        memtable_ = std::make_unique<MemTable>();
-    }
-    if (memtable_->memTableIsFull()) {
-        immutable_memtable_ = std::move(memtable_);
-        memtable_ = std::make_unique<MemTable>();
-        
-        std::string buffer (sstableManager_->packingTable(immutable_memtable_->GetSkipList()));
-        assert(buffer.size() == BLOCK_SIZE);
-        if (buffer.empty()) {
-            std::cerr << "[ERROR] packingTable returned empty buffer!" << std::endl;
-            return Status::IOError("Packing failed");
-        }
-        sstableManager_->writeSSTable(0, immutable_memtable_->getMinKey(), immutable_memtable_->getMaxKey(), buffer);
+    std::shared_ptr<MemTable> imm_hold;
+    InternalKey minK, maxK;
+    bool need_flush = false;
 
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        if (!memtable_) memtable_ = std::make_unique<MemTable>();
+        if (memtable_->memTableIsFull()) {
+            // 把 unique_ptr 轉成 shared_ptr
+            imm_hold = std::shared_ptr<MemTable>(std::move(memtable_));
+            immutable_memtable_ = imm_hold;              // 讓讀者可見
+            memtable_ = std::make_unique<MemTable>();    // 新 memtable
+
+            minK = imm_hold->getMinKey();                // by value
+            maxK = imm_hold->getMaxKey();
+            need_flush = true;
+        }
+    } // 解鎖
+
+    if (need_flush) {
+        const auto& list_ref = imm_hold->GetSkipList();  // 注意：是 const&，不是 shared_ptr
+        auto buffer = sstableManager_->packingTable(list_ref);
+        if ( buffer.data() == nullptr || buffer.size != BLOCK_SIZE) return Status::IOError("Packing failed");
+        sstableManager_->writeSSTable(0, minK, maxK, std::move(buffer), /*clearImmuteTable=*/true);
     }
     compaction();
     uint32_t lpn = 0;
@@ -97,22 +114,32 @@ Status API::put(std::string key ,std::string value){
 
 
 Status API::delete_key(std::string key ,std::string value){
-    if (!memtable_) {
-        memtable_ = std::make_unique<MemTable>();
-    }
-    if (memtable_->memTableIsFull()) {
-        immutable_memtable_ = std::move(memtable_);
-        memtable_ = std::make_unique<MemTable>();
-        
-        std::string buffer( sstableManager_->packingTable(immutable_memtable_->GetSkipList()) );
-        assert(buffer.size() == BLOCK_SIZE);
-        if (buffer.empty()) {
-            std::cerr << "[ERROR] packingTable returned empty buffer!" << std::endl;
-            return Status::IOError("Packing failed");
-        }
-        sstableManager_->writeSSTable(0, immutable_memtable_->getMinKey(), immutable_memtable_->getMaxKey(), buffer);
+   std::shared_ptr<MemTable> imm_hold;
+    InternalKey minK, maxK;
+    bool need_flush = false;
 
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        if (!memtable_) memtable_ = std::make_unique<MemTable>();
+        if (memtable_->memTableIsFull()) {
+            // 把 unique_ptr 轉成 shared_ptr
+            imm_hold = std::shared_ptr<MemTable>(std::move(memtable_));
+            immutable_memtable_ = imm_hold;              // 讓讀者可見
+            memtable_ = std::make_unique<MemTable>();    // 新 memtable
+
+            minK = imm_hold->getMinKey();                // by value
+            maxK = imm_hold->getMaxKey();
+            need_flush = true;
+        }
+    } // 解鎖
+
+    if (need_flush) {
+        const auto& list_ref = imm_hold->GetSkipList();  // 注意：是 const&，不是 shared_ptr
+        auto buffer = sstableManager_->packingTable(list_ref);
+        if ( buffer.data() == nullptr || buffer.size != BLOCK_SIZE) return Status::IOError("Packing failed");
+        sstableManager_->writeSSTable(0, minK, maxK, std::move(buffer), /*clearImmuteTable=*/true);
     }
+    compaction();
     uint32_t lpn = 0;
     uint32_t offset = 0;
     getLogManager()->getLPN(lpn, offset);
@@ -420,21 +447,16 @@ Status API::range_query(std::string start_key,
     Status s = it.Init();
     if (!s.ok()) return s;
 
-    // 6) 迭代：decode internal key -> user key；收集到 result_set
     for (; it.Valid(); it.Next()) {
-        // 取 value（可選；你的 child iter 要支援 copy）
         std::string val;
         Status sv = it.ReadValue(val);
-        // if (!sv.ok() && !sv.IsNotSupported()) {
-        //     return sv;  // 某 child 不支援 value copy 也沒關係，NotSupported 可忽略
-        // }
         if (!sv.ok()) {
             std::cout << sv.ToString() << std::endl;
-            return sv;  // 某 child 不支援 value copy 也沒關係，NotSupported 可忽略
+            return sv;
         }
-        InternalKey ik = InternalKey::Decode(it.key().data());
+        InternalKey ik = InternalKey::Decode(std::string(it.key()));
 
-        std::cout << "KEY: " << ik.UserKey() << " -> VAL: " << val << "\n";
+        std::cout << "KEY: " << ik.UserKey() << "[seq: " << ik.info.seq << "] " << " -> VAL: " << val << "\n";
     }
 
     return Status::OK();
@@ -533,4 +555,20 @@ void API::set_compaction_key_list(InternalKey key , int level){
         throw std::out_of_range("Level out of range");
     }
     compaction_key_list_[level] = key;
+}
+
+
+void API::OnSSTableFlushed(const sstable_info& info) {
+    std::lock_guard<std::mutex> lk(mu_);
+
+    if (immutable_memtable_) {
+        immutable_memtable_.reset();
+        std::cout << "[API] Immutable memtable cleared after flush to " << info.filename << "\n";
+    }
+}
+
+void API::OnSSTableWriteFailed(const sstable_info& info, int err) {
+    std::lock_guard<std::mutex> lk(mu_);
+    std::cerr << "[API] Flush failed for " << info.filename << ", err=" << err
+              << " (keeping immutable memtable for retry)\n";
 }

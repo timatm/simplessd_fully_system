@@ -60,11 +60,16 @@ private:
     std::unique_ptr<LSMTree> lsmTree_;
     PackingType packing_;
     std::unique_ptr<MemTable> memtable_;
-    std::unique_ptr<MemTable> immutable_memtable_;
+    std::shared_ptr<MemTable> immutable_memtable_;
     std::unique_ptr<LogManager> logManager_;
     std::atomic<uint64_t> global_seq_{0}; 
     std::unique_ptr<SstableManager> sstableManager_;
     std::vector<std::optional<InternalKey>> compaction_key_list_;
     InternalKeyComparator icmp_;
+    std::mutex mu_;
+
+private:
+    void OnSSTableFlushed(const sstable_info& info);
+    void OnSSTableWriteFailed(const sstable_info& info, int err);
 };
 #endif
