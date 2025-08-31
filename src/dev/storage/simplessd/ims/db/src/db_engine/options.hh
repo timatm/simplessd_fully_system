@@ -6,7 +6,7 @@ enum class PackingType {
     kKeyRange       = 0x2,
 };
 
-#define PACKING_T (PackingType::kKeyRange)
+#define PACKING_T (PackingType::kKeyPerPage)
 
 #define LEVEL0_MAX 4
 #define LEVEL1_MAX 10

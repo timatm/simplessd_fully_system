@@ -1,6 +1,7 @@
 #include "internal_key.hh"
 #include <iostream>
 #include <iomanip>
+#include "print.hh"
 
 // Default constructor: zero everything
 InternalKey::InternalKey() {
@@ -73,8 +74,11 @@ std::string InternalKey::Encode() const {
 }
 
 InternalKey InternalKey::Decode(const std::string& buf) {
-
     InternalKey ik{};
+    if (buf.size() != sizeof(InternalKey)) {
+        pr_debug("InternalKey size is invalid(%d)",buf.size());
+        return ik;
+    }
     size_t off = 0;
 
     ik.key.key_size = static_cast<uint8_t>(buf[off++]);
@@ -103,8 +107,8 @@ InternalKey InternalKey::Decode(const std::string& buf) {
 // }
 
 InternalKey InternalKey::Decode(char* buf) {
-
     InternalKey ik{};
+    
     size_t off = 0;
 
     ik.key.key_size = static_cast<uint8_t>(buf[off++]);
@@ -176,10 +180,16 @@ bool InternalKey::operator()(const InternalKey& a, const InternalKey& b) const {
     if (a.info.seq != b.info.seq) return a.info.seq > b.info.seq;  
     return a.info.type > b.info.type;
 }                      
+// 建議改成 const 成員函式
+bool InternalKey::IsValid() const {
+    // 基本形狀檢查
+    if (key.key_size > 40) return false;
 
-bool InternalKey::IsValid(){
-    if(info.type == UINT64_MAX){
-        return false;
-    }
+    // 型別必須在我們定義的合法範圍內（0..3），且不能是 kInvalid(0xFF)
+    const uint8_t t = static_cast<uint8_t>(info.type);
+    if (t == static_cast<uint8_t>(ValueType::kInvalid)) return false;
+    if (t >  static_cast<uint8_t>(ValueType::kTypeMax)) return false;
+
     return true;
 }
+

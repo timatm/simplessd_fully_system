@@ -23,23 +23,28 @@ std::queue<std::shared_ptr<TreeNode>> LSMTree::search_key(const Key& key) {
         result.push(candidate);
     }
     for (int level = 1; level < MAX_LEVEL; ++level) {
-        const auto& nodes = tree_->get_level_nodes(level);
-        if (nodes.empty()) continue;
+        const auto& Lnodes = tree_->get_level_nodes(level);
+        if (Lnodes.empty()) continue;
 
         
-        auto it = nodes.upper_bound(dummy);
+        auto it = Lnodes.lower_bound(dummy);  // 注意：改用 lower_bound 較直覺
 
-        if (it != nodes.begin()) {
-            --it;
-            const auto& candidate = *it;
-            std::cout << "Check node " << candidate->filename << " in level: " << level << std::endl;
-
-            if (compareKey(candidate->rangeMin, key) <= 0 &&
-                compareKey(candidate->rangeMax, key) >= 0) {
-                candidate->dump();
-                result.push(candidate);
+        if (it != Lnodes.end()) {
+            const auto& cand = *it;
+            if (compareKey(cand->rangeMin, key) <= 0 &&
+                compareKey(cand->rangeMax,  key) >= 0) {
+                result.push(cand);
             }
         }
+        if (it != Lnodes.begin()) {
+            auto it_prev = std::prev(it);
+            const auto& cand = *it_prev;
+            if (compareKey(cand->rangeMin, key) <= 0 &&
+                compareKey(cand->rangeMax,  key) >= 0) {
+                result.push(cand);
+            }
+        }
+
     }
 
     return result;

@@ -19,20 +19,24 @@
 static_assert(sizeof(InternalKey) == 64, "InternalKey must be fixed 64B for this scaffold");
 
 struct CompactionPlan {
-    CompactionPlan(int src,int dst,std::string l,std::string u):src_level(src),dst_level(dst),lower(l),upper(u){};
-    int src_level;
-    int dst_level;
-    std::optional<std::string> lower;
-    std::optional<std::string> upper;
+    CompactionPlan(int level,std::string l,std::string u):level_(level),lower_(l),upper_(u){};
+    int level_;
+    std::optional<std::string> lower_;
+    std::optional<std::string> upper_;
 };
 
-// 一個極簡的 Writer 包裝：實際要呼叫 SstableManager 建立 Builder、Add(key,val)、Finish()。
 
 
 class CompactionRunner {
 public:
-    CompactionRunner(API *db,const InternalKeyComparator* icmp,CompactionPlan config);
-    CompactionRunner(SstableManager *smgr,LogManager *lmgr,LSMTree *tree,const InternalKeyComparator* icmp,PackingType type,CompactionPlan config);
+    // CompactionRunner(API *db,const InternalKeyComparator* icmp,CompactionPlan config);
+    // CompactionRunner(   SstableManager *smgr,LogManager *lmgr,LSMTree *tree,const InternalKeyComparator* icmp,
+    //                     PackingType type,CompactionPlan ,CompactionPlan);
+
+    CompactionRunner(   SstableManager *smgr,LogManager *lmgr,LSMTree *tree,const InternalKeyComparator* icmp,
+                        PackingType type,int level,
+                        std::vector<std::shared_ptr<TreeNode>> srcSstables,
+                        std::vector<std::shared_ptr<TreeNode>> dstSstables);
     // 執行 compaction，回傳新檔 metas 與統計資訊。
     Status Run();
     
@@ -51,7 +55,9 @@ private:
     const InternalKeyComparator* icmp_;
     size_t nums_;
     PackingType packType_;
-    CompactionPlan config_;
+    int srcLevel_;
+    // CompactionPlan srcConfig_;
+    // CompactionPlan dstConfig_;
     std::unique_ptr<InternalIterator> srcLevelIter_;
     std::unique_ptr<InternalIterator> dstLevelIter_;
     std::queue<std::string> sortedList_;

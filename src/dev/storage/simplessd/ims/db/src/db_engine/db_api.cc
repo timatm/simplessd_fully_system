@@ -92,7 +92,7 @@ Status API::put(std::string key ,std::string value){
             maxK = imm_hold->getMaxKey();
             need_flush = true;
         }
-    } // 解鎖
+    }
 
     if (need_flush) {
         const auto& list_ref = imm_hold->GetSkipList();  // 注意：是 const&，不是 shared_ptr
@@ -472,56 +472,289 @@ Status API::removeSSable(std::shared_ptr<TreeNode> rm){
 }
 
 
-void API::compaction(){
-    if(getLSMTree()->get_level_num(0) >= LEVEL0_MAX){
-        pr_info("Compaction triggered at Level 0");
+// void API::compaction(){
+//     if(getLSMTree()->get_level_num(0) >= LEVEL0_MAX){
+//         pr_debug("Compaction triggered at Level 0");
+//         auto node = getLSMTree()->findLevel0Older();
+//         if(node != nullptr){
+//             pr_debug("Dump compaction source info:");
+//             node->dump();
+//             auto srcNodes = getLSMTree()->search_one_level(0, node->rangeMin, node->rangeMax);
+//             auto dstNodes = getLSMTree()->search_one_level(1, node->rangeMin, node->rangeMax);
+
+//             InternalKey srcMinKey(node->rangeMin.toString(), UINT64_MAX, ValueType::kTypeMin);
+//             InternalKey srcMaxKey(node->rangeMax.toString(), 0,          ValueType::kTypeMax);
+
+//             Key dstMinUser = node->rangeMin, dstMaxUser = node->rangeMax;
+//             bool hasDst = false;
+//             for (auto q = dstNodes; !q.empty(); q.) {
+//                 auto sp = q.front();
+//                 if (!sp) continue;
+//                 if (!hasDst) { dstMinUser = sp->rangeMin; dstMaxUser = sp->rangeMax; hasDst = true; }
+//                 else {
+//                     if (compareKey(sp->rangeMin, dstMinUser) < 0) dstMinUser = sp->rangeMin;
+//                     if (compareKey(sp->rangeMax, dstMaxUser) > 0) dstMaxUser = sp->rangeMax;
+//                 }
+//             }
+
+//             InternalKey dstMinKey(dstMinUser.toString(), UINT64_MAX, ValueType::kTypeMin);
+//             InternalKey dstMaxKey(dstMaxUser.toString(), 0,          ValueType::kTypeMax);
+
+//             CompactionPlan srcPlane(0, srcMinKey.Encode(), srcMaxKey.Encode());
+//             CompactionPlan dstPlane(1, dstMinKey.Encode(), dstMaxKey.Encode());
+//             CompactionRunner compaction(sstableManager_.get(),logManager_.get(),lsmTree_.get(),&icmp_,packing_,srcPlane,dstPlane);
+//             Status s = compaction.Run();
+//             if(s.ok()){
+//                 set_compaction_key_list(srcMaxKey,0);
+//                 for(auto rm : dstNodes) removeSSable(rm);
+//                 for(auto rm : srcNodes) removeSSable(rm);
+//             }
+//             else{
+//                 pr_debug("Compaction in level0 fail");
+//                 return;
+//             }
+//         }
+//     }
+//     for(int level = 1;level < MAX_LEVEL;level++){
+//         if(compactionTrigger(level)){
+//             pr_debug("Compaction triggered at Level %d",level);
+//             auto key = compaction_key_list_[level];
+//             if(key == std::nullopt){
+//                 auto firstNode = getLSMTree()->getLevelFirstNode(level);
+//                 if (!firstNode) continue;
+//                 key = InternalKey(firstNode->rangeMin.toString(),0,ValueType::kTypeMin);
+//             }
+
+//             auto srcNode = getLSMTree()->getNextNode(level,key->UserKey());
+            
+//             if(srcNode != nullptr){
+//                 pr_debug("Dump compaction source info:");
+//                 srcNode->dump();
+
+
+//                 auto dstNodes = getLSMTree()->search_one_level(level+1,srcNode->rangeMin,srcNode->rangeMax);
+//                 InternalKey srcMinKey(srcNode->rangeMin.toString(),UINT64_MAX,ValueType::kTypeMin);
+//                 InternalKey srcMaxKey(srcNode->rangeMax.toString(),0,ValueType::kTypeMax);
+
+//                 InternalKey dstMinKey(dstNodes.front()->rangeMin.toString(),UINT64_MAX,ValueType::kTypeMin);
+//                 InternalKey dstMaxKey(dstNodes.back()->rangeMax.toString(),0,ValueType::kTypeMax);
+
+//                 CompactionPlan srcPlane(level,srcMinKey.Encode(),srcMaxKey.Encode());
+//                 CompactionPlan dstPlane(level+1,dstMinKey.Encode(),dstMaxKey.Encode());
+//                 CompactionRunner compaction(sstableManager_.get(),logManager_.get(),lsmTree_.get(),&icmp_,packing_,srcPlane,dstPlane);
+//                 Status s = compaction.Run();
+//                 if(s.ok()){
+//                     set_compaction_key_list(srcMaxKey,level);
+//                     for(auto rm : dstNodes) removeSSable(rm);
+//                     removeSSable(srcNode);
+//                 }
+//             }
+//         }
+//     }
+// }
+
+void API::compaction() {
+    auto LowerSentinel = [](const std::string& uk) {
+        return InternalKey(uk, UINT64_MAX, ValueType::kTypeMin);
+    };
+    auto UpperSentinel = [](const std::string& uk) {
+        return InternalKey(uk, 0,          ValueType::kTypeMax);
+    };
+
+    bool compaction = false;
+    // ---------- L0 -> L1 ----------
+    if (getLSMTree()->get_level_num(0) >= LEVEL0_MAX) {
+        pr_debug("Compaction start tree info:");
+        lsmTree_->dump_lsmtere();
+        compaction = true;
+        pr_debug("Compaction triggered at Level 0");
         auto node = getLSMTree()->findLevel0Older();
-        if(node != nullptr){
-            auto srcNodes = getLSMTree()->search_one_level(0,node->rangeMin,node->rangeMax);
-            auto dstNodes = getLSMTree()->search_one_level(1,node->rangeMin,node->rangeMax);
-            InternalKey minKey(node->rangeMin.toString(),0,ValueType::kTypeMin);
-            InternalKey maxKey(node->rangeMax.toString(),UINT64_MAX,ValueType::kTypeMax);
-            CompactionPlan com(0,1,minKey.Encode(),maxKey.Encode());
-            CompactionRunner compaction(sstableManager_.get(),logManager_.get(),lsmTree_.get(),&icmp_,packing_,com);
-            Status s = compaction.Run();
-            if(s.ok()){
-                set_compaction_key_list(maxKey,0);
-                for(auto rm : dstNodes) removeSSable(rm);
-                for(auto rm : srcNodes) removeSSable(rm);
+        if (!node) return;
+
+        pr_debug("Dump compaction source info:");
+        node->dump();
+
+        // 來源/目的候選：vector
+        auto srcNodes = getLSMTree()->search_one_level(0, node->rangeMin, node->rangeMax);
+
+        
+        Key srcMin = node->rangeMin;
+        Key srcMax = node->rangeMax;
+        
+
+        for (const auto& srcNode : srcNodes) {
+            if(compareKey(srcNode->rangeMin,srcMin) < 0){
+                srcMin = srcNode->rangeMin;
             }
-            else{
-                pr_debug("Compaction in level0 fail");
-                return;
+            if(compareKey(srcNode->rangeMax,srcMax) > 0){
+                srcMax = srcNode->rangeMax;
             }
+        }
+        InternalKey srcMinKey = UpperSentinel(srcMin.toString());
+        InternalKey srcMaxKey = LowerSentinel(srcMax.toString());
+
+
+        auto dstNodes = getLSMTree()->search_one_level(1, srcMin, srcMax);
+
+        pr_debug("Dump source nodes info:");
+        for(auto srcNode : srcNodes){
+            
+            srcNode->dump();   
+        }
+        pr_debug("Dump source nodes end");
+        pr_debug("Dump destination nodes info:");
+        for(auto dstNode : dstNodes){
+            
+            dstNode->dump();   
+        }
+        pr_debug("Dump destination nodes end");
+        // 正確的 internal key 哨兵
+        
+
+        // 聚合目的層的 user key 範圍（允許為空）
+        Key dstMinUser = node->rangeMin, dstMaxUser = node->rangeMax;
+        bool hasDst = false;
+        for (const auto& sp : dstNodes) {
+            if (!sp) continue;
+            if (!hasDst) {
+                dstMinUser = sp->rangeMin;
+                dstMaxUser = sp->rangeMax;
+                hasDst = true;
+            } else {
+                if (compareKey(sp->rangeMin, dstMinUser) < 0) dstMinUser = sp->rangeMin;
+                if (compareKey(sp->rangeMax, dstMaxUser) > 0) dstMaxUser = sp->rangeMax;
+            }
+        }
+
+        InternalKey dstMinKey = LowerSentinel(dstMinUser.toString());
+        InternalKey dstMaxKey = UpperSentinel(dstMaxUser.toString());
+
+       
+
+        CompactionRunner compaction(sstableManager_.get(), logManager_.get(),
+                                    lsmTree_.get(), &icmp_, packing_,0,
+                                    srcNodes,dstNodes);
+        Status s = compaction.Run();
+        if (s.ok()) {
+            // 記錄下一輪起點（上界哨兵）
+            set_compaction_key_list(srcMaxKey, 0);
+            // 安全刪除（跳過 nullptr）
+            for (const auto& sp : dstNodes) if (sp) removeSSable(sp);
+            for (const auto& sp : srcNodes) if (sp) removeSSable(sp);
+        } else {
+            pr_debug("Compaction in level0 fail");
+            return;
         }
     }
-    for(int level = 1;level < MAX_LEVEL;level++){
-        if(compactionTrigger(level)){
-            pr_info("Compaction triggered at Level %d",level);
-            auto key = compaction_key_list_[level];
-            if(key == std::nullopt){
-                auto firstNode = getLSMTree()->getLevelFirstNode(level);
-                if (!firstNode) continue;
-                key = InternalKey(firstNode->rangeMin.toString(),0,ValueType::kTypeMin);
-            }
 
-            auto srcNode = getLSMTree()->getNextNode(level,key->UserKey());
-            if(srcNode != nullptr){
-                auto dstNodes = getLSMTree()->search_one_level(level+1,srcNode->rangeMin,srcNode->rangeMax);
-                InternalKey minKey(srcNode->rangeMin.toString(),0,ValueType::kTypeMin);
-                InternalKey maxKey(srcNode->rangeMax.toString(),UINT64_MAX,ValueType::kTypeMax);
-                CompactionPlan com(level,level+1,minKey.Encode(),maxKey.Encode());
-                CompactionRunner compaction(sstableManager_.get(),logManager_.get(),lsmTree_.get(),&icmp_,packing_,com);
-                Status s = compaction.Run();
-                if(s.ok()){
-                    set_compaction_key_list(maxKey,level);
-                    for(auto rm : dstNodes) removeSSable(rm);
-                    removeSSable(srcNode);
-                }
+    // ---------- Lk -> Lk+1 ----------
+    for (int level = 1; level < MAX_LEVEL; ++level) {
+        if (!compactionTrigger(level)) continue;
+        pr_debug("Compaction triggered at Level %d", level);
+        pr_debug("Compaction start tree info:");
+        lsmTree_->dump_lsmtere();
+        compaction = true;
+        
+        auto &optKey = compaction_key_list_[level];
+        if (!optKey.has_value()) {
+            auto firstNode = getLSMTree()->getLevelFirstNode(level);
+            if (!firstNode) continue;
+            // 預設起點要用【下界哨兵】
+            optKey = LowerSentinel(firstNode->rangeMin.toString());
+        }
+
+        auto srcNode = getLSMTree()->getNextNode(level, optKey->UserKey());
+        std::vector<std::shared_ptr<TreeNode>> srcNodes;
+        srcNodes.push_back(srcNode);
+        if (!srcNode) {
+            pr_debug("No next node at level %d", level);
+            continue;
+        }
+
+        pr_debug("Dump compaction source info:");
+        srcNode->dump();
+
+        auto dstNodes = getLSMTree()->search_one_level(level + 1, srcNode->rangeMin, srcNode->rangeMax);
+
+        InternalKey srcMinKey = LowerSentinel(srcNode->rangeMin.toString());
+        InternalKey srcMaxKey = UpperSentinel(srcNode->rangeMax.toString());
+
+        // 聚合目的層的 user key 範圍（允許為空）
+        Key dstMinUser = srcNode->rangeMin, dstMaxUser = srcNode->rangeMax;
+        bool hasDst = false;
+        for (const auto& sp : dstNodes) {
+            if (!sp) continue;
+            if (!hasDst) {
+                dstMinUser = sp->rangeMin;
+                dstMaxUser = sp->rangeMax;
+                hasDst = true;
+            } else {
+                if (compareKey(sp->rangeMin, dstMinUser) < 0) dstMinUser = sp->rangeMin;
+                if (compareKey(sp->rangeMax, dstMaxUser) > 0) dstMaxUser = sp->rangeMax;
             }
         }
+
+        InternalKey dstMinKey = LowerSentinel(dstMinUser.toString());
+        InternalKey dstMaxKey = UpperSentinel(dstMaxUser.toString());
+
+        CompactionPlan srcPlane(level,     srcMinKey.Encode(), srcMaxKey.Encode());
+        CompactionPlan dstPlane(level + 1, dstMinKey.Encode(), dstMaxKey.Encode());
+
+        CompactionRunner compaction(sstableManager_.get(), logManager_.get(),
+                                    lsmTree_.get(), &icmp_, packing_,level,
+                                    srcNodes, dstNodes);
+        Status s = compaction.Run();
+        if (s.ok()) {
+            set_compaction_key_list(srcMaxKey, level);  // 更新進度（上界哨兵）
+            for (const auto& sp : dstNodes) if (sp) removeSSable(sp);
+            removeSSable(srcNode);
+        }
+    }
+    if(compaction){
+        pr_debug("Compaction result:");
+        lsmTree_->dump_lsmtere();
+    }
+    
+}
+
+
+
+void API::test(){
+    auto node = getLSMTree()->findLevel0Older();
+    if (!node) return;
+
+    pr_debug("Dump compaction source info:");
+    node->dump();
+
+    // 來源/目的候選：vector
+    auto srcNodes = getLSMTree()->search_one_level(0, node->rangeMin, node->rangeMax);
+
+    
+    Key srcMin = node->rangeMin;
+    Key srcMax = node->rangeMax;
+    
+
+    for (const auto& srcNode : srcNodes) {
+        if(compareKey(srcMin,srcNode->rangeMin) < 0){
+            srcMin = srcNode->rangeMin;
+        }
+        if(compareKey(srcMax,srcNode->rangeMax) < 0){
+            srcMax = srcNode->rangeMax;
+        }
+    }
+
+    Level0Iterator it(sstableManager_.get(),logManager_.get(),&icmp_,lsmTree_.get(),srcNodes,true);
+    it.Init();
+    it.SeekToFirst();
+    while(it.Valid()){
+        std::string value;
+        it.ReadValue(value);
+        InternalKey k = InternalKey::Decode(std::string(it.key()));
+        std::cout << "Key: " << k.UserKey() << " -> Value: " << value << std::endl;
+        it.Next();
     }
 }
+
 
 bool API::compactionTrigger(int level){
     if(level < 0 || level >= MAX_LEVEL) throw std::out_of_range("Level out of range");

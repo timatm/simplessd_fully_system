@@ -6,26 +6,79 @@
 
 static constexpr size_t kIKeySize = sizeof(InternalKey);
 
+
+
+inline InternalKey LowerSentinel(const std::string& uk) {
+    return InternalKey(uk, UINT64_MAX, ValueType::kTypeMin);
+};
+inline InternalKey UpperSentinel(const std::string& uk) {
+    return InternalKey(uk, 0,          ValueType::kTypeMax);
+};
+
+uint64_t to_u64_stoull(const std::string& s, int base = 10) {
+    size_t pos = 0;
+    uint64_t v = std::stoull(s, &pos, base); // base=10；若想自动识别 0x 前缀，用 base=0
+    if (pos != s.size()) throw std::invalid_argument("trailing chars");
+    return v;
+}
+
 // ---- ctor ----
 Level0Iterator::Level0Iterator( SstableManager* smgr,
                                 LogManager*    lmgr,
                                 const InternalKeyComparator* icmp,
                                 LSMTree*        tree,
-                                Options         opts)
+                                Options         opts,
+                                bool            IsCompaction)
     : smgr_(smgr), lmgr_(lmgr), icmp_(icmp), tree_(tree), opts_(std::move(opts)),
-      heap_(HeapCmp{icmp_, &children_}) {}
+      heap_(HeapCmp{icmp_, &children_}),compaction_(IsCompaction) {
+        metas_.clear();
+      }
+
+
+Level0Iterator::Level0Iterator( SstableManager* smgr,
+                                LogManager*    lmgr,
+                                const InternalKeyComparator* icmp,
+                                LSMTree*        tree,
+                                std::vector<std::shared_ptr<TreeNode>> sstables,
+                                bool            IsCompaction): 
+    smgr_(smgr), lmgr_(lmgr), icmp_(icmp), tree_(tree),
+    heap_(HeapCmp{icmp_, &children_}),compaction_(IsCompaction) {
+        metas_.clear();
+        uint64_t fid_fallback = 0;
+        for (auto& sstable : sstables) {
+            if (!sstable) continue;
+            L0FileMeta meta;
+            meta.filename = sstable->filename;
+            meta.min_key  = LowerSentinel(sstable->rangeMin.toString()).Encode();
+            meta.max_key  = UpperSentinel(sstable->rangeMax.toString()).Encode();
+            if (meta.min_key.size() != kIKeySize || meta.max_key.size() != kIKeySize){
+                pr_debug("Internal key size is error");
+            }
+            // 檔名非純數字時避免丟例外
+            try {
+                meta.file_id = to_u64_stoull(sstable->filename);
+            } catch (...) {
+                pr_debug("Sstable filename is error");
+                meta.file_id = fid_fallback++; // 保底 tie-break
+            }
+            metas_.push_back(std::move(meta));
+        }
+    }
+
+
 
 // ---- public ----
 Status Level0Iterator::Init() {
     st_ = Status::OK();
-    metas_.clear();
     children_.clear();
     clear_heap_();
     curr_idx_ = static_cast<size_t>(-1);
     build_bounds_from_opts_();
-    if (!LoadL0Metas_()) {
-        st_ = Status::IOError("LoadL0Metas failed");
-        return st_;
+    if(metas_.empty()){
+        if (!LoadL0Metas_()) {
+            st_ = Status::IOError("LoadL0Metas failed");
+            return st_;
+        }
     }
     children_.resize(metas_.size());
     for (size_t i = 0; i < metas_.size(); ++i) {
@@ -59,6 +112,10 @@ void Level0Iterator::SeekToFirst() {
 
         if (canon_lower_) {
             std::string_view lo(canon_lower_->data(), canon_lower_->size());
+            if(lo.size() != sizeof(InternalKey)){
+                pr_debug("The internal key size is invalid");
+                std::cout << "KEY: " << lo.data() << " size: " << lo.size() << std::endl; 
+            }
             ch.it->Seek(lo);
         } else {
             ch.it->SeekToFirst();
@@ -114,7 +171,7 @@ void Level0Iterator::Seek(std::string_view internal_target) {
         auto& ch = children_[i];
         if (!overlap_with_range_with_target_(ch.meta, internal_target)) continue;
 
-        ch.it->Seek(internal_target);
+        ch.it->Seek(tgt);
         if (ch.it->Valid() && within_upper_(ch.it->key())) push_heap_(i);
     }
     pull_top_();
@@ -320,38 +377,58 @@ void Level0Iterator::build_bounds_from_opts_() {
     }
 }
 
-uint64_t to_u64_stoull(const std::string& s, int base = 10) {
-    size_t pos = 0;
-    uint64_t v = std::stoull(s, &pos, base); // base=10；若想自动识别 0x 前缀，用 base=0
-    if (pos != s.size()) throw std::invalid_argument("trailing chars");
-    return v;
-}
 
 
-// ---- Metadata loading (請接你們系統) ----
 bool Level0Iterator::LoadL0Metas_() {
     metas_.clear();
-    if (!canon_lower_.has_value() || !canon_upper_.has_value()) {
-        return false;
+
+    // 1) 決定查詢的 user-key 區間
+    Key qmin;                              // 最小：空 key
+    Key qmax; qmax.key_size = 40; std::memset(qmax.key, 0xFF, 40); // 最大：40B 0xFF
+
+    if (canon_lower_.has_value()) {
+        if (canon_lower_->size() != kIKeySize) return false;
+        InternalKey lower{};
+        lower = InternalKey::Decode(canon_lower_->data());
+        qmin = lower.key;
     }
-    if (canon_lower_->size() != kIKeySize || canon_upper_->size() != kIKeySize) {
-        return false;
+    if (canon_upper_.has_value()) {
+        if (canon_upper_->size() != kIKeySize) return false;
+        InternalKey upper{};
+        upper = InternalKey::Decode(canon_upper_->data());
+        qmax = upper.key;
     }
-    InternalKey lower{}, upper{};
-    std::memcpy(&lower, canon_lower_->data(), kIKeySize);
-    std::memcpy(&upper, canon_upper_->data(), kIKeySize);
-    auto sstables = tree_->search_one_level(0, lower.key, upper.key);
-    for(auto sstable : sstables) {
+
+    // 2) 取覆蓋此 user 區間的 L0 檔案（vector）
+    auto sstables = tree_->search_one_level(0, qmin, qmax);
+
+    metas_.reserve(sstables.size());
+    uint64_t fid_fallback = 0;
+    for (auto& sstable : sstables) {
+        if (!sstable) continue;
         L0FileMeta meta;
         meta.filename = sstable->filename;
-        meta.min_key = InternalKey(sstable->rangeMin.toString(),0,ValueType::kTypeMin).Encode();
-        meta.max_key = InternalKey(sstable->rangeMax.toString(),std::numeric_limits<uint64_t>::max(),ValueType::kTypeMax).Encode();
+        meta.min_key  = LowerSentinel(sstable->rangeMin.toString()).Encode();
+        meta.max_key  = UpperSentinel(sstable->rangeMax.toString()).Encode();
         if (meta.min_key.size() != kIKeySize || meta.max_key.size() != kIKeySize) return false;
-        meta.file_id = to_u64_stoull(sstable->filename);
-        metas_.push_back(meta);
+
+        // 檔名非純數字時避免丟例外
+        try {
+            meta.file_id = to_u64_stoull(sstable->filename);
+        } catch (...) {
+            meta.file_id = fid_fallback++; // 保底 tie-break
+        }
+        metas_.push_back(std::move(meta));
+    }
+
+    // 4) compaction 模式：載完 metas 才清掉上下界，後續 Seek/SeekToFirst 無界遍歷
+    if (compaction_) {
+        canon_lower_.reset();
+        canon_upper_.reset();
     }
     return true;
 }
+
 
 
 LevelNIterator::LevelNIterator( SstableManager* smgr,
@@ -360,20 +437,47 @@ LevelNIterator::LevelNIterator( SstableManager* smgr,
                                 LSMTree*        tree,
                                 int             level,
                                 Options         opts)
-    : smgr_(smgr), lmgr_(lmgr), icmp_(icmp), tree_(tree), level_(level), opts_(std::move(opts)) {}
+    : smgr_(smgr), lmgr_(lmgr), icmp_(icmp), tree_(tree), level_(level), opts_(std::move(opts)) {
+        metas_.clear();
+    }
+
+
+LevelNIterator::LevelNIterator( SstableManager* smgr,
+                                LogManager*     lmgr,
+                                const InternalKeyComparator* icmp,
+                                LSMTree*        tree,
+                                int             level,
+                                std::vector<std::shared_ptr<TreeNode>> sstables,
+                                bool            compaction)
+    : smgr_(smgr), lmgr_(lmgr), icmp_(icmp), tree_(tree), level_(level),compaction_(compaction) {
+        metas_.clear();
+        for (auto sstable : sstables) {
+            L0FileMeta meta;
+            meta.filename = sstable->filename;
+
+            meta.min_key  = LowerSentinel(sstable->rangeMin.toString()).Encode();
+            meta.max_key  = UpperSentinel(sstable->rangeMax.toString()).Encode();
+            if (meta.min_key.size() != kIKeySize || meta.max_key.size() != kIKeySize){
+                pr_debug("Internal key size is error");
+            }
+            meta.file_id = std::stoull(sstable->filename);
+            metas_.push_back(std::move(meta));
+        }
+    }
+
 
 Status LevelNIterator::Init() {
     st_ = Status::OK();
-    metas_.clear();
     children_.clear();
     open_lru_.clear();
     reset_view_();
 
     build_bounds_from_opts_();
-
-    if (!LoadLevelMetas_()) {
-        st_ = Status::IOError("LoadLevelMetas failed");
-        return st_;
+    if(metas_.empty()){
+        if (!LoadLevelMetas_()) {
+            st_ = Status::IOError("LoadLevelMetas failed");
+            return st_;
+        }
     }
     children_.resize(metas_.size());
     for (size_t i = 0; i < metas_.size(); ++i) children_[i].meta = metas_[i];
@@ -382,6 +486,11 @@ Status LevelNIterator::Init() {
     SeekToFirst();
     return st_;
 }
+
+
+
+
+
 
 bool LevelNIterator::Valid() const { return st_.ok() && has_top_; }
 
@@ -558,6 +667,7 @@ void LevelNIterator::build_bounds_from_opts_() {
 }
 
 bool LevelNIterator::LoadLevelMetas_() {
+    if(compaction_) return true;
     metas_.clear();
     if (!canon_lower_.has_value() || !canon_upper_.has_value()) return false;
     if (canon_lower_->size() != kIKeySize || canon_upper_->size() != kIKeySize) return false;

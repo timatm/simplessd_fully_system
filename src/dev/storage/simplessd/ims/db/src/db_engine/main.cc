@@ -84,6 +84,60 @@ static void ScanBackward(Level0Iterator& it, const InternalKeyComparator& icmp) 
     }
 }
 
+
+// SstableIterator iter(db.getSSTable(),db.getLogManager(),&icmp,"00000000000000000000000000000000049",db.getPackType());
+
+// opts.lower = InternalKey("key0").Encode();
+// opts.lower = InternalKey("key9999").Encode();
+// LevelNIterator iter(db.getSSTable(),db.getLogManager(),&icmp,db.getLSMTree(),2,opts);
+
+
+#include <iomanip>
+#include <sstream>
+
+// ...
+
+// int main() {
+//     API db;
+//     Status err = db.open();
+//     if(err.ok()) {
+//         std::cout << "Database opened successfully.\n";
+//     } else {
+//         std::cerr << "Failed to open database: " << err.ToString() << "\n";
+//         return -1;
+//     }
+
+//     // 你要插入的总数
+//     const int N = 2000;
+
+//     // 计算需要的位数：1999 -> 4 位；若以后 N 变大会自动适配
+//     const int key_digits = std::to_string(N - 1).size();
+
+//     auto make_key = [&](int i) -> std::string {
+//         std::ostringstream oss;
+//         oss << "key" << std::setw(key_digits) << std::setfill('0') << i;  // key0000, key0001, ...
+//         return oss.str();
+//     };
+
+//     for (int i = 0; i < N; ++i) {
+//         std::string key = make_key(i);
+//         std::string value = "value" + std::to_string(i);
+//         Status s = db.put(key, value);
+//         if (!s.ok()) {
+//             std::cerr << "Put failed at index " << i << " with key: " << key << "\n";
+//         }
+//     }
+    
+//     db.getSSTable()->waitAllTasksDone();
+//     db.dump_memtable();
+//     db.dump_lsmtree();
+
+//     return 0;
+// }
+
+
+
+
 int main() {
     API db;
     Status err = db.open();
@@ -95,7 +149,7 @@ int main() {
         return -1;
     }
     
-    for (int i = 0; i < 1000 ; ++i) {
+    for (int i = 0; i < 2000; ++i) {
         std::string key = "key" + std::to_string(i);
         std::string value = "value" + std::to_string(i);
         Status s = db.put(key, value);
@@ -112,8 +166,27 @@ int main() {
     // db.getSSTable()->waitAllTasksDone();
     db.dump_memtable();
     db.dump_lsmtree();
+    Options opts;
+    
+    // SstableIterator iter(db.getSSTable(),db.getLogManager(),&icmp,"00000000000000000000000000000000004",db.getPackType());
+    // iter.Init();
+    // iter.SeekToFirst();
+    // while(iter.Valid()){
+    //     InternalKey k = InternalKey::Decode(std::string(iter.key()));
+    //     std::string val;
+    //     iter.ReadValue(val);
+        
+    //     std::cout << "KEY:" << k.UserKey() << "  VAL:" << val << std::endl;
+    //     iter.Next();
+    // }
+
     std::string value;
     std::set<std::string> result;
+
+
+    // db.test();
+
+
     // Options opt;
     // opt.lower = InternalKey("key0",0,ValueType::kTypeMin).Encode();
     // opt.upper = InternalKey("key500",0,ValueType::kTypeMax).Encode();
@@ -126,7 +199,8 @@ int main() {
     //     std::cout << "KEY:" << k.UserKey() << "  VAL:" << val << std::endl;
     //     it.Next();
     // }
-    // db.range_query("key0","key999",result);
+
+    db.range_query("key0","key9999",result);
     
     std::cout << "Iterator traverse is done"<< std::endl;
 }

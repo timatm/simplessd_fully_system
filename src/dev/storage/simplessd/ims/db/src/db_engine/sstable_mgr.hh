@@ -33,20 +33,34 @@ static inline void* allocateAligned(size_t size) {
     return ptr;
 }
 
+
+
+static AlignedBuf MakeAlignedBlockSize() {
+    void* p = nullptr;
+    // 也可用 aligned_alloc(kAlign, kTableSize)；posix_memalign 更通用
+    int rc = ::posix_memalign(&p, 4096, BLOCK_SIZE);
+    if (rc != 0 || p == nullptr) throw std::bad_alloc();
+    std::memset(p, 0xFF, BLOCK_SIZE);
+    return AlignedBuf{ std::unique_ptr<void, void(*)(void*)>(p, &::free), BLOCK_SIZE, 4096 };
+}
+
 using OnWriteDone = std::function<void(const sstable_info& info)>;
 using OnWriteFail = std::function<void(const sstable_info& info, int err)>;
 
 class SstableManager {
 public:
-    SstableManager(INVMEDriver& nvme,LSMTree& tree):lsmTree_(tree) ,nvme_(nvme) {}
+    // SstableManager(INVMEDriver& nvme,LSMTree& tree):lsmTree_(tree) ,nvme_(nvme) ,sequenceNumber_(0){};
+    SstableManager(INVMEDriver& nvme, LSMTree& tree)
+    : lsmTree_(tree), nvme_(nvme), sequenceNumber_(0) {
+        std::cout << "[ctor] seq=" << sequenceNumber_.load(std::memory_order_relaxed) << "\n";
+    }
+
     ~SstableManager() = default;
     // TODO
     static constexpr size_t kAlign     = 4096;             // 4KB
     static constexpr size_t kTableSize = BLOCK_SIZE;
 
 
-    
-    static AlignedBuf MakeAlignedBlockSize();
 
     // 主要 API：回傳「對齊且固定 2MB」的打包結果
     AlignedBuf packingTable(const SkipList<Record, RecordComparator>& skiplist) const;
@@ -57,7 +71,7 @@ public:
     void eraseSSTable(const std::string& filename);
     // std::string packingTable(const SkipList<Record,RecordComparator> &skiplist);
 
-    std::string packingTable(std::queue<std::string> sortedLsit);
+    AlignedBuf packingTable(std::queue<std::string> sortedLsit);
     void setSequenceNumber(uint32_t seq) {
         sequenceNumber_ = seq;
     }
@@ -76,7 +90,7 @@ private:
     LSMTree& lsmTree_;
     mutable std::mutex tree_mutex_;
     INVMEDriver& nvme_;
-    std::atomic<uint32_t> sequenceNumber_ = 0; // Sequence number for SSTables
+    std::atomic<uint32_t> sequenceNumber_ ; // Sequence number for SSTables
     std::unordered_map<std::string, std::shared_ptr<std::deque<InternalKey>>> keyRangeMap; // sstable name -> key range per slot
 
     OnWriteDone on_write_done_;
@@ -84,9 +98,9 @@ private:
 
 private:
     std::string generateFilename(uint32_t seq);
-    char* keyPerPagePacking(const SkipList<Record,RecordComparator> &skiplist);
-    char* keyHashPacking(const SkipList<Record,RecordComparator> &skiplist);
-    char* keyRangePacking(const SkipList<Record,RecordComparator> &skiplist);
+    // char* keyPerPagePacking(const SkipList<Record,RecordComparator> &skiplist);
+    // char* keyHashPacking(const SkipList<Record,RecordComparator> &skiplist);
+    // char* keyRangePacking(const SkipList<Record,RecordComparator> &skiplist);
 
     AlignedBuf keyPerPagePacking(const SkipList<Record, RecordComparator>& skiplist) const;
     AlignedBuf keyHashPacking   (const SkipList<Record, RecordComparator>& skiplist) const;
@@ -106,9 +120,9 @@ private:
     // char* keyHashPacking(std::queue<std::string> sortedLsit);
     // char* keyRangePacking(std::queue<std::string> sortedLsit);
 
-    AlignedBuf keyPerPagePacking(std::queue<std::string> sortedLsit);
-    AlignedBuf keyHashPacking(std::queue<std::string> sortedLsit);
-    AlignedBuf keyRangePacking(std::queue<std::string> sortedLsit);
+    AlignedBuf keyPerPagePacking(std::queue<std::string> sortedLsit) const;
+    AlignedBuf keyHashPacking(std::queue<std::string> sortedLsit) const;
+    AlignedBuf keyRangePacking(std::queue<std::string> sortedLsit) const;
 
     void  notify_done(const sstable_info& info) noexcept;
     void  notify_fail(const sstable_info& info, int err) noexcept;
@@ -127,7 +141,7 @@ public:
                     std::string filename,
                     PackingType type)
         : sstable_mgr_(smgr),log_mgr_(lmgr) ,icmp_(icmp), filename_(std::move(filename)),type_(type) {
-            buf_ = static_cast<char*>(allocateAligned(BLOCK_SIZE));
+            buf_ = MakeAlignedBlockSize();
         }
 
     Status Init();
@@ -149,14 +163,14 @@ public:
 
 private:
     std::string_view entry_key(const EntryRef& e) const {
-        return std::string_view(buf_+ e.key_off, sizeof(InternalKey));
+        return std::string_view(buf_.data()+ e.key_off, sizeof(InternalKey));
     }
     std::vector<EntryRef> gen_sorted_view();
     std::string filename_;        
     SstableManager* sstable_mgr_{nullptr};
     LogManager* log_mgr_{nullptr};
     const InternalKeyComparator* icmp_{nullptr};
-    char* buf_;
+    AlignedBuf buf_;
     std::vector<EntryRef> entries_;
     int pos_ = -1;
     Status st_;

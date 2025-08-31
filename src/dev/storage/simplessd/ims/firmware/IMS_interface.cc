@@ -179,6 +179,7 @@ int IMS_interface::erase_sstable(hostInfo *request){
     if(err == OPERATION_SUCCESS){
         mappingTable_->remove_mapping(filename);
     }
+    return err;
 }
 
 int IMS_interface::read_ssKeyRange(hostInfo *request, uint8_t* buffer){
@@ -281,6 +282,10 @@ int IMS_interface::rebuild_super_page() {
     get_logManager()->insert_logRecord(sp_ptr_old_->nextLogLBN);
     sp_ptr_old_->logOffset = 0;
     sp_ptr_old_->usedLBN_num = 0;
+    sp_ptr_old_->global_sequence = 0;
+    sp_ptr_old_->sstable_sequence = 0;
+    sp_ptr_old_->lastUsedChannel = 0;
+    uint8_t lastUsedChannel;
     lbnPool_->set_lastUsedChannel(0);
     return OPERATION_SUCCESS;
 }
@@ -505,6 +510,9 @@ int IMS_interface::dump_IMS(){
 int IMS_interface::open_DB(uint8_t* buffer, size_t buffer_size) {
     std::string result;
     DB_INIT info;
+
+    get_oldSuperPage()->dump();
+
     info.current_lbn  = get_logManager()->currentLogLBN;
     info.next_lbn     = get_logManager()->nextLogLBN;
     info.page_offset  = get_logManager()->logOffset;

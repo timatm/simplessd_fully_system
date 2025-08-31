@@ -55,6 +55,7 @@ public:
 
     void init_compaction_key_list();
     void set_compaction_key_list(InternalKey key , int level);
+    void test();
 private:
     std::shared_ptr<Tree> tree_;
     std::unique_ptr<LSMTree> lsmTree_;

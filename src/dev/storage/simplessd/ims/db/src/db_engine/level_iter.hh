@@ -47,10 +47,17 @@ static_assert(sizeof(InternalKey) == 64, "InternalKey must be 64B");
 class Level0Iterator :public InternalIterator{
 public:
     Level0Iterator( SstableManager* smgr,
-                    LogManager*    lmgr,
+                    LogManager*     lmgr,
                     const InternalKeyComparator* icmp,
                     LSMTree*        tree,
-                    Options         opts);
+                    Options         opts,
+                    bool            compaction);
+    Level0Iterator( SstableManager* smgr,
+                    LogManager*     lmgr,
+                    const InternalKeyComparator* icmp,
+                    LSMTree*        tree,
+                    std::vector<std::shared_ptr<TreeNode>> meta,
+                    bool            IsCompaction);
     // 基本 API
     Status Init() override;                    // 一次性開啟所有 L0 檔案
     bool   Valid() const override;
@@ -126,6 +133,7 @@ private:
     std::string_view key_;
     size_t          curr_idx_{static_cast<size_t>(-1)}; // ReadValue 時的真實來源 child
     Status          st_{Status::OK()};
+    bool            compaction_;
 };
 
 
@@ -134,11 +142,21 @@ private:
 class LevelNIterator :public InternalIterator{
 public:
     LevelNIterator( SstableManager* smgr,
-    LogManager* lmgr,
-    const InternalKeyComparator* icmp,
-    LSMTree* tree,
-    int level, // 1..6
-    Options opts);
+                    LogManager* lmgr,
+                    const InternalKeyComparator* icmp,
+                    LSMTree* tree,
+                    int level, // 1..6
+                    Options opts);
+
+
+    LevelNIterator( SstableManager* smgr,
+                    LogManager* lmgr,
+                    const InternalKeyComparator* icmp,
+                    LSMTree* tree,
+                    int level, // 1..6
+                    std::vector<std::shared_ptr<TreeNode>> meta,
+                    bool compaction
+                    );
 
 
     // 基本 API（語義與 Level0Iterator 相同）
@@ -221,7 +239,7 @@ private:
     std::optional<std::string> canon_lower_;
     std::optional<std::string> canon_upper_;
 
-
+    bool compaction_;
     // 當前檔與 key 檢視
     size_t cur_file_{static_cast<size_t>(-1)};
     std::string_view key_;

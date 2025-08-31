@@ -31,6 +31,12 @@ include_directories(
 file(GLOB NVME_SRC src/db_nvme/nvme_test.cc)
 add_library(mydb_nvme STATIC ${NVME_SRC})
 
+
+
+# 或者針對目標（更精準）
+
+
+
 target_include_directories(mydb_nvme PRIVATE
   ${CMAKE_SOURCE_DIR}/src/db_nvme
   ${CMAKE_SOURCE_DIR}/src/db_nvme/lib
@@ -72,4 +78,6 @@ target_link_options(mydb_engine PRIVATE
   -fsanitize=address,undefined
 )
 
+target_compile_options(mydb_engine PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+target_link_options(mydb_engine    PRIVATE -fsanitize=address)
 message(STATUS "✅ ASan build (glibc, dynamic) enabled")

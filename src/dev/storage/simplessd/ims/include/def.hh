@@ -40,8 +40,11 @@
 
 #define MAPPINGLBN 1
 
+
 #define LBN_NUM ( CHANNEL_NUM * PACKAGE_NUM * DIE_NUM * PLANE_NUM * BLOCK_NUM )
 #define LBN_SIZE ( IMS_PAGE_SIZE * IMS_PAGE_NUM )
+
+#define LPN_NUM (LBN_NUM * IMS_PAGE_NUM)
 
 #define LBN2CH(lbn)       ((lbn) % CHANNEL_NUM)
 #define LBN2PACKAGE(lbn)  (((lbn) / CHANNEL_NUM) % PACKAGE_NUM)

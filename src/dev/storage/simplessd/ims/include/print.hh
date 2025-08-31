@@ -16,13 +16,20 @@ namespace logger {
 
 enum class Level { Info, Debug };
 
-// 基本輸出格式
+// ANSI 色碼
+inline constexpr const char* RED   = "\033[31m";
+inline constexpr const char* RESET = "\033[0m";
+
+// 基本輸出格式（Debug 使用紅色）
 inline void print(Level lvl, const std::string& msg) {
     switch (lvl) {
-        case Level::Info:  std::cout << "[INFO]  "; break;
-        case Level::Debug: std::cout << "[DEBUG] "; break;
+        case Level::Info:
+            std::cout << "[INFO]  " << msg << std::endl;
+            break;
+        case Level::Debug:
+            std::cout << RED << "[DEBUG] " << msg << RESET << std::endl;
+            break;
     }
-    std::cout << msg << std::endl;
 }
 
 // 改進版 fmt_str：若沒有 args，使用 safer fallback

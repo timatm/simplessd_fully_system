@@ -70,7 +70,7 @@ Status QueryIterator::BuildChildren_() {
 void QueryIterator::build_iter(int level) {
     switch (level) {
         case 0: {
-            auto it = std::make_unique<Level0Iterator>(smgr_, lmgr_, icmp_, tree_, opts_);
+            auto it = std::make_unique<Level0Iterator>(smgr_, lmgr_, icmp_, tree_, opts_,false);
             children_.push_back(Child{std::move(it), false});
             return;
         }

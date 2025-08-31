@@ -8,31 +8,46 @@ extern Tree tree;
 
 std::vector<std::shared_ptr<TreeNode>> Tree::search_overlap(int level, const Key& queryMin, const Key& queryMax) {
     std::vector<std::shared_ptr<TreeNode>> result;
-    auto& nodes = level_map_[level];
+   
+    auto itLevel = level_map_.find(level);
+    if (itLevel == level_map_.end()) return result;
+    const auto& nodes = itLevel->second;
 
     auto dummy = std::make_shared<TreeNode>("dummy", level, queryMin, queryMin);
     auto it = nodes.lower_bound(dummy);
-
-    if (it != nodes.begin()) {
-        auto prev = std::prev(it);
-        if (compareKey((*prev)->rangeMax, queryMin) >= 0) {
-            result.push_back(*prev);
+    if(level == 0){
+        for(auto node:nodes){
+            if((compareKey((node)->rangeMax, queryMin) >= 0) && (compareKey(queryMax, (node)->rangeMin) >= 0)){
+                result.push_back(node);
+            }
         }
     }
-
-    while (it != nodes.end() && compareKey((*it)->rangeMin, queryMax) <= 0) {
-        if (compareKey((*it)->rangeMax, queryMin) >= 0) {
-            result.push_back(*it);
+    else if(level > 0 && level < MAX_LEVEL){
+        if (it != nodes.begin()) {
+            auto prev = std::prev(it);
+            if (compareKey((*prev)->rangeMax, queryMin) >= 0) {
+                result.push_back(*prev);
+            }
         }
-        ++it;
-    }
 
+        while (it != nodes.end() && compareKey((*it)->rangeMin, queryMax) <= 0) {
+            if (compareKey((*it)->rangeMax, queryMin) >= 0) {
+                result.push_back(*it);
+            }
+            ++it;
+        }
+    }
+    
     return result;
 }
 
 void Tree::build_link(std::shared_ptr<TreeNode> node){
     int parent_level = node->levelInfo - 1;
     int children_level = node->levelInfo + 1;
+    if (children_level >= MAX_LEVEL) {
+        pr_debug("Children level is too high...");
+        return;
+    } 
     std::vector<std::shared_ptr<TreeNode>> Poverlap;
     std::vector<std::shared_ptr<TreeNode>> Coverlap;
     if(parent_level > 0){
@@ -75,16 +90,17 @@ void Tree::insert_node(std::shared_ptr<TreeNode> node){
         return;
     }
     std::vector<std::shared_ptr<TreeNode>> overlap;
-    if(level > 0){
-        overlap = search_overlap(level, node->rangeMin, node->rangeMax);
-    }
+    level_map_[level].insert(node);
+    // if(level > 0){
+    //     overlap = search_overlap(level, node->rangeMin, node->rangeMax);
+    // }
     
-    if(overlap.empty()){
-        level_map_[level].insert(node);
-    }
-    else{
-        pr_debug("Insert node key range is error,key range overlap");
-    }
+    // if(overlap.empty()){
+    //     level_map_[level].insert(node);
+    // }
+    // else{
+    //     pr_debug("Insert node key range is error,key range overlap");
+    // }
     build_link(node);
 }
 
@@ -153,7 +169,7 @@ void Tree::clear() {
 void Tree::dump() const {
     std::cout << "=== Tree Dump ===" << std::endl;
 
-    for (int level = 0; level <= 7; ++level) {
+    for (int level = 0; level < MAX_LEVEL; ++level) {
         auto it = level_map_.find(level);
         if (it == level_map_.end() || it->second.empty()) continue;
 
