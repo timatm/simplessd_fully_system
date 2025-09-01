@@ -42,9 +42,8 @@ void LogManager::flush_buffer()
     std::memcpy(aligned_page, buffer_.data(), IMS_PAGE_SIZE);
 
     uint64_t lpn = static_cast<uint64_t>(LBN2LPN(currenet_lbn_) + page_offset_);
-    pr_info("Flushing buffer to LPN: %lu", lpn);
-    printf("[FLUSH] th=%lu currentLPN=%u\n",
-       pthread_self(), lpn);
+    // pr_info("Flushing buffer to LPN: %lu", lpn);
+    // printf("[FLUSH] th=%lu currentLPN=%u\n",pthread_self(), lpn);
     if (nvme_.nvme_write_log(lpn, aligned_page) == COMMAND_FAILED) {
         std::cerr << "Failed to write log at LPN: " << lpn << '\n';
         return;

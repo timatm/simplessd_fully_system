@@ -187,8 +187,9 @@ bool InternalKey::IsValid() const {
 
     // 型別必須在我們定義的合法範圍內（0..3），且不能是 kInvalid(0xFF)
     const uint8_t t = static_cast<uint8_t>(info.type);
-    if (t == static_cast<uint8_t>(ValueType::kInvalid)) return false;
-    if (t >  static_cast<uint8_t>(ValueType::kTypeMax)) return false;
+    if  (t == static_cast<uint8_t>(ValueType::kInvalid)) return false;
+    if  (t >= static_cast<uint8_t>(ValueType::kTypeMax)) return false;
+    if  (t <= static_cast<uint8_t>(ValueType::kTypeMin)) return false;
 
     return true;
 }

@@ -155,7 +155,7 @@ Status API::get(std::string key,std::string& value){
     if(key.empty()){
         return Status::IOError("Key string is empty");
     }
-    std::cout << "Search key: " << key << std::endl;
+    // std::cout << "Search key: " << key << std::endl;
     Key interkey(key);
     InternalKey search_key(key);
     auto result = memtable_->Get(key);
@@ -168,15 +168,15 @@ Status API::get(std::string key,std::string& value){
         char * buffer = (char *)allocateAligned(BLOCK_SIZE);
         while(!result.has_value() && !sstables.empty()){
             auto sstable = sstables.front();
-            std::cout   << "Find SStable: " << sstable->filename << "  Key range [ " << sstable->rangeMin.toString() << " ~ "
-                        << sstable->rangeMax.toString() << " ]" <<std::endl;
+            // std::cout   << "Find SStable: " << sstable->filename << "  Key range [ " << sstable->rangeMin.toString() << " ~ "
+            //             << sstable->rangeMax.toString() << " ]" <<std::endl;
             sstables.pop();
             sstableManager_->readSSTable(sstable->filename,buffer);
             getSSTable()->waitAllTasksDone();
             auto keys = parse_sstable(buffer);
             auto it = keys.find(search_key);
             if(it != keys.end()){
-                it->dump();
+                // it->dump();
                 uint32_t lpn = it->value_ptr.lpn;
                 uint32_t offset = it->value_ptr.offset;
                 if(it->info.type == static_cast<uint8_t>(ValueType::kTypeDeletion) ){
@@ -185,7 +185,7 @@ Status API::get(std::string key,std::string& value){
                     return Status::NotFound("The key has been deleted");
                 }
                 auto record = logManager_->readLog(lpn, offset);
-                record->Dump();
+                // record->Dump();
                 if(record.has_value()){
                     result = (*record).value;
                 }
@@ -213,16 +213,16 @@ std::set<InternalKey ,SetComparator> API::parse_sstable(char* buffer) {
 
     while (offset + sizeof(InternalKey) <= BLOCK_SIZE) {
         InternalKey key;
-        key = InternalKey::Decode( (buffer + offset));
+        key = InternalKey::Decode( std::string((buffer + offset) ,sizeof(InternalKey)) );
         offset += sizeof(InternalKey);
-        if(key.info.type == INVALID_KEY_TYPE){
-            continue;
+        if(key.IsValid()){
+            keys.insert(key);
         }
-        keys.insert(key);
     }
 
     return keys;
 }
+
 void API::dump_system() {
     std::cout << "Dumping system information..." << std::endl;
     std::cout << "SSD config:" << std::endl;
@@ -372,7 +372,7 @@ Status API::search(std::string key ,std::string& value){
             break;
         }
         case PackingType::kHash:{
-            pattern_info.slot_index = HashModN(internalKey, SLOT_NUM); 
+            pattern_info.slot_index = HashModN(internalKey, SLOT_NUM_PER_PAGE); 
             break;
         }
             

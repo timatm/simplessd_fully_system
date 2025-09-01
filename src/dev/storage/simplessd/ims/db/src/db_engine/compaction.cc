@@ -115,7 +115,7 @@ CompactionRunner::CompactionRunner( SstableManager *smgr,
 
             while (!sortedList_.empty()) sortedList_.pop();
             hash_num_.clear();
-            if (packType_ == PackingType::kHash) hash_num_.assign(SLOT_NUM, 0);
+            if (packType_ == PackingType::kHash) hash_num_.assign(SLOT_NUM_PER_PAGE, 0);
         }
 
 bool CompactionRunner::same_user_key(std::string_view a, std::string_view b) {
@@ -139,7 +139,7 @@ bool CompactionRunner::memTableIsFull() {
             return std::any_of(hash_num_.begin(), hash_num_.end(),
                                [](uint32_t count) { return count >= IMS_PAGE_NUM; });
         case PackingType::kKeyRange:
-            return nums_ >= SLOT_NUM * IMS_PAGE_NUM;
+            return nums_ >= SLOT_NUM_PER_PAGE * IMS_PAGE_NUM;
         default:
             return false;
     }
@@ -174,14 +174,16 @@ Status CompactionRunner::Run() {
             pr_debug("flush: bad internal key size (front/back)");
             return Status::IOError("flush: bad internal key size");
         }
-
         InternalKey minK = InternalKey::Decode(sortedList_.front());
         InternalKey maxK = InternalKey::Decode(sortedList_.back());
         
         auto buffer = smgr_->packingTable(sortedList_);
+        // pr_debug("Compaction write SStable info");
+        // minK.dump();
+        // maxK.dump();
         smgr_->writeSSTable( static_cast<uint8_t>(srcLevel_ + 1), minK, maxK, std::move(buffer), /*clearImmuteTable=*/false);
         // 清空 queue、重置計數
-        pr_debug("Compaction write SStable info");
+        
 
         while (!sortedList_.empty()) sortedList_.pop();
         nums_ = 0;
@@ -192,12 +194,18 @@ Status CompactionRunner::Run() {
     // emit()：把一個 key 放入 chunk；若滿了就 flush()
     auto emit = [&](std::string_view k) -> Status {
         // 實際拷貝一份（queue 內持有）
+        InternalKey a = InternalKey::Decode(std::string(k.data(),k.size()));
+        if(a.key.key_size == 0){
+            pr_debug("Compation sorted list insert a error internal key");
+            a.dump();
+            return Status::OK();
+        }
         sortedList_.emplace(k.data(), k.size());
 
         if (packType_ == PackingType::kHash) {
             InternalKey key{};
             if (!DecodeInternal(k, key)) return Status::IOError("emit: bad internal key (hash)");
-            auto idx = HashModN(key, SLOT_NUM);
+            auto idx = HashModN(key, SLOT_NUM_PER_PAGE);
             if (idx >= hash_num_.size()) return Status::IOError("hash_num_ not initialized");
             hash_num_[idx]++;
         } else {
@@ -243,7 +251,6 @@ Status CompactionRunner::Run() {
             }
         }
 
-        // ⚠️ 先複製，再 Next()（避免 key() 在 Next 後失效）
         std::string cur_owned;
         if (take_left) {
             std::string_view sv = srcLevelIter_->key();
@@ -258,11 +265,15 @@ Status CompactionRunner::Run() {
         }
         std::string_view cur_key(cur_owned.data(), cur_owned.size());
 
-        // 單調性（internal）檢查（debug）
+        
         InternalKey cur_internal{};
         if (DecodeInternal(cur_key, cur_internal)) {
             if (has_prev && !(*icmp_)(prev_internal, cur_internal) && !equal_internal(prev_internal, cur_internal)) {
                 pr_debug("Compaction non-monotonic: previous > current (internal order broken)");
+            }
+            if(cur_internal.key.key_size == 0){
+                pr_debug("Internal key is error");
+                continue;
             }
             prev_internal = cur_internal;
             has_prev = true;

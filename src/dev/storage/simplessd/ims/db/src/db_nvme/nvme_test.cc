@@ -43,7 +43,7 @@ int MyNVMeDriver::nvme_write_sstable(sstable_info info,char *buffer){
     return err;
 }
 int MyNVMeDriver::nvme_write_log(uint64_t lpn,char *buffer){
-    pr_info("Write log to LPN: %lu", lpn);
+    // pr_info("Write log to LPN: %lu", lpn);
     if(buffer == nullptr){
         pr_debug("Write sstable failed ,data buffer is nullptr");
         return COMMAND_FAILED;

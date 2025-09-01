@@ -204,3 +204,17 @@ std::shared_ptr<TreeNode> LSMTree::findLevel0Older(){
     }
     return oldest;
 }
+
+std::vector<std::shared_ptr<TreeNode>> LSMTree::get_level_treeNode(int level){
+
+    std::vector<std::shared_ptr<TreeNode>> result;
+    if(level < 0 || level > MAX_LEVEL){
+        pr_debug("Error level in get_level_treeNode()");
+        return result;
+    }
+    auto nodes = tree_->get_level_nodes(level);
+    for(auto node : nodes){
+        result.emplace_back(node);
+    }
+    return result;
+}

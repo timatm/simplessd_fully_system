@@ -149,7 +149,7 @@ int main() {
         return -1;
     }
     
-    for (int i = 0; i < 2000; ++i) {
+    for (int i = 0; i < 1000000; ++i) {
         std::string key = "key" + std::to_string(i);
         std::string value = "value" + std::to_string(i);
         Status s = db.put(key, value);
@@ -164,11 +164,11 @@ int main() {
 
     // std::cout << "Inserted 129 key-value pairs successfully.\n";
     // db.getSSTable()->waitAllTasksDone();
-    db.dump_memtable();
+    // db.dump_memtable();
     db.dump_lsmtree();
     Options opts;
     
-    // SstableIterator iter(db.getSSTable(),db.getLogManager(),&icmp,"00000000000000000000000000000000004",db.getPackType());
+    // SstableIterator iter(db.getSSTable(),db.getLogManager(),&icmp,"00000000000000000000000000000000000",db.getPackType());
     // iter.Init();
     // iter.SeekToFirst();
     // while(iter.Valid()){
@@ -187,21 +187,33 @@ int main() {
     // db.test();
 
 
-    // Options opt;
-    // opt.lower = InternalKey("key0",0,ValueType::kTypeMin).Encode();
-    // opt.upper = InternalKey("key500",0,ValueType::kTypeMax).Encode();
-    // LevelNIterator it(db.getSSTable(),db.getLogManager(),&icmp,db.getLSMTree(),1,opt);
+    // auto nodes = db.getLSMTree()->get_level_treeNode(1);
+    // LevelNIterator it(db.getSSTable(),db.getLogManager(),&icmp,db.getLSMTree(),1,nodes,false);
     // it.Init();
+    // it.SeekToFirst();
     // while(it.Valid()){
-    //     InternalKey k = InternalKey::Decode(it.key().data());
+    //     // InternalKey k = InternalKey::Decode(std::string(it.key().data(),it.key().size()));
+    //     InternalKey k = InternalKey::Decode(std::string(it.key()));
     //     std::string val;
     //     it.ReadValue(val);
     //     std::cout << "KEY:" << k.UserKey() << "  VAL:" << val << std::endl;
     //     it.Next();
     // }
 
-    db.range_query("key0","key9999",result);
-    
+    // db.range_query("key0","key9999",result);
+
+
+    std::string val;
+    db.get("key0",val);
+    for (int i = 0; i < 1000; ++i) {
+        std::string key = "key" + std::to_string(i*1000);
+        Status s = db.get(key, val);
+        if (!s.ok()) {
+            std::cerr << "Put failed at index " << i << " with key: " << key << "\n";
+        }
+        pr_debug("===RESULT===");
+        std::cout << "KEY: " <<  key << "  VAL :" << val << std::endl;
+    }
     std::cout << "Iterator traverse is done"<< std::endl;
 }
 

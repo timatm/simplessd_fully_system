@@ -308,11 +308,12 @@ struct slotFormat {
 static_assert(sizeof(slotFormat) == 64, "slotFormat must be 64 bytes");
 
 
-#define SLOT_SIZE sizeof(slotFormat)
-#define SLOT_NUM IMS_PAGE_SIZE/sizeof(slotFormat)
+#define SLOT_SIZE sizeof    (slotFormat)
+#define SLOT_NUM_PER_PAGE   (IMS_PAGE_SIZE/sizeof(slotFormat))
+#define SLOT_NUM_PER_BLOCK  (SLOT_NUM_PER_PAGE * IMS_PAGE_NUM)
 struct pageFormat
 {
-    slotFormat slot[SLOT_NUM];
+    slotFormat slot[SLOT_NUM_PER_PAGE];
 };
 static_assert(sizeof(pageFormat) == IMS_PAGE_SIZE ,"pageformat must be same to page size");
 

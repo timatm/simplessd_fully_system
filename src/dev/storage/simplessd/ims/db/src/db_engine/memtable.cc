@@ -12,7 +12,7 @@ MemTable::MemTable()
 
 void MemTable::Put(const Record &rec) {
     skiplist_.Insert(rec);
-    size_ += sizeof(InternalKey);
+    // size_ += sizeof(InternalKey);
     ++node_count_;
     hash_num_[HashModN(rec.internal_key, hash_num_.size())]++;
 }
@@ -55,9 +55,9 @@ void MemTable::Dump() const {
     std::cout << "=======================" << std::endl;
 }
 
-size_t MemTable::ApproximateMemoryUsage() const {
-    return size_;
-}
+// size_t MemTable::ApproximateMemoryUsage() const {
+//     return size_;
+// }
 
 bool MemTable::memTableIsFull() {
     switch (packing_type_) {
@@ -67,7 +67,7 @@ bool MemTable::memTableIsFull() {
             return std::any_of(hash_num_.begin(), hash_num_.end(),
                                [](uint32_t count) { return count >= IMS_PAGE_NUM; });
         case static_cast<int>(PackingType::kKeyRange):
-            return size_ >= IMS_PAGE_SIZE;
+            return node_count_ >= SLOT_NUM_PER_BLOCK;
         default:
             return false;
     }
@@ -85,14 +85,24 @@ static void* AllocateAligned(size_t size) {
 
 
 
-size_t HashModN(const InternalKey& ikey, size_t n) {
-    std::string_view data = ikey.Encode(); 
 
-    std::hash<std::string_view> hasher;
-    size_t hash_value = hasher(data);
-    return hash_value % n;
+static inline uint64_t FNV1aHash64(const void* ptr, size_t len) {
+    const auto* p = static_cast<const unsigned char*>(ptr);
+    uint64_t hash = 14695981039346656037ull;   // offset basis
+    const uint64_t prime = 1099511628211ull;   // FNV prime
+    for (size_t i = 0; i < len; ++i) {
+        hash ^= static_cast<uint64_t>(p[i]);
+        hash *= prime;
+    }
+    return hash;
 }
 
+// 你原本的 HashModN —— 修正生命期
+size_t HashModN(const InternalKey& ikey, size_t n) {
+    std::string encoded = ikey.Encode();                // 擁有者在此，活到函式末
+    uint64_t hash_value = FNV1aHash64(encoded.data(), encoded.size());
+    return static_cast<size_t>(hash_value % n);
+}
 
 
 Status MemTableIterator::Init(){

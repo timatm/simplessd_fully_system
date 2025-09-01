@@ -447,7 +447,7 @@ int IMS_interface::init_DB(uint8_t *buffer){
 }
 // TODO now not complete still need to modify
 int IMS_interface::write_log(uint64_t lpn,uint8_t *buffer){
-    pr_info("Write log at LPN: %lu in IMS", lpn);
+    // pr_info("Write log at LPN: %lu in IMS", lpn);
     if (buffer == nullptr) {
         pr_debug("Read log failed: null request or buffer");
         return OPERATION_FAILURE;
