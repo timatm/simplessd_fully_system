@@ -50,7 +50,7 @@ public:
 
     std::set<std::string> read_key_range(const std::string& filename);
     SearchPattern generate_search_slot(const std::string& filename, const Key& key,const std::set<std::string>& keys);
-    void generate_search_package(const std::string& filename, const std::string& pattern);
+    // void generate_search_package(const std::string& filename, const std::string& pattern);
     std::set<InternalKey ,SetComparator> parse_sstable_page(char* buffer);
 
     void init_compaction_key_list();
@@ -68,7 +68,7 @@ private:
     std::vector<std::optional<InternalKey>> compaction_key_list_;
     InternalKeyComparator icmp_;
     std::mutex mu_;
-
+    std::unique_ptr<ReadCache> keyRangeCache_;
 private:
     void OnSSTableFlushed(const sstable_info& info);
     void OnSSTableWriteFailed(const sstable_info& info, int err);

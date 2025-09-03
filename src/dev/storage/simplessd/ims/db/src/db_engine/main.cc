@@ -23,10 +23,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <string>
 #include <vector>
 #include <optional>
-#include <iostream>
 
 // === 依你的專案調整這些 include ===
 #include "sstable_mgr.hh"      // 內含 SstableIterator / SstableManager（或等價標頭）

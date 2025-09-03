@@ -10,9 +10,11 @@
 #include <list>
 #include <unordered_map>
 #include <mutex>
+#include "options.hh"
 class ReadCache {
 public:
     explicit ReadCache(size_t capacity);
+    explicit ReadCache();
     std::optional<std::set<std::string>> get(std::string&);
     bool put(const std::string&, const std::set<std::string>& value);
     bool remove(const std::string&);

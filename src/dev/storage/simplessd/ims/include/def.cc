@@ -1,6 +1,23 @@
 #include "def.hh"
 #include <iostream>
 #include <iomanip>
+
+
+static inline void append_u32_le(std::string& out, uint32_t v) {
+    out.push_back(static_cast<char>(v & 0xFF));
+    out.push_back(static_cast<char>((v >> 8) & 0xFF));
+    out.push_back(static_cast<char>((v >> 16) & 0xFF));
+    out.push_back(static_cast<char>((v >> 24) & 0xFF));
+}
+
+static inline uint32_t load_u32_le(const char* p) {
+    return  (static_cast<uint32_t>(static_cast<unsigned char>(p[0]))      ) |
+           ((static_cast<uint32_t>(static_cast<unsigned char>(p[1])) << 8 )) |
+           ((static_cast<uint32_t>(static_cast<unsigned char>(p[2])) << 16)) |
+           ((static_cast<uint32_t>(static_cast<unsigned char>(p[3])) << 24));
+}
+
+
 std::string DB_INIT::encode() {
     std::string buf;
     auto append_u32 = [&](uint32_t val) {
@@ -101,119 +118,305 @@ void DB_INIT::dump() const {
     std::cout << "==================================\n";
 }
 
-static inline void append_u32_le(std::string& out, uint32_t v) {
-    out.push_back(static_cast<char>(v & 0xFF));
-    out.push_back(static_cast<char>((v >> 8) & 0xFF));
-    out.push_back(static_cast<char>((v >> 16) & 0xFF));
-    out.push_back(static_cast<char>((v >> 24) & 0xFF));
+
+namespace {
+
+constexpr std::size_t kSSTNameLen = 36;
+
+inline void PutU32(std::string& dst, uint32_t v) {
+    char b[4];
+    b[0] = static_cast<char>( v        & 0xFF);
+    b[1] = static_cast<char>((v >> 8)  & 0xFF);
+    b[2] = static_cast<char>((v >> 16) & 0xFF);
+    b[3] = static_cast<char>((v >> 24) & 0xFF);
+    dst.append(b, 4);
 }
 
-static inline uint32_t load_u32_le(const char* p) {
-    return  (static_cast<uint32_t>(static_cast<unsigned char>(p[0]))      ) |
-           ((static_cast<uint32_t>(static_cast<unsigned char>(p[1])) << 8 )) |
-           ((static_cast<uint32_t>(static_cast<unsigned char>(p[2])) << 16)) |
-           ((static_cast<uint32_t>(static_cast<unsigned char>(p[3])) << 24));
+inline bool GetU32(const std::string& src, size_t& off, uint32_t& out) {
+    if (off + 4 > src.size()) return false;
+    const unsigned char* p = reinterpret_cast<const unsigned char*>(src.data() + off);
+    out = static_cast<uint32_t>(p[0])
+        | (static_cast<uint32_t>(p[1]) << 8)
+        | (static_cast<uint32_t>(p[2]) << 16)
+        | (static_cast<uint32_t>(p[3]) << 24);
+    off += 4;
+    return true;
 }
 
-std::string SearchPattern::encode() const {
-    if (sstable_name.size() != 36) return {};
-    std::string buf;
-    buf.reserve(40);
-    buf.append(sstable_name);
-    append_u32_le(buf, slot_index);
-    return buf;
+inline bool GetBytes(const std::string& src, size_t& off, uint32_t len, std::string& out) {
+    if (off + len > src.size()) return false;
+    out.assign(src.data() + off, len);
+    off += len;
+    return true;
 }
 
-std::optional<SearchPattern> SearchPattern::decode(const std::string& buf) {
-    constexpr size_t kNameLen = 36;
-    constexpr size_t kTotal   = kNameLen + 4;
-    if (buf.size() != kTotal) return std::nullopt;
 
-    SearchPattern sp;
-    sp.sstable_name.assign(buf.data(), kNameLen);
-    sp.slot_index = load_u32_le(buf.data() + kNameLen);
-    return sp;
+inline void PutFixedExact(std::string& dst, std::string_view src, std::size_t fixed_len) {
+    if (src.size() != fixed_len) {
+        throw std::length_error("sstable_name must be exactly 36 bytes");
+    }
+    dst.append(src.data(), fixed_len);
 }
 
-std::string SearchPackage::encode() const {
-    constexpr uint32_t kMagic = 0x31504753u; // 'S','G','P','1' (LE)
-    const uint32_t count = static_cast<uint32_t>(searchPatterns.size());
 
-    const size_t kPatternSize = 40;
-    std::string buf;
-    buf.reserve(8 + static_cast<size_t>(count) * kPatternSize);
+inline bool GetFixed(const std::string& src, size_t& off, std::size_t fixed_len, std::string& out) {
+    if (off + fixed_len > src.size()) return false;
+    out.assign(src.data() + off, fixed_len);
+    off += fixed_len;
+    return true;
+}
 
-    // header
-    append_u32_le(buf, kMagic);
-    append_u32_le(buf, count);
+constexpr uint32_t kMagic_D = 0x444B5053; // 'S','P','K','D'（小端）
+constexpr uint32_t kMagic_H = 0x484B5053; // 'S','P','K','H'（小端）
 
-    // body
+inline void EnsureU32Len(std::size_t n, const char* what) {
+    if (n > std::numeric_limits<uint32_t>::max()) {
+        throw std::length_error(std::string(what) + " too large for u32 length field");
+    }
+}
+
+} // namespace
+
+
+// ======= SearchPatternD =======
+// 编码格式：
+//   u32 name_len
+//   [name_len bytes] sstable_name
+//   u32 slot_index
+// 编码： [36B] sstable_name + u32 slot_index
+std::string SearchPatternD::encode() const {
+    std::string out;
+    out.reserve(kSSTNameLen + 4);
+    PutFixedExact(out, sstable_name, kSSTNameLen); // 不等 36B 直接抛异常
+    PutU32(out, slot_index);
+    return out;
+}
+
+std::optional<SearchPatternD> SearchPatternD::decode(const std::string& buf) {
+    SearchPatternD pat{};
+    size_t off = 0;
+
+    if (!GetFixed(buf, off, kSSTNameLen, pat.sstable_name)) return std::nullopt;
+    // ❌ 不要 RStripZeros —— 因为你是用字符 '0' 左填充的，必须完整保留 36B
+
+    uint32_t slot = 0;
+    if (!GetU32(buf, off, slot)) return std::nullopt;
+    pat.slot_index = slot;
+
+    return pat; // 允许 slice 有尾随字节
+}
+
+
+void SearchPatternD::dump() const {
+    std::cout << "SearchPatternD { name=\"" << sstable_name
+              << "\", slot_index=" << slot_index << " }\n";
+}
+
+// ======= SearchPackageD =======
+// 编码格式：
+//   u32 magic (==kMagic_D)
+//   u32 pattern_num (= searchPatterns.size())
+//   u32 key_len
+//   [key_len bytes] search_key
+//   repeat pattern_num times:
+//     u32 pat_len
+//     [pat_len bytes] SearchPatternD::encode()
+std::string SearchPackageD::encode() const {
+    EnsureU32Len(search_key.size(), "search_key");
+    auto pat_num = static_cast<uint32_t>(searchPatterns.size());
+
+    // 预估长度（减少realloc）
+    std::size_t hint = 12 + search_key.size();
     for (const auto& p : searchPatterns) {
-        auto encoded = p.encode();
-        if (encoded.size() != kPatternSize) return {};
-        buf.append(encoded.data(), encoded.size());
-    }
-    return buf;
-}
-
-std::optional<SearchPackage> SearchPackage::decode(const std::string& buf){
-    constexpr uint32_t kMagic = 0x31504753u;
-    constexpr size_t kHeader = 8;
-    constexpr size_t kPatternSize = 40;
-
-    if (buf.size() < kHeader) return std::nullopt;
-
-    size_t offset = 0;
-    const uint32_t magic = load_u32_le(buf.data() + offset); offset += 4;
-    const uint32_t count = load_u32_le(buf.data() + offset); offset += 4;
-
-    if (magic != kMagic) return std::nullopt;
-
-    const size_t body = buf.size() - offset;
-    if (body / kPatternSize < count) return std::nullopt;
-
-    SearchPackage spkg;
-    spkg.header.magic = magic;
-    spkg.header.pattern_num = count;
-
-    spkg.searchPatterns.reserve(count);
-    for (uint32_t i = 0; i < count; ++i) {
-        auto pattern_buf = buf.substr(offset, kPatternSize);
-        auto pattern = SearchPattern::decode(pattern_buf);
-        if (!pattern) return std::nullopt;
-        spkg.searchPatterns.push_back(*pattern);
-        offset += kPatternSize;
+        auto enc = p.encode();
+        EnsureU32Len(enc.size(), "SearchPatternD");
+        hint += 4 + enc.size();
     }
 
-    return spkg;
+    std::string out;
+    out.reserve(hint);
+
+    PutU32(out, kMagic_D);
+    PutU32(out, pat_num);
+    PutU32(out, static_cast<uint32_t>(search_key.size()));
+    out.append(search_key);
+
+    for (const auto& p : searchPatterns) {
+        auto enc = p.encode();
+        PutU32(out, static_cast<uint32_t>(enc.size()));
+        out.append(enc);
+    }
+    return out;
+}
+
+std::optional<SearchPackageD> SearchPackageD::decode(const std::string& buf) {
+    SearchPackageD pkg{};
+    size_t off = 0;
+
+    uint32_t magic = 0, pattern_num = 0, key_len = 0;
+    if (!GetU32(buf, off, magic)) return std::nullopt;
+    if (magic != kMagic_D) return std::nullopt;
+    pkg.header.magic = magic;
+
+    if (!GetU32(buf, off, pattern_num)) return std::nullopt;
+    pkg.header.pattern_num = pattern_num;
+
+    if (!GetU32(buf, off, key_len)) return std::nullopt;
+    if (!GetBytes(buf, off, key_len, pkg.search_key)) return std::nullopt;
+
+    pkg.searchPatterns.clear();
+    pkg.searchPatterns.reserve(pattern_num);
+
+    for (uint32_t i = 0; i < pattern_num; ++i) {
+        uint32_t pat_len = 0;
+        if (!GetU32(buf, off, pat_len)) return std::nullopt;
+        if (off + pat_len > buf.size()) return std::nullopt;
+
+        std::string slice(buf.data() + off, pat_len);
+        off += pat_len;
+
+        auto pat = SearchPatternD::decode(slice);
+        if (!pat) return std::nullopt;
+        pkg.searchPatterns.push_back(std::move(*pat));
+    }
+
+    // 严格模式：必须刚好消费完
+    if (off != buf.size()) return std::nullopt;
+
+    return pkg;
+}
+
+void SearchPackageD::dump() const {
+    std::cout << "SearchPackageD {\n";
+    std::cout << "  magic       : 0x" << std::hex << header.magic << std::dec << "\n";
+    std::cout << "  pattern_num : " << header.pattern_num
+              << " (vec.size=" << searchPatterns.size() << ")\n";
+    std::cout << "  search_key  : \"" << search_key << "\" (len=" << search_key.size() << ")\n";
+    for (size_t i = 0; i < searchPatterns.size(); ++i) {
+        std::cout << "  [pat#" << i << "] ";
+        searchPatterns[i].dump();
+    }
+    std::cout << "}\n";
+}
+
+// ======= SearchPatternH =======
+// 编码格式：
+//   u32 name_len
+//   [name_len bytes] sstable_name
+//   u32 pattern_len
+//   [pattern_len bytes] searh_pattern
+// 编码： [36B] sstable_name + u32 len + [len] searh_pattern
+std::string SearchPatternH::encode() const {
+    std::string out;
+    out.reserve(kSSTNameLen + 4 + searh_pattern.size());
+
+    PutFixedExact(out, sstable_name, kSSTNameLen); // 严格 36B
+    EnsureU32Len(searh_pattern.size(), "searh_pattern");
+    PutU32(out, static_cast<uint32_t>(searh_pattern.size()));
+    out.append(searh_pattern);
+    return out;
+}
+
+std::optional<SearchPatternH> SearchPatternH::decode(const std::string& buf) {
+    SearchPatternH pat{};
+    size_t off = 0;
+
+    if (!GetFixed(buf, off, kSSTNameLen, pat.sstable_name)) return std::nullopt;
+    // 不做裁剪
+
+    uint32_t patt_len = 0;
+    if (!GetU32(buf, off, patt_len)) return std::nullopt;
+    if (!GetBytes(buf, off, patt_len, pat.searh_pattern)) return std::nullopt;
+
+    return pat;
 }
 
 
-
-void SearchPattern::dump() const {
-    std::cout << "SearchPattern {\n"
-              << "  sstable_name : \"" << sstable_name << "\"\n"
-              << "  slot_index   : " << slot_index << "\n"
-              << "}\n";
+void SearchPatternH::dump() const {
+    std::cout << "SearchPatternH { name=\"" << sstable_name
+              << "\", searh_pattern_len=" << searh_pattern.size() << " }\n";
 }
 
+// ======= SearchPackageH =======
+// 编码格式：
+//   u32 magic (==kMagic_H)
+//   u32 pattern_num (= searchPatterns.size())
+//   u32 key_len
+//   [key_len bytes] search_key
+//   repeat pattern_num times:
+//     u32 pat_len
+//     [pat_len bytes] SearchPatternH::encode()
+std::string SearchPackageH::encode() const {
+    EnsureU32Len(search_key.size(), "search_key");
+    auto pat_num = static_cast<uint32_t>(searchPatterns.size());
 
-void SearchPackage::dump() const {
-    std::cout << "SearchPackage {\n"
-              << "  header.magic       : 0x" 
-              << std::hex << std::uppercase << header.magic 
-              << std::dec << "\n"
-              << "  header.pattern_num : " << header.pattern_num << "\n";
+    std::size_t hint = 12 + search_key.size();
+    for (const auto& p : searchPatterns) {
+        auto enc = p.encode();
+        EnsureU32Len(enc.size(), "SearchPatternH");
+        hint += 4 + enc.size();
+    }
 
-    if (searchPatterns.empty()) {
-        std::cout << "  searchPatterns     : []\n";
-    } else {
-        std::cout << "  searchPatterns [\n";
-        for (size_t i = 0; i < searchPatterns.size(); ++i) {
-            std::cout << "    [" << i << "] ";
-            searchPatterns[i].dump(); // 呼叫 SearchPattern 的 dump()
-        }
-        std::cout << "  ]\n";
+    std::string out;
+    out.reserve(hint);
+
+    PutU32(out, kMagic_H);
+    PutU32(out, pat_num);
+    PutU32(out, static_cast<uint32_t>(search_key.size()));
+    out.append(search_key);
+
+    for (const auto& p : searchPatterns) {
+        auto enc = p.encode();
+        PutU32(out, static_cast<uint32_t>(enc.size()));
+        out.append(enc);
+    }
+    return out;
+}
+
+std::optional<SearchPackageH> SearchPackageH::decode(const std::string& buf) {
+    SearchPackageH pkg{};
+    size_t off = 0;
+
+    uint32_t magic = 0, pattern_num = 0, key_len = 0;
+    if (!GetU32(buf, off, magic)) return std::nullopt;
+    if (magic != kMagic_H) return std::nullopt;
+    pkg.header.magic = magic;
+
+    if (!GetU32(buf, off, pattern_num)) return std::nullopt;
+    pkg.header.pattern_num = pattern_num;
+
+    if (!GetU32(buf, off, key_len)) return std::nullopt;
+    if (!GetBytes(buf, off, key_len, pkg.search_key)) return std::nullopt;
+
+    pkg.searchPatterns.clear();
+    pkg.searchPatterns.reserve(pattern_num);
+
+    for (uint32_t i = 0; i < pattern_num; ++i) {
+        uint32_t pat_len = 0;
+        if (!GetU32(buf, off, pat_len)) return std::nullopt;
+        if (off + pat_len > buf.size()) return std::nullopt;
+
+        std::string slice(buf.data() + off, pat_len);
+        off += pat_len;
+
+        auto pat = SearchPatternH::decode(slice);
+        if (!pat) return std::nullopt;
+        pkg.searchPatterns.push_back(std::move(*pat));
+    }
+
+    if (off != buf.size()) return std::nullopt;
+    return pkg;
+}
+
+void SearchPackageH::dump() const {
+    std::cout << "SearchPackageH {\n";
+    std::cout << "  magic       : 0x" << std::hex << header.magic << std::dec << "\n";
+    std::cout << "  pattern_num : " << header.pattern_num
+              << " (vec.size=" << searchPatterns.size() << ")\n";
+    std::cout << "  search_key  : \"" << search_key << "\" (len=" << search_key.size() << ")\n";
+    for (size_t i = 0; i < searchPatterns.size(); ++i) {
+        std::cout << "  [pat#" << i << "] ";
+        searchPatterns[i].dump();
     }
     std::cout << "}\n";
 }

@@ -17,5 +17,8 @@ enum class PackingType {
 #define LEVEL6_MAX LEVEL5_MAX * 10
 
 
+#define RANGE_KEY_CACHE_SIZE 30
+
+#define SEARCH_PATTERN 0
 
 #endif  // __OPTIONS__HH__

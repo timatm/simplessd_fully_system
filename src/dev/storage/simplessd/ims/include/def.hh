@@ -7,6 +7,7 @@
 #include <cstring>
 #include <string>
 #include <memory>
+#include "options.hh"
 // [SSD setting start]
 
 #define CHANNEL_NUM 4
@@ -375,24 +376,50 @@ struct  DB_INIT {
 
 // [search key setting]
 
-struct SearchPattern{
-    std::string sstable_name;  
+
+
+struct SearchPatternD{
+    std::string sstable_name;  //36B
     uint32_t slot_index;
     std::string encode() const;
-    static std::optional<SearchPattern> decode(const std::string& buf);
+    static std::optional<SearchPatternD> decode(const std::string& buf);
     void dump() const; 
 };
 
-struct SearchPackage{
+struct SearchPackageD{
     struct {
         uint32_t magic;
         uint32_t pattern_num;
     } header;
-    std::vector<SearchPattern> searchPatterns;
+    std::string search_key;
+    std::vector<SearchPatternD> searchPatterns;
     std::string encode() const;
-    static std::optional<SearchPackage> decode(const std::string& buf);
+    static std::optional<SearchPackageD> decode(const std::string& buf);
     void dump() const;
 };
+
+struct SearchPatternH{
+    std::string sstable_name;  // 36B
+    std::string searh_pattern; // 16KB 
+    std::string encode() const;
+    static std::optional<SearchPatternH> decode(const std::string& buf);
+    void dump() const; 
+};
+
+struct SearchPackageH{
+    struct {
+        uint32_t magic;
+        uint32_t pattern_num;
+    } header;
+    std::string search_key;
+    std::vector<SearchPatternH> searchPatterns;
+    std::string encode() const;
+    static std::optional<SearchPackageH> decode(const std::string& buf);
+    void dump() const;
+};
+
+
+
 #define READ_CACHE_CAPACITY 20
 
 

@@ -5,6 +5,10 @@
 ReadCache::ReadCache(size_t capacity){
     capacity_ = capacity;
 };
+ReadCache::ReadCache(){
+    capacity_ = RANGE_KEY_CACHE_SIZE;
+};
+
 std::optional<std::set<std::string>> ReadCache::get(std::string& sstable){
     std::lock_guard<std::mutex> lk(mu_);
 
