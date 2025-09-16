@@ -19,6 +19,13 @@ enum class PackingType {
 
 #define RANGE_KEY_CACHE_SIZE 30
 
+
+// Search pattern generate in HOST / DEVICE
+// 0: DEVICE
+// 1: HOST
 #define SEARCH_PATTERN 0
+
+#define LOG_GC_THRESHOLD 20
+#define GC_BLOCK_NUM 5
 
 #endif  // __OPTIONS__HH__

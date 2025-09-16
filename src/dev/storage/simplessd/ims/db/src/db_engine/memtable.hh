@@ -19,6 +19,7 @@ public:
 
     void Put(const Record &rec);
     std::optional<std::string> Get(const std::string& user_key) const;
+    std::optional<Record> get_record(const std::string& user_key) const;
     void Dump() const;
     size_t ApproximateMemoryUsage() const;
     bool memTableIsFull();

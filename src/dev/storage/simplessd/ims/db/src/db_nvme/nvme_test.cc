@@ -129,7 +129,7 @@ int MyNVMeDriver::nvme_read_ssKeyRange(std::string filename, char* buffer){
     }
     int err;
     hostInfo req(filename);
-    err = ims.read_sstable(&req,reinterpret_cast<uint8_t*>(buffer));
+    err = ims.read_ssKeyRange(&req,reinterpret_cast<uint8_t*>(buffer));
     return err;
 }
 
@@ -154,3 +154,31 @@ int MyNVMeDriver::nvme_write_metadata(uint64_t lpn,char *buffer,size_t size){
     return err;
 }
 
+int MyNVMeDriver::nvme_write_block(uint32_t lbn, char* buffer){
+    int err = OPERATION_FAILURE;
+    if(buffer == nullptr){
+        pr_debug("Write block failed ,data buffer is nullptr");
+        return err;
+    }
+    if(lbn >= LBN_NUM){
+        pr_debug("Write block failed ,LBN is out of limit");
+        return err;
+    }
+    err = ims.write_block(lbn,reinterpret_cast<uint8_t*>(buffer));
+    return err;
+}
+
+
+int MyNVMeDriver::nvme_read_block(uint32_t lbn, char* buffer){
+    int err = OPERATION_FAILURE;
+    if(buffer == nullptr){
+        pr_debug("Read block failed ,data buffer is nullptr");
+        return err;
+    }
+    if(lbn >= LBN_NUM){
+        pr_debug("Read block failed ,LBN is out of limit");
+        return err;
+    }
+    err = ims.read_block(lbn,reinterpret_cast<uint8_t*>(buffer));
+    return err;
+}

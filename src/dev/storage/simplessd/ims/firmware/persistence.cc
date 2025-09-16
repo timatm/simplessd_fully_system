@@ -81,7 +81,7 @@ int Persistence::flushMappingTable(const std::unordered_map<std::string, uint64_
 
 
 
-int  Persistence::readSStable(uint64_t lbn,uint8_t *buffer,size_t size){
+int  Persistence::readBlock(uint64_t lbn,uint8_t *buffer,size_t size){
     int err;
     if (buffer == nullptr) {
         std::cerr << "[ERROR] Memory allocation failed.\n";
@@ -98,7 +98,7 @@ int  Persistence::readSStable(uint64_t lbn,uint8_t *buffer,size_t size){
     return OPERATION_SUCCESS;
 }
 
-int Persistence::flushSStable(uint64_t lbn,uint8_t *buffer,size_t size){
+int Persistence::writeBlock(uint64_t lbn,uint8_t *buffer,size_t size){
     int err;
     if(!ENABLE_DISK){
         return OPERATION_SUCCESS;
@@ -122,24 +122,24 @@ int Persistence::flushSStable(uint64_t lbn,uint8_t *buffer,size_t size){
     return err;
 }
 
-int Persistence::readSStablePage(uint64_t lpn,uint8_t *buffer,size_t size){
-    int err;
-    if (buffer == nullptr) {
-        std::cerr << "[ERROR] Memory allocation failed.\n";
-        return OPERATION_FAILURE;
-    }
-    if (size != IMS_PAGE_SIZE){
-        pr_debug("[ERROR] Memory allocation failed.");
-        return OPERATION_FAILURE;
-    }
-    err = pDisk_->readPage(lpn,buffer);
-    if(err){
-        return OPERATION_FAILURE;
-    }
-    return OPERATION_SUCCESS;
-}
+// int Persistence::readSStablePage(uint64_t lpn,uint8_t *buffer,size_t size){
+//     int err;
+//     if (buffer == nullptr) {
+//         std::cerr << "[ERROR] Memory allocation failed.\n";
+//         return OPERATION_FAILURE;
+//     }
+//     if (size != IMS_PAGE_SIZE){
+//         pr_debug("[ERROR] Memory allocation failed.");
+//         return OPERATION_FAILURE;
+//     }
+//     err = pDisk_->readPage(lpn,buffer);
+//     if(err){
+//         return OPERATION_FAILURE;
+//     }
+//     return OPERATION_SUCCESS;
+// }
 
-int Persistence::readLog(uint64_t lpn,uint8_t *buffer,size_t size){
+int Persistence::readPage(uint64_t lpn,uint8_t *buffer,size_t size){
     int err;
     if (pDisk_ == nullptr) {
         pr_debug("[ERROR] Disk not initialized.");
@@ -160,7 +160,7 @@ int Persistence::readLog(uint64_t lpn,uint8_t *buffer,size_t size){
     return OPERATION_SUCCESS;
 }
 
-int Persistence::writeLog(uint64_t lpn,uint8_t *buffer,size_t size){
+int Persistence::writePage(uint64_t lpn,uint8_t *buffer,size_t size){
     int err;
     if (pDisk_ == nullptr) {
         pr_debug("[ERROR] Disk not initialized");
@@ -182,7 +182,7 @@ int Persistence::writeLog(uint64_t lpn,uint8_t *buffer,size_t size){
 }
 
 
-int Persistence::eraseSStable(uint64_t lbn){
+int Persistence::eraseBlock(uint64_t lbn){
     int err;
     if(!ENABLE_DISK){
         return OPERATION_SUCCESS;

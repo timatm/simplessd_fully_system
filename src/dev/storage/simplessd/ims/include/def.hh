@@ -7,7 +7,6 @@
 #include <cstring>
 #include <string>
 #include <memory>
-#include "options.hh"
 // [SSD setting start]
 
 #define CHANNEL_NUM 4
@@ -400,7 +399,7 @@ struct SearchPackageD{
 
 struct SearchPatternH{
     std::string sstable_name;  // 36B
-    std::string searh_pattern; // 16KB 
+    std::string search_pattern; // 16KB 
     std::string encode() const;
     static std::optional<SearchPatternH> decode(const std::string& buf);
     void dump() const; 

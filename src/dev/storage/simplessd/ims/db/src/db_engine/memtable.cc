@@ -35,6 +35,22 @@ std::optional<std::string> MemTable::Get(const std::string& user_key) const {
 }
 
 
+std::optional<Record> MemTable::get_record(const std::string& user_key) const {
+    SkipList<Record, RecordComparator>::Iterator iter = skiplist_.GetIterator();
+    InternalKey lookup(user_key, UINT64_MAX, ValueType::kTypeValue); 
+    Record lookup_rec(lookup, "");
+
+    iter.Seek(lookup_rec);
+    if (iter.Valid() && iter.record().internal_key.UserKey() == user_key) {
+        const auto& record = iter.record();
+        if (static_cast<ValueType>(record.internal_key.info.type) == ValueType::kTypeDeletion) {
+            return std::nullopt;
+        }
+        return record;
+    }
+    return std::nullopt;
+}
+
 void MemTable::Dump() const {
     auto iter = skiplist_.GetIterator();
     iter.SeekToFirst();

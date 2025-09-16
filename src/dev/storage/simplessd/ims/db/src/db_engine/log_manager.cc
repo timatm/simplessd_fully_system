@@ -1,4 +1,5 @@
 #include "log_manager.hh"
+#include "status.hh"
 #include "nvme_interface.hh"
 #include <cstring>
 #include <cstdint>
@@ -7,8 +8,9 @@
 #include <algorithm>
 #include <memory>
 #include <optional>
+
 LogManager::LogManager(INVMEDriver& nvme)
-    : next_lbn_(0), currenet_lbn_(0), page_offset_(0), byte_offset_(0) ,nvme_(nvme) {}
+    : next_lbn_(0), currenet_lbn_(0), page_offset_(0), byte_offset_(0) ,first_block_offset_(0),nvme_(nvme) {}
 
 void LogManager::allocate_lbn() {
     char *buffer = (char*)calloc(sizeof(uint32_t), 1);
@@ -104,6 +106,8 @@ uint32_t LogManager::findNextLPN(uint32_t lpn) const{
 }
 
 
+constexpr size_t kHeader = sizeof(uint32_t) * 2;
+
 std::optional<Record> LogManager::readLog(uint32_t lpn, uint32_t offset)
 {
     auto readPage = [&](uint32_t lpn,char* buffer) -> bool{
@@ -123,12 +127,7 @@ std::optional<Record> LogManager::readLog(uint32_t lpn, uint32_t offset)
         return std::nullopt;
     }
     
-    uint32_t ikey_sz = 0;
-    uint32_t val_sz = 0;
-    
     size_t firstPageByte = IMS_PAGE_SIZE - offset;
-    constexpr size_t kHeader = sizeof(uint32_t) * 2;
-
 
     if(lpn == getLPN()){
         result.append(buffer_.data() + curOffset,kHeader);
@@ -140,11 +139,11 @@ std::optional<Record> LogManager::readLog(uint32_t lpn, uint32_t offset)
             return std::nullopt;
         }
         if(firstPageByte >= kHeader ){
-            result.append(read_buffer+offset,kHeader);
+            result.append(read_buffer + offset,kHeader);
             curOffset = offset + kHeader;  
         }
         else{
-            result.append(read_buffer+offset,firstPageByte);
+            result.append(read_buffer + offset,firstPageByte);
             curLPN = findNextLPN(curLPN);
             if(curLPN == getLPN()){
                 result.append(buffer_.data(), kHeader - firstPageByte);
@@ -154,13 +153,16 @@ std::optional<Record> LogManager::readLog(uint32_t lpn, uint32_t offset)
                     std::free(read_buffer);
                     return std::nullopt;
                 }
-                result.append(read_buffer,kHeader-firstPageByte);
+                result.append(read_buffer,kHeader - firstPageByte);
             }
-            curOffset = kHeader-firstPageByte;
+            curOffset = kHeader - firstPageByte;
         }
     }
+
+    uint32_t ikey_sz = 0;
+    uint32_t val_sz = 0;
     memcpy(&ikey_sz,result.data(),sizeof(uint32_t));
-    memcpy(&val_sz,result.data()+sizeof(uint32_t),sizeof(uint32_t));
+    memcpy(&val_sz,result.data() + sizeof(uint32_t),sizeof(uint32_t));
     uint32_t blobSize = ikey_sz + val_sz;
     if (ikey_sz > 64) {
         pr_debug("Reading log at LPN: %u, Offset: %u, Blob Size: %u (Key size: %u,value size: %u)", lpn, offset, blobSize,ikey_sz,val_sz);
@@ -189,7 +191,7 @@ std::optional<Record> LogManager::readLog(uint32_t lpn, uint32_t offset)
             result.append(read_buffer + curOffset, n);
         }
         curOffset += n;
-        copied     += n;
+        copied    += n;
     }
 
     Record record;
@@ -197,6 +199,119 @@ std::optional<Record> LogManager::readLog(uint32_t lpn, uint32_t offset)
     std::free(read_buffer);
     return record;
 }
+
+
+std::vector<Record> LogManager::readLogBlock(uint32_t lbn,
+                                             uint32_t valid_offset,
+                                             uint32_t &nextBlockValidOffset) {
+    auto readBlock = [&](uint32_t lbn, char* buffer) -> bool {
+        int err = nvme_.nvme_read_block(lbn, buffer);
+        if (err == COMMAND_FAILED) {
+            pr_debug("NVMe read log failed at LBN %u (err=%d)", lbn, err);
+            return false;
+        }
+        return true;
+    };
+
+    std::vector<Record> results;
+
+    if (lbn >= LBN_NUM) {
+        pr_debug("LBN %u is out of range (LBN_NUM=%u)", lbn, LBN_NUM);
+        nextBlockValidOffset = UINT32_MAX;
+        return results;
+    }
+    if (valid_offset >= BLOCK_SIZE) {
+        pr_debug("Valid offset %u is out of range (BLOCK_SIZE=%u)", valid_offset, BLOCK_SIZE);
+        nextBlockValidOffset = UINT32_MAX;
+        return results;
+    }
+
+    char* read_buffer = (char*)aligned_alloc(4096, BLOCK_SIZE);
+    if (!read_buffer) {
+        std::cerr << "Failed to allocate read buffer." << std::endl;
+        nextBlockValidOffset = UINT32_MAX;
+        return results;
+    }
+
+    if (!readBlock(lbn, read_buffer)) {
+        pr_debug("Read block failed at LBN %u", lbn);
+        nextBlockValidOffset = UINT32_MAX;
+        free(read_buffer);
+        return results;
+    }
+
+    uint32_t ikey_sz = 0;
+    uint32_t val_sz  = 0;
+    constexpr size_t kHeader = sizeof(uint32_t) * 2;
+
+    size_t curOffset = valid_offset; 
+    while (curOffset + kHeader <= BLOCK_SIZE) {
+        // 讀 header
+        std::memcpy(&ikey_sz, read_buffer + curOffset, sizeof(uint32_t));
+        std::memcpy(&val_sz,  read_buffer + curOffset + sizeof(uint32_t), sizeof(uint32_t));
+
+        if (ikey_sz != 64) {
+            pr_debug("Invalid key size %u at LBN %u, Offset %zu", ikey_sz, lbn, curOffset);
+            nextBlockValidOffset = UINT32_MAX;
+            break;
+        }
+
+        const size_t rec_size = static_cast<size_t>(kHeader) +
+                                static_cast<size_t>(ikey_sz) +
+                                static_cast<size_t>(val_sz);
+
+        if (curOffset + rec_size > BLOCK_SIZE) {
+            pr_debug("Record exceeds block boundary at LBN %u, Offset %zu", lbn, curOffset);
+            nextBlockValidOffset = UINT32_MAX;
+            break;
+        }
+
+        std::string record_buf(read_buffer + curOffset, rec_size);
+        Record record = Record::Decode(record_buf);
+        results.push_back(std::move(record));
+
+        curOffset += rec_size;
+    }
+
+    const size_t curBlockRemainder = BLOCK_SIZE - curOffset;
+
+    const uint32_t baseLPN = LBN2LPN(lbn);
+
+    const uint32_t curLPN  = baseLPN + static_cast<uint32_t>(curOffset / IMS_PAGE_SIZE);
+    const uint32_t curOffsetInLPN = static_cast<uint32_t>(curOffset % IMS_PAGE_SIZE);   
+
+    if (curBlockRemainder != 0) {
+        auto rec = readLog(curLPN, curOffsetInLPN);
+        if (rec.has_value()) {
+            results.push_back(*rec);
+            ikey_sz = rec->internal_key_size;
+            val_sz  = rec->value_size;
+
+            if (ikey_sz != 64) {
+                nextBlockValidOffset = UINT32_MAX;
+                pr_debug("Invalid key size %u at LPN %u, Offset %u", ikey_sz, curLPN, curOffsetInLPN);
+            }
+
+            
+            constexpr size_t kHdr = sizeof(uint32_t) * 2;
+            const size_t rec_size = static_cast<size_t>(kHdr) +
+                                    static_cast<size_t>(ikey_sz) +
+                                    static_cast<size_t>(val_sz);
+            nextBlockValidOffset = static_cast<uint32_t>(rec_size - curBlockRemainder);
+            
+        } else {
+            nextBlockValidOffset = UINT32_MAX;
+            pr_debug("Failed to read cross-page log at LPN %u, Offset %u", curLPN, curOffsetInLPN);
+        }
+    }
+    else{
+        nextBlockValidOffset = 0;
+    }
+
+    free(read_buffer);
+    return results;
+}
+
 
 
 
@@ -247,3 +362,4 @@ void LogManager::dump() const {
 
     std::cout << "======================================\n";
 }
+

@@ -121,7 +121,7 @@ void DB_INIT::dump() const {
 
 namespace {
 
-constexpr std::size_t kSSTNameLen = 36;
+constexpr std::size_t kSSTNameLen = 35;
 
 inline void PutU32(std::string& dst, uint32_t v) {
     char b[4];
@@ -135,7 +135,7 @@ inline void PutU32(std::string& dst, uint32_t v) {
 inline bool GetU32(const std::string& src, size_t& off, uint32_t& out) {
     if (off + 4 > src.size()) return false;
     const unsigned char* p = reinterpret_cast<const unsigned char*>(src.data() + off);
-    out = static_cast<uint32_t>(p[0])
+    out =  static_cast<uint32_t>(p[0])
         | (static_cast<uint32_t>(p[1]) << 8)
         | (static_cast<uint32_t>(p[2]) << 16)
         | (static_cast<uint32_t>(p[3]) << 24);
@@ -197,7 +197,6 @@ std::optional<SearchPatternD> SearchPatternD::decode(const std::string& buf) {
     size_t off = 0;
 
     if (!GetFixed(buf, off, kSSTNameLen, pat.sstable_name)) return std::nullopt;
-    // ❌ 不要 RStripZeros —— 因为你是用字符 '0' 左填充的，必须完整保留 36B
 
     uint32_t slot = 0;
     if (!GetU32(buf, off, slot)) return std::nullopt;
@@ -308,12 +307,12 @@ void SearchPackageD::dump() const {
 // 编码： [36B] sstable_name + u32 len + [len] searh_pattern
 std::string SearchPatternH::encode() const {
     std::string out;
-    out.reserve(kSSTNameLen + 4 + searh_pattern.size());
+    out.reserve(kSSTNameLen + 4 + search_pattern.size());
 
     PutFixedExact(out, sstable_name, kSSTNameLen); // 严格 36B
-    EnsureU32Len(searh_pattern.size(), "searh_pattern");
-    PutU32(out, static_cast<uint32_t>(searh_pattern.size()));
-    out.append(searh_pattern);
+    EnsureU32Len(search_pattern.size(), "search_pattern");
+    PutU32(out, static_cast<uint32_t>(search_pattern.size()));
+    out.append(search_pattern);
     return out;
 }
 
@@ -326,7 +325,7 @@ std::optional<SearchPatternH> SearchPatternH::decode(const std::string& buf) {
 
     uint32_t patt_len = 0;
     if (!GetU32(buf, off, patt_len)) return std::nullopt;
-    if (!GetBytes(buf, off, patt_len, pat.searh_pattern)) return std::nullopt;
+    if (!GetBytes(buf, off, patt_len, pat.search_pattern)) return std::nullopt;
 
     return pat;
 }
@@ -334,7 +333,7 @@ std::optional<SearchPatternH> SearchPatternH::decode(const std::string& buf) {
 
 void SearchPatternH::dump() const {
     std::cout << "SearchPatternH { name=\"" << sstable_name
-              << "\", searh_pattern_len=" << searh_pattern.size() << " }\n";
+              << "\", searh_pattern_len=" << search_pattern.size() << " }\n";
 }
 
 // ======= SearchPackageH =======

@@ -24,12 +24,12 @@ public:
 
     int flushMappingTable(const std::unordered_map<std::string, uint64_t>& mappingTable);
     int readMappingTable(uint64_t lpn, uint8_t* buffer, size_t size);
-    int flushSStable(uint64_t lbn, uint8_t* buffer, size_t size);
-    int eraseSStable(uint64_t lbn);
-    int readSStable(uint64_t lbn, uint8_t* buffer, size_t size);
-    int readSStablePage(uint64_t lpn, uint8_t* buffer, size_t size);
-    int readLog(uint64_t lpn, uint8_t* buffer, size_t size);
-    int writeLog(uint64_t lpn, uint8_t* buffer, size_t size);
+    int writeBlock(uint64_t lbn, uint8_t* buffer, size_t size);
+    int eraseBlock(uint64_t lbn);
+    int readBlock(uint64_t lbn, uint8_t* buffer, size_t size);
+    // int readSStablePage(uint64_t lpn, uint8_t* buffer, size_t size);
+    int readPage(uint64_t lpn, uint8_t* buffer, size_t size);
+    int writePage(uint64_t lpn, uint8_t* buffer, size_t size);
 
 private:
 

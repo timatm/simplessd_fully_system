@@ -147,7 +147,7 @@ int main() {
         return -1;
     }
     
-    for (int i = 0; i < 1000000; ++i) {
+    for (int i = 0; i < 100000; ++i) {
         std::string key = "key" + std::to_string(i);
         std::string value = "value" + std::to_string(i);
         Status s = db.put(key, value);
@@ -181,7 +181,13 @@ int main() {
     std::string value;
     std::set<std::string> result;
 
-
+    // db.search("key37",value);
+    auto lbn = db.getLogManager()->get_log_list_front();
+    uint32_t aaa;
+    auto recs = db.getLogManager()->readLogBlock(lbn,db.getLogManager()->get_first_block_offset_(),aaa);
+    for(auto &r : recs){
+        r.Dump();
+    }
     // db.test();
 
 
@@ -201,18 +207,18 @@ int main() {
     // db.range_query("key0","key9999",result);
 
 
-    std::string val;
-    db.get("key0",val);
-    for (int i = 0; i < 1000; ++i) {
-        std::string key = "key" + std::to_string(i*1000);
-        Status s = db.get(key, val);
-        if (!s.ok()) {
-            std::cerr << "Put failed at index " << i << " with key: " << key << "\n";
-        }
-        pr_debug("===RESULT===");
-        std::cout << "KEY: " <<  key << "  VAL :" << val << std::endl;
-    }
-    std::cout << "Iterator traverse is done"<< std::endl;
+    // std::string val;
+    // db.get("key0",val);
+    // for (int i = 0; i < 1000; ++i) {
+    //     std::string key = "key" + std::to_string(i*1000);
+    //     Status s = db.get(key, val);
+    //     if (!s.ok()) {
+    //         std::cerr << "Put failed at index " << i << " with key: " << key << "\n";
+    //     }
+    //     pr_debug("===RESULT===");
+    //     std::cout << "KEY: " <<  key << "  VAL :" << val << std::endl;
+    // }
+    // std::cout << "Iterator traverse is done"<< std::endl;
 }
 
 

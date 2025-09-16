@@ -22,6 +22,9 @@ public:
     int nvme_allcate_lbn(char *buffer) override;
     int nvme_dump_ims() override;
     int nvme_read_ssKeyRange(std::string, char* buffer) override;
+
+    int nvme_write_block(uint32_t lbn, char* buffer) override;
+    int nvme_read_block(uint32_t lbn, char* buffer) override;
 private:
     IMS_interface ims;
 };

@@ -114,7 +114,7 @@ int IMS_interface::write_sstable(hostInfo *request, uint8_t *buffer) {
     pr_info("Allocated LBN %lu for file: %s", lbn, filename.c_str());
 
     if (ENABLE_DISK) {
-        err = persistenceManager_->flushSStable(lbn, buffer, BLOCK_SIZE);
+        err = persistenceManager_->writeBlock(lbn, buffer, BLOCK_SIZE);
     }
 
     if (err == OPERATION_SUCCESS) {
@@ -158,7 +158,7 @@ int IMS_interface::read_sstable(hostInfo *request, uint8_t *buffer) {
     request->lbn = it->second;
 
     if (ENABLE_DISK) {
-        err = persistenceManager_->readSStable(request->lbn, buffer, BLOCK_SIZE);
+        err = persistenceManager_->readBlock(request->lbn, buffer, BLOCK_SIZE);
     }
 
     if (err == OPERATION_SUCCESS) {
@@ -175,7 +175,7 @@ int IMS_interface::erase_sstable(hostInfo *request){
     int err = OPERATION_SUCCESS;
     std::string filename = request->filename;
     auto lbn = mappingTable_->getLBN(filename);
-    err = persistenceManager_->eraseSStable(lbn);
+    err = persistenceManager_->eraseBlock(lbn);
     if(err == OPERATION_SUCCESS){
         mappingTable_->remove_mapping(filename);
     }
@@ -207,7 +207,7 @@ int IMS_interface::read_ssKeyRange(hostInfo *request, uint8_t* buffer){
     request->lbn = it->second;
 
     if (ENABLE_DISK) {
-        err = persistenceManager_->readLog(LBN2LPN(request->lbn), buffer, IMS_PAGE_SIZE);
+        err = persistenceManager_->readPage(LBN2LPN(request->lbn), buffer, IMS_PAGE_SIZE);
     }
 
     if (err == OPERATION_SUCCESS) {
@@ -453,7 +453,7 @@ int IMS_interface::write_log(uint64_t lpn,uint8_t *buffer){
         return OPERATION_FAILURE;
     }
     int err = OPERATION_SUCCESS;
-    err = get_persistenceManager()->writeLog(lpn,buffer,IMS_PAGE_SIZE);
+    err = get_persistenceManager()->writePage(lpn,buffer,IMS_PAGE_SIZE);
     if( err != OPERATION_SUCCESS){
         pr_debug("Write value log failed at LPN %lu", lpn);
     }
@@ -466,12 +466,50 @@ int IMS_interface::read_log(uint64_t lpn,uint8_t *buffer){
         return OPERATION_FAILURE;
     }
     int err = OPERATION_SUCCESS;
-    err = get_persistenceManager()->readLog(lpn,buffer,IMS_PAGE_SIZE);
+    err = get_persistenceManager()->readPage(lpn,buffer,IMS_PAGE_SIZE);
     if( err != OPERATION_SUCCESS){
         pr_debug("Read value log failed at LPN %lu", lpn);
     }
     return err;
 }
+
+int IMS_interface::write_block(uint32_t lbn, uint8_t* buffer){
+    int err = OPERATION_FAILURE;
+    if (buffer == nullptr) {
+        pr_debug("Read log failed: null request or buffer");
+        return err;
+    }
+    if (lbn > LBN_NUM) {
+        pr_debug("LBN is out of range");
+        return err;
+    }
+    
+    err = get_persistenceManager()->writeBlock(lbn,buffer,BLOCK_SIZE);
+    if( err != OPERATION_SUCCESS){
+        pr_debug("Write block failed at LBN %lu", lbn); err;
+    }
+    return err;
+}
+
+
+int IMS_interface::read_block(uint32_t lbn, uint8_t* buffer){
+    int err = OPERATION_FAILURE;
+    if (buffer == nullptr) {
+        pr_debug("Read log failed: null request or buffer");
+        return err;
+    }
+    if (lbn > LBN_NUM) {
+        pr_debug("LBN is out of range");
+        return err;
+    }
+    err = get_persistenceManager()->readBlock(lbn,buffer,BLOCK_SIZE);
+    if( err != OPERATION_SUCCESS){
+        pr_debug("Read block failed at LBN %lu", lbn);
+    }
+    return err;
+}
+
+
 
 void IMS_interface::reset_superPage(super_page *sp) {
     if (sp == nullptr) {

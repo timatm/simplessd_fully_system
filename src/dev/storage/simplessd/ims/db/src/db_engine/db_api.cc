@@ -84,12 +84,11 @@ Status API::put(std::string key ,std::string value){
         std::lock_guard<std::mutex> lk(mu_);
         if (!memtable_) memtable_ = std::make_unique<MemTable>();
         if (memtable_->memTableIsFull()) {
-            // 把 unique_ptr 轉成 shared_ptr
             imm_hold = std::shared_ptr<MemTable>(std::move(memtable_));
-            immutable_memtable_ = imm_hold;              // 讓讀者可見
-            memtable_ = std::make_unique<MemTable>();    // 新 memtable
+            immutable_memtable_ = imm_hold;              
+            memtable_ = std::make_unique<MemTable>();
 
-            minK = imm_hold->getMinKey();                // by value
+            minK = imm_hold->getMinKey();
             maxK = imm_hold->getMaxKey();
             need_flush = true;
         }
@@ -208,6 +207,62 @@ Status API::get(std::string key,std::string& value){
 }
 
 
+
+Status API::get(std::string key,Record& rec){
+    if(key.empty()){
+        return Status::IOError("Key string is empty");
+    }
+    // std::cout << "Search key: " << key << std::endl;
+    Key interkey(key);
+    InternalKey search_key(key);
+    auto result = memtable_->get_record(key);
+    if(!result.has_value() && immutable_memtable_){
+        result = immutable_memtable_->get_record(key);
+    }
+    int level = 0;
+    if(!result.has_value()){
+        auto sstables = lsmTree_->search_key(interkey);
+        char * buffer = (char *)allocateAligned(BLOCK_SIZE);
+        while(!result.has_value() && !sstables.empty()){
+            auto sstable = sstables.front();
+            // std::cout   << "Find SStable: " << sstable->filename << "  Key range [ " << sstable->rangeMin.toString() << " ~ "
+            //             << sstable->rangeMax.toString() << " ]" <<std::endl;
+            sstables.pop();
+            sstableManager_->readSSTable(sstable->filename,buffer);
+            getSSTable()->waitAllTasksDone();
+            auto keys = parse_sstable(buffer);
+            auto it = keys.find(search_key);
+            if(it != keys.end()){
+                // it->dump();
+                uint32_t lpn = it->value_ptr.lpn;
+                uint32_t offset = it->value_ptr.offset;
+                if(it->info.type == static_cast<uint8_t>(ValueType::kTypeDeletion) ){
+                    std::cout << "Key is not found ,becasue this key has been deleted" << std::endl;
+                    free(buffer);
+                    return Status::NotFound("The key has been deleted");
+                }
+                auto record = logManager_->readLog(lpn, offset);
+                // record->Dump();
+                if(record.has_value()){
+                    result = record;
+                }
+                else{
+                    pr_debug("Failed to read log for key: %s at LPN: %u, offset: %u", key.c_str(), lpn, offset);
+                    free(buffer);
+                    return Status::IOError("Failed to read log for key");
+                }
+                
+            }
+        }
+        free(buffer);
+    }
+    if(!result.has_value()){
+        return Status::NotFound("The key isn't in the DB");
+    }
+    rec = result.value();
+    return Status::OK();
+}
+
 std::set<InternalKey ,SetComparator> API::parse_sstable(char* buffer) {
     size_t offset = 0;
     std::set<InternalKey ,SetComparator> keys;
@@ -287,7 +342,7 @@ std::set<std::string> API::read_key_range(const std::string& filename){
     if (!buffer) {
         throw std::runtime_error("Failed to allocate buffer for reading key range");
     }
-    int err = nvme_->nvme_read_sstable(filename, buffer);
+    int err = nvme_->nvme_read_ssKeyRange(filename, buffer);
     if(err == COMMAND_FAILED){
         free(buffer);
         throw std::runtime_error("Failed to read SSTable: " + filename);
@@ -302,26 +357,67 @@ std::set<std::string> API::read_key_range(const std::string& filename){
 }
 
 
-SearchPattern API::generate_search_slot(const std::string& filename, const Key& key,const std::set<std::string>& keys){
+SearchPatternD API::generate_SearchPatternD(const std::string& filename, const Key& searchKey,const std::set<std::string>& keys){
     if(filename.empty()){
         throw std::invalid_argument("Filename cannot be empty");
     }
-    if (filename.size() != 36) {
-        throw std::invalid_argument("sstable_name must be 36 bytes");
+    if (filename.size() != 35) {
+        throw std::invalid_argument("sstable_name must be 35 bytes");
     }
     if(keys.empty()){
         throw std::invalid_argument("Keys set cannot be empty");
     }
-
-    auto it = keys.upper_bound(key.toString());
+    if(searchKey.key_size == 0){
+        throw std::invalid_argument("Search key cannot be empty");
+    }
+    auto it = keys.upper_bound(searchKey.toString());
     if(it == keys.begin()){
         throw std::out_of_range("No predecessor: provided key is smaller than the smallest key");
     }
-    SearchPattern pattern;
+    SearchPatternD pattern;
     pattern.slot_index = static_cast<uint32_t>(std::distance(keys.begin(), std::prev(it)));
     pattern.sstable_name = filename;
     return pattern;
 }
+
+SearchPatternH API::generate_SearchPatternH(const std::string& filename,const Key& searchKey,const std::set<std::string>& keys){
+    if (filename.empty()) throw std::invalid_argument("Filename cannot be empty");
+    constexpr std::size_t kSSTNameLen = 35;
+    if (filename.size() != kSSTNameLen) throw std::invalid_argument("sstable_name must be 36 bytes");
+    if (keys.empty()) throw std::invalid_argument("Keys set cannot be empty");
+    if (searchKey.key_size == 0) throw std::invalid_argument("Search key cannot be empty");
+
+    auto it = keys.upper_bound(searchKey.toString());
+    if (it == keys.begin()) {
+        throw std::out_of_range("No predecessor: provided key is smaller than the smallest key");
+    }
+    const size_t slot_index = static_cast<size_t>(std::distance(keys.begin(), std::prev(it)));
+
+    const std::string enc = searchKey.encode();
+    if (enc.empty()) {
+        throw std::invalid_argument("Encoded search key is empty");
+    }
+
+   
+    const size_t num_slots = IMS_PAGE_SIZE / SLOT_SIZE;
+    if (num_slots == 0 || IMS_PAGE_SIZE % SLOT_SIZE != 0) {
+        throw std::logic_error("Invalid IMS_PAGE_SIZE / SLOT_SIZE configuration");
+    }
+    if (slot_index >= num_slots) {
+        throw std::out_of_range("slot_index is out of range for one page");
+    }
+    if (enc.size() > SLOT_SIZE) {
+        throw std::length_error("Encoded key doesn't fit into one SLOT");
+    }
+    std::string search_pattern(IMS_PAGE_SIZE, static_cast<char>(0xFF));
+    std::memcpy(search_pattern.data() + slot_index * SLOT_SIZE, enc.data(), enc.size());
+
+    SearchPatternH pattern;
+    pattern.sstable_name = filename;
+    pattern.search_pattern = std::move(search_pattern);
+    return pattern;
+}
+
 
 std::set<InternalKey ,SetComparator> API::parse_sstable_page(char* buffer) {
     size_t offset = 0;
@@ -341,6 +437,8 @@ std::set<InternalKey ,SetComparator> API::parse_sstable_page(char* buffer) {
     return keys;
 }
 
+
+#if (SEARCH_PATTERN == 0)
 Status API::search(std::string key ,std::string& value){
     if(key.empty()){
         return Status::IOError("Key string is empty");
@@ -348,17 +446,27 @@ Status API::search(std::string key ,std::string& value){
     std::cout << "Search key: " << key << std::endl;
     Key userKey(key);
     InternalKey internalKey(key);
-    auto result = memtable_->Get(key);
-    if(!result.has_value() && immutable_memtable_){
-        result = immutable_memtable_->Get(key);
+    if (memtable_) {
+        auto result = memtable_->Get(key);
+        if (!result.has_value() && immutable_memtable_) {
+            result = immutable_memtable_->Get(key);
+        }
+        if (result.has_value()) {
+            Record rec = Record::Decode(*result);
+            if(rec.internal_key.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion)){
+                return Status::NotFound("The key has been deleted");
+            }
+            value = rec.value;
+            return Status::OK();
+        }
     }
-    if(result.has_value()){
-        value = result.value();
+
+    auto sstables = lsmTree_->search_key(userKey);
+    if (sstables.empty()){
+        pr_info("No candidate SSTables found for key: %s", key.c_str());
         return Status::OK();
     }
-    auto sstables = lsmTree_->search_key(userKey);
-    if (sstables.empty()) return Status::NotFound("No candidate SSTables");
-    SearchPackage search_package;
+    SearchPackageD search_package;
 
 
     while( !sstables.empty() ){
@@ -366,48 +474,149 @@ Status API::search(std::string key ,std::string& value){
         std::cout   << "Find SStable: " << sstable->filename << "  Key range [ " << sstable->rangeMin.toString() << " ~ "
                     << sstable->rangeMax.toString() << " ]" <<std::endl;
         sstables.pop();
-        SearchPattern pattern_info;
+        SearchPatternD pattern_info;
         switch (packing_){
-        case PackingType::kKeyPerPage:{
-            pattern_info.slot_index = 0;
-            break;
-        }
-        case PackingType::kHash:{
-            pattern_info.slot_index = HashModN(internalKey, SLOT_NUM_PER_PAGE); 
-            break;
-        }
-            
-        case PackingType::kKeyRange:{
-            auto key_range = read_cache_->get(sstable->filename);
-            if(key_range == std::nullopt){
-                key_range = read_key_range(sstable->filename);
-                if(key_range == std::nullopt){
-                    return Status::NotFound("Key not found in SSTable: " + sstable->filename);
-                }
-                read_cache_->put(sstable->filename, *key_range);
+            case PackingType::kKeyPerPage:{
+                pattern_info.slot_index = 0;
+                break;
             }
-            pattern_info = generate_search_slot(sstable->filename, userKey, *key_range);
-            break;
+            case PackingType::kHash:{
+                pattern_info.slot_index = HashModN(internalKey, SLOT_NUM_PER_PAGE); 
+                break;
+            }
+                
+            case PackingType::kKeyRange:{
+                auto key_range = keyRangeCache_->get(sstable->filename);
+                if(key_range == std::nullopt){
+                    key_range = read_key_range(sstable->filename);
+                    if(!key_range.has_value()){
+                        return Status::NotFound("Key not found in SSTable: " + sstable->filename);
+                    }
+                    keyRangeCache_->put(sstable->filename, *key_range);
+                }
+                pattern_info = generate_SearchPatternD(sstable->filename, userKey, *key_range);
+                break;
+            }
+            default:
+                return Status::NotFound("Unknown packing type");
         }
-        default:
-            return Status::NotFound("Unknown packing type");
-        }
-        pattern_info.sstable_name = sstable->filename;    
+        pattern_info.sstable_name = sstable->filename;
         search_package.searchPatterns.emplace_back(pattern_info);
     }
     if (search_package.searchPatterns.empty()) {
         return Status::NotFound("No valid SSTable patterns");
     }
-
+    search_package.search_key = userKey.toString();
     search_package.header.pattern_num = static_cast<uint32_t>(search_package.searchPatterns.size());
-    auto encoded_package = search_package.encode();
-    char* buffer  = (char*)allocateAligned(BLOCK_SIZE);
+    const std::string encoded_package = search_package.encode();
+
+    if (encoded_package.empty()) {
+        return Status::IOError("Encoded search package is empty");
+    }
+    search_package.dump();
+    char* buffer  = (char*)allocateAligned(encoded_package.size());
     memcpy(buffer, encoded_package.data(), encoded_package.size());
+
+    // TODO  
     // nvme_->nvme_write_search_package(buffer, encoded_package.size());
 
+    free(buffer);
     
     return Status::OK();
 }
+#elif (SEARCH_PATTERN == 1)
+Status API::search(std::string key ,std::string& value){
+    if(key.empty()){
+        return Status::IOError("Key string is empty");
+    }
+    std::cout << "Search key: " << key << std::endl;
+    Key userKey(key);
+    InternalKey internalKey(key);
+    if (memtable_) {
+        auto result = memtable_->Get(key);
+        if (!result.has_value() && immutable_memtable_) {
+            result = immutable_memtable_->Get(key);
+        }
+        if (result.has_value()) {
+            Record rec = Record::Decode(*result);
+            if(rec.internal_key.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion)){
+                return Status::NotFound("The key has been deleted");
+            }
+            value = rec.value;
+            return Status::OK();
+        }
+    }
+
+    auto sstables = lsmTree_->search_key(userKey);
+    if (sstables.empty()){
+        pr_info("No candidate SSTables found for key: %s", key.c_str());
+        return Status::OK();
+    }
+    SearchPackageH search_package;
+
+
+    while( !sstables.empty() ){
+        auto sstable = sstables.front();
+        std::cout   << "Find SStable: " << sstable->filename << "  Key range [ " << sstable->rangeMin.toString() << " ~ "
+                    << sstable->rangeMax.toString() << " ]" <<std::endl;
+        sstables.pop();
+        SearchPatternH pattern_info;
+        switch (packing_){
+            case PackingType::kKeyPerPage:{
+                std::string enc = userKey.encode();
+                pattern_info.search_pattern = std::string(IMS_PAGE_SIZE, static_cast<char>(0xFF));
+                memcpy(pattern_info.search_pattern.data(), enc.data(), enc.size());
+                break;
+            }
+            case PackingType::kHash:{
+                std::string enc = userKey.encode();
+                pattern_info.search_pattern = std::string(IMS_PAGE_SIZE, static_cast<char>(0xFF));
+                size_t slot_index = HashModN(internalKey, SLOT_NUM_PER_PAGE); 
+                memcpy(pattern_info.search_pattern.data() + slot_index*SLOT_SIZE, enc.data(), enc.size());
+                break;
+            }
+                
+            case PackingType::kKeyRange:{
+                auto key_range = keyRangeCache_->get(sstable->filename);
+                if(key_range == std::nullopt){
+                    key_range = read_key_range(sstable->filename);
+                    if(!key_range.has_value()){
+                        return Status::NotFound("Key not found in SSTable: " + sstable->filename);
+                    }
+                    keyRangeCache_->put(sstable->filename, *key_range);
+                }
+                pattern_info = generate_SearchPatternH(sstable->filename, userKey, *key_range);
+                break;
+            }
+            default:
+                return Status::NotFound("Unknown packing type");
+        }
+        pattern_info.sstable_name = sstable->filename;
+        search_package.searchPatterns.emplace_back(pattern_info);
+    }
+    if (search_package.searchPatterns.empty()) {
+        return Status::NotFound("No valid SSTable patterns");
+    }
+    search_package.search_key = userKey.toString();
+    search_package.header.pattern_num = static_cast<uint32_t>(search_package.searchPatterns.size());
+    const std::string encoded_package = search_package.encode();
+
+    if (encoded_package.empty()) {
+        return Status::IOError("Encoded search package is empty");
+    }
+
+    char* buffer  = (char*)allocateAligned(encoded_package.size());
+    memcpy(buffer, encoded_package.data(), encoded_package.size());
+
+    // TODO  
+    // nvme_->nvme_write_search_package(buffer, encoded_package.size());
+
+    free(buffer);
+    
+    return Status::OK();
+}
+
+#endif
 
 Status API::range_query(std::string start_key,
                         std::string end_key,
@@ -725,4 +934,82 @@ void API::OnSSTableWriteFailed(const sstable_info& info, int err) {
     std::lock_guard<std::mutex> lk(mu_);
     std::cerr << "[API] Flush failed for " << info.filename << ", err=" << err
               << " (keeping immutable memtable for retry)\n";
+}
+
+
+void API::log_garbage_collection(){
+    if(logManager_->get_log_block_num() < LOG_GC_THRESHOLD){
+        return;
+    }
+    int gcBlockNum = GC_BLOCK_NUM;
+    while(gcBlockNum > 0){
+        uint32_t valid_offset = logManager_->get_first_block_offset_();
+        uint32_t lbn = logManager_->get_log_list_front();
+        if(lbn >= LBN_NUM){
+            pr_debug("Invalid LBN for GC: %u", lbn);
+            break;
+        }
+        if(valid_offset >= BLOCK_SIZE){
+            pr_debug("Invalid offset for GC: %u", valid_offset);
+            break;
+        }
+        uint32_t next_block_valid_offset = 0;
+        auto records = logManager_->readLogBlock(lbn,valid_offset,next_block_valid_offset);
+
+        if (next_block_valid_offset == UINT32_MAX) {
+            pr_debug("GC cross-page read failed for LBN %u; abort this GC cycle to avoid data loss", lbn);
+            break;
+        }
+        if (next_block_valid_offset >= BLOCK_SIZE) {
+            pr_debug("GC got invalid next_block_valid_offset=%u for LBN %u; abort", next_block_valid_offset, lbn);
+            break;
+        }
+        if (records.empty() && next_block_valid_offset == 0) {
+            pr_debug("GC readLogBlock returned empty for LBN %u (offset=%u); stop to avoid data loss",
+                     lbn, valid_offset);
+            break;
+        }
+        
+
+        Record rec;
+        Status s;
+        for(const auto& record : records){
+            if (static_cast<uint8_t>(record.internal_key.info.type) == static_cast<uint8_t>(ValueType::kTypeDeletion)) {
+                pr_debug("GC skip tombstone key: %s", record.internal_key.UserKey().c_str());
+                continue;
+            }
+            s = get(record.internal_key.UserKey(),rec);
+            if(!s.ok()){
+                if(s.IsNotFound()){
+                    pr_debug("GC key: %s is deleted", record.internal_key.UserKey().c_str());
+                    continue;
+                } else {
+                    pr_debug("Failed to get key: %s during GC", record.internal_key.UserKey().c_str());
+                    continue;
+                }
+            }
+
+            bool still_live =
+                rec.internal_key.value_ptr.lpn    == record.internal_key.value_ptr.lpn &&
+                rec.internal_key.value_ptr.offset == record.internal_key.value_ptr.offset &&
+                rec.value_size                    == record.value_size;
+
+            if (still_live) {
+                pr_info("GC rewrite live key: %s", record.internal_key.UserKey().c_str());
+                Status ps = put(record.internal_key.UserKey(), record.value); // 或 std::move(record.value)
+                if (!ps.ok()) {
+                    pr_debug("GC put() failed for key: %s: %s",
+                            record.internal_key.UserKey().c_str(), ps.ToString().c_str());
+                }
+            }
+            else{
+                pr_debug("GC key: %s has newer version, skip", record.internal_key.UserKey().c_str());
+            }
+        }
+        
+
+        logManager_->remove_log_front();
+        logManager_->set_first_block_offset_(next_block_valid_offset);
+        --gcBlockNum;
+    }
 }

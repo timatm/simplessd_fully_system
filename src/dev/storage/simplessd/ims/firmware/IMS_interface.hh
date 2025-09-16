@@ -44,6 +44,9 @@ public:
     int allocate_block(uint64_t *);
     int write_log(uint64_t,uint8_t *buffer);
     int read_log(uint64_t,uint8_t *buffer);
+    int write_block(uint32_t lbn, uint8_t* buffer);
+    int read_block(uint32_t lbn, uint8_t* buffer);
+
     int close_DB();
     int open_DB(uint8_t* buffer, size_t buffer_size);
     
