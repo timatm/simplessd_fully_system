@@ -6,6 +6,12 @@ enum class PackingType {
     kKeyRange       = 0x2,
 };
 
+enum PutType{
+    kPutByUser,
+    kPutByGC
+};
+
+
 #define PACKING_T (PackingType::kKeyRange)
 
 #define LEVEL0_MAX 4
@@ -25,7 +31,7 @@ enum class PackingType {
 // 1: HOST
 #define SEARCH_PATTERN 0
 
-#define LOG_GC_THRESHOLD 20
-#define GC_BLOCK_NUM 5
+#define LOG_GC_THRESHOLD 3
+#define GC_BLOCK_NUM 1
 
 #endif  // __OPTIONS__HH__

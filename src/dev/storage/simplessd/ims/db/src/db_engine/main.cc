@@ -146,8 +146,25 @@ int main() {
         std::cerr << "Failed to open database: " << err.ToString() << "\n";
         return -1;
     }
-    
-    for (int i = 0; i < 100000; ++i) {
+    db.dump_all();
+    for (int i = 0; i < 2000; ++i) {
+        std::string key = "key" + std::to_string(i);
+        std::string value = "value" + std::to_string(i);
+        Status s = db.put(key, value);
+        if (!s.ok()) {
+            std::cerr << "Put failed at index " << i << " with key: " << key << "\n";
+        }
+    }
+
+    for (int i = 0; i < 2000; ++i) {
+        std::string key = "key" + std::to_string(i);
+        std::string value = "value" + std::to_string(i+10);
+        Status s = db.put(key, value);
+        if (!s.ok()) {
+            std::cerr << "Put failed at index " << i << " with key: " << key << "\n";
+        }
+    }
+    for (int i = 2001; i < 100000; ++i) {
         std::string key = "key" + std::to_string(i);
         std::string value = "value" + std::to_string(i);
         Status s = db.put(key, value);
@@ -163,7 +180,7 @@ int main() {
     // std::cout << "Inserted 129 key-value pairs successfully.\n";
     // db.getSSTable()->waitAllTasksDone();
     // db.dump_memtable();
-    db.dump_lsmtree();
+    db.dump_all();
     Options opts;
     
     // SstableIterator iter(db.getSSTable(),db.getLogManager(),&icmp,"00000000000000000000000000000000000",db.getPackType());
@@ -182,12 +199,12 @@ int main() {
     std::set<std::string> result;
 
     // db.search("key37",value);
-    auto lbn = db.getLogManager()->get_log_list_front();
-    uint32_t aaa;
-    auto recs = db.getLogManager()->readLogBlock(lbn,db.getLogManager()->get_first_block_offset_(),aaa);
-    for(auto &r : recs){
-        r.Dump();
-    }
+    // auto lbn = db.getLogManager()->get_log_list_front();
+    // uint32_t aaa;
+    // auto recs = db.getLogManager()->readLogBlock(lbn,db.getLogManager()->get_first_block_offset_(),aaa);
+    // for(auto &r : recs){
+    //     r.Dump();
+    // }
     // db.test();
 
 

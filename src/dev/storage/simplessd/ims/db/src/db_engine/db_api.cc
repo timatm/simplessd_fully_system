@@ -74,8 +74,16 @@ Status API::open() {
     return Status::OK();
 }
 
+Status API::put(std::string key, std::string value) {
+    return put_impl(std::move(key), std::move(value), PutType::kPutByUser);
+}
 
-Status API::put(std::string key ,std::string value){
+Status API::put_from_gc(std::string key, std::string value) {
+    return put_impl(std::move(key), std::move(value), PutType::kPutByGC);
+}
+
+
+Status API::put_impl(std::string key ,std::string value,PutType t){
     std::shared_ptr<MemTable> imm_hold;
     InternalKey minK, maxK;
     bool need_flush = false;
@@ -109,6 +117,9 @@ Status API::put(std::string key ,std::string value){
     Record internal_value(internal_key,value);
     logManager_->writeLog(internal_value);
     memtable_->Put(internal_value);
+    if(logManager_->get_log_block_num() >= LOG_GC_THRESHOLD && t == PutType::kPutByUser){
+        log_garbage_collection();
+    }
     return Status::OK();
 }
 
@@ -688,7 +699,7 @@ void API::compaction() {
         return InternalKey(uk, UINT64_MAX, ValueType::kTypeMin);
     };
     auto UpperSentinel = [](const std::string& uk) {
-        return InternalKey(uk, 0,          ValueType::kTypeMax);
+        return InternalKey(uk,0,ValueType::kTypeMax);
     };
 
     bool compaction = false;
@@ -938,9 +949,6 @@ void API::OnSSTableWriteFailed(const sstable_info& info, int err) {
 
 
 void API::log_garbage_collection(){
-    if(logManager_->get_log_block_num() < LOG_GC_THRESHOLD){
-        return;
-    }
     int gcBlockNum = GC_BLOCK_NUM;
     while(gcBlockNum > 0){
         uint32_t valid_offset = logManager_->get_first_block_offset_();
@@ -973,7 +981,7 @@ void API::log_garbage_collection(){
 
         Record rec;
         Status s;
-        for(const auto& record : records){
+        for(const auto record : records){
             if (static_cast<uint8_t>(record.internal_key.info.type) == static_cast<uint8_t>(ValueType::kTypeDeletion)) {
                 pr_debug("GC skip tombstone key: %s", record.internal_key.UserKey().c_str());
                 continue;
@@ -988,7 +996,23 @@ void API::log_garbage_collection(){
                     continue;
                 }
             }
-
+            // std::cout << "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++" << std::endl;
+            // record.Dump();
+            // std::cout << "===========================================================" << std::endl;
+            // rec.Dump();
+            // std::cout << "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++" << std::endl;
+            // if(rec.internal_key.value_ptr.lpn != record.internal_key.value_ptr.lpn){
+            //     pr_debug("log lpn is mismatch,LPN(%lu) in log , but LPN(%lu) in LSM tree"
+            //             ,record.internal_key.value_ptr.lpn,rec.internal_key.value_ptr.lpn);
+            // }
+            // if(rec.internal_key.value_ptr.offset != record.internal_key.value_ptr.offset){
+            //     pr_debug("log offset is mismatch,offset(%lu) in log , but offset(%lu) in LSM tree"
+            //             ,record.internal_key.value_ptr.offset,rec.internal_key.value_ptr.offset);
+            // }
+            // if(rec.value_size != record.value_size){
+            //     pr_debug("log value size is mismatch,offset(%lu) in log , but offset(%lu) in LSM tree"
+            //             ,record.value_size,rec.value_size);
+            // }
             bool still_live =
                 rec.internal_key.value_ptr.lpn    == record.internal_key.value_ptr.lpn &&
                 rec.internal_key.value_ptr.offset == record.internal_key.value_ptr.offset &&
@@ -996,7 +1020,7 @@ void API::log_garbage_collection(){
 
             if (still_live) {
                 pr_info("GC rewrite live key: %s", record.internal_key.UserKey().c_str());
-                Status ps = put(record.internal_key.UserKey(), record.value); // 或 std::move(record.value)
+                Status ps = put_from_gc(record.internal_key.UserKey(), record.value); // 或 std::move(record.value)
                 if (!ps.ok()) {
                     pr_debug("GC put() failed for key: %s: %s",
                             record.internal_key.UserKey().c_str(), ps.ToString().c_str());

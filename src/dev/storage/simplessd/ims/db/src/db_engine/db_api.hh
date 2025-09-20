@@ -25,11 +25,15 @@ public:
     // std::unique_ptr<ReadCache> read_cache_;
     std::unique_ptr<ReadCache> keyRangeCache_;
 
+    
+
     Status open();
     Status get(std::string key ,std::string& value);
     Status get(std::string key,Record& value);
     Status delete_key(std::string key ,std::string value);
     Status put(std::string key ,std::string value);
+    Status put_from_gc(std::string key ,std::string value);
+    Status put_impl(std::string key ,std::string value,PutType);
     Status search(std::string key ,std::string& value);
     Status range_query(std::string start_key, std::string end_key, std::set<std::string>& result_set);
 
