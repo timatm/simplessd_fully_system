@@ -17,6 +17,8 @@ public:
     LogManager(INVMEDriver& nvme);
     ~LogManager() = default;
     //TODO
+    void init();
+
     void writeLog(const Record& log);
     std::optional<Record> readLog(uint32_t lpn, uint32_t offset);
     std::vector<Record> readLogBlock(uint32_t lbn,uint32_t valid_offset,uint32_t &nextBlockValidOffset);

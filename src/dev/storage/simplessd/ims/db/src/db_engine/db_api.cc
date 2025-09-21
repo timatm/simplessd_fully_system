@@ -33,6 +33,7 @@ API::API(){
     keyRangeCache_ = std::make_unique<ReadCache>();
 
 }
+
 Status API::open() {
     pr_info("Opening database...");
 
@@ -73,6 +74,11 @@ Status API::open() {
 
     return Status::OK();
 }
+
+Status API::close(){
+    pr_info("Closing database  .......");
+}
+
 
 Status API::put(std::string key, std::string value) {
     return put_impl(std::move(key), std::move(value), PutType::kPutByUser);

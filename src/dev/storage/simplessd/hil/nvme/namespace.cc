@@ -20,7 +20,7 @@
 #include "hil/nvme/namespace.hh"
 #include "ims/firmware/IMS_interface.hh"
 #include "ims/firmware/persistence.hh"
-#include "ims/firmware/log.hh"
+#include "ims/include/log.hh"
 #include "hil/nvme/subsystem.hh"
 #include "util/algorithm.hh"
 

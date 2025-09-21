@@ -36,6 +36,7 @@ public:
     Status put_impl(std::string key ,std::string value,PutType);
     Status search(std::string key ,std::string& value);
     Status range_query(std::string start_key, std::string end_key, std::set<std::string>& result_set);
+    Status close();
 
 
     Status removeSSable(std::shared_ptr<TreeNode> rm);

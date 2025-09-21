@@ -224,8 +224,6 @@ static_assert(sizeof(super_page) == IMS_PAGE_SIZE, "super_page must be same to p
 // [mapping table setting start]
 #pragma pack(push, 1)
 struct mappingEntry {
-    
-
     uint64_t lbn;
     uint8_t level;
     uint8_t channel;

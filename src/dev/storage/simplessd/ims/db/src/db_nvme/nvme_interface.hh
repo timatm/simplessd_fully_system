@@ -48,6 +48,7 @@ public:
 
     // TODO
     virtual int nvme_write_metadata(uint64_t lpn,char *buffer,size_t size) = 0;
+    virtual int nvme_read_metadata(uint64_t lpn,char *buffer,size_t size) = 0;
 
     virtual int nvme_open_DB(uint8_t* buffer) = 0;
     virtual int nvme_close_DB() = 0;
