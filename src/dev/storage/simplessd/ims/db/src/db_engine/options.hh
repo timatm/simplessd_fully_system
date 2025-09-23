@@ -12,7 +12,7 @@ enum PutType{
 };
 
 
-#define PACKING_T (PackingType::kKeyRange)
+#define PACKING_T (PackingType::kKeyPerPage)
 
 #define LEVEL0_MAX 4
 #define LEVEL1_MAX 10
@@ -31,7 +31,7 @@ enum PutType{
 // 1: HOST
 #define SEARCH_PATTERN 0
 
-#define LOG_GC_THRESHOLD 3
+#define LOG_GC_THRESHOLD 1000
 #define GC_BLOCK_NUM 1
 
 #endif  // __OPTIONS__HH__

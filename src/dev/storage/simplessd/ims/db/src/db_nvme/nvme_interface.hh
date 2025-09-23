@@ -47,11 +47,14 @@ public:
 
 
     // TODO
-    virtual int nvme_write_metadata(uint64_t lpn,char *buffer,size_t size) = 0;
-    virtual int nvme_read_metadata(uint64_t lpn,char *buffer,size_t size) = 0;
+    virtual int nvme_write_metadata(char *buffer,size_t size) = 0;
+    virtual int nvme_read_metadata(char *buffer,size_t size) = 0;
+
+    // virtual int nvme_set_sstable_info(uint32_t *) = 0;
+    // virtual int nvme_set_log_info(uint32_t *) = 0;
 
     virtual int nvme_open_DB(uint8_t* buffer) = 0;
-    virtual int nvme_close_DB() = 0;
+    virtual int nvme_close_DB(uint8_t* buffer,size_t size) = 0;
     virtual int nvme_write_log(uint64_t lpn, char* buffer) = 0;
     virtual int nvme_read_log(uint64_t lpn, char* buffer) = 0;
     virtual int nvme_allcate_lbn(char* buffer) = 0;

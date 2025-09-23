@@ -39,7 +39,13 @@ int MyNVMeDriver::nvme_write_sstable(sstable_info info,char *buffer){
     }
     int err = 0;
     hostInfo req(info.filename,info.level,info.min,info.max);
-    err = ims.write_sstable(&req,reinterpret_cast<uint8_t*>(buffer));
+    std::string enc_hostinfo = req.encode();
+    err = ims.write_meta(reinterpret_cast<uint8_t*>(const_cast<char*>(enc_hostinfo.data())), enc_hostinfo.size());
+    if(err != OPERATION_SUCCESS){
+        pr_debug("Write hostInfo metadata failed");
+        return COMMAND_FAILED;
+    }
+    err = ims.write_sstable(reinterpret_cast<uint8_t*>(buffer));
     return err;
 }
 int MyNVMeDriver::nvme_write_log(uint64_t lpn,char *buffer){
@@ -62,7 +68,13 @@ int MyNVMeDriver::nvme_read_sstable(std::string filename,char *buffer){
     }
     int err;
     hostInfo req(filename);
-    err = ims.read_sstable(&req,reinterpret_cast<uint8_t*>(buffer));
+    std::string enc_hostinfo = req.encode();
+    err = ims.write_meta(reinterpret_cast<uint8_t*>(const_cast<char*>(enc_hostinfo.data())), enc_hostinfo.size());
+    if(err != OPERATION_SUCCESS){
+        pr_debug("Write hostInfo metadata failed");
+        return COMMAND_FAILED;
+    }
+    err = ims.read_sstable(reinterpret_cast<uint8_t*>(buffer));
     return err;
 }
 
@@ -88,7 +100,9 @@ int MyNVMeDriver::nvme_erase_sstable(std::string filename){
     }
     int err;
     hostInfo req(filename);
-    err = ims.erase_sstable(&req);
+    std::string enc_hostinfo = req.encode();
+    err = ims.write_meta(reinterpret_cast<uint8_t*>(const_cast<char*>(enc_hostinfo.data())), enc_hostinfo.size());
+    err = ims.erase_sstable();
     return err;
 }
 
@@ -114,12 +128,21 @@ int MyNVMeDriver::nvme_open_DB(uint8_t *buffer){
         return OPERATION_FAILURE;
     }
     int err;
-    err = ims.open_DB(buffer, DB_PAGE_SIZE);
+    uint32_t datalen;
+    err = ims.open_DB(&datalen);
+    err = nvme_read_metadata(reinterpret_cast<char*>(buffer), datalen);
     return err;
 }
-int MyNVMeDriver::nvme_close_DB(){
+int MyNVMeDriver::nvme_close_DB(uint8_t* buffer,size_t size){
+    if (buffer == nullptr) {
+        pr_debug("Open DB failed: null buffer");
+        return OPERATION_FAILURE;
+    }
     std::cout << "Close DB with buffer size: " <<  std::endl;
-    return OPERATION_SUCCESS;
+    int err;
+    uint32_t datalen;
+    err = ims.close_DB(buffer,size);
+    return err;
 }
 
 int MyNVMeDriver::nvme_read_ssKeyRange(std::string filename, char* buffer){
@@ -135,13 +158,12 @@ int MyNVMeDriver::nvme_read_ssKeyRange(std::string filename, char* buffer){
 
 
 
-int MyNVMeDriver::nvme_write_metadata(uint64_t lpn,char *buffer,size_t size){
+int MyNVMeDriver::nvme_write_metadata(char *buffer,size_t size){
     if(buffer == nullptr){
         pr_debug("Write metadata failed ,data buffer is nullptr");
         return COMMAND_FAILED;
     }
-    int err;
-    // int err = ims.read_sstable(&req,reinterpret_cast<uint8_t*>(buffer));
+    int err = ims.write_meta(reinterpret_cast<uint8_t*>(buffer),size);
     if(err == STATUS_OPERATION_SUCCESS){
         pr_debug("nvme write success");
         err = COMMAND_SUCCESS;
@@ -153,6 +175,25 @@ int MyNVMeDriver::nvme_write_metadata(uint64_t lpn,char *buffer,size_t size){
     }
     return err;
 }
+
+int MyNVMeDriver::nvme_read_metadata(char *buffer,size_t size){
+    if(buffer == nullptr){
+        pr_debug("Write metadata failed ,data buffer is nullptr");
+        return COMMAND_FAILED;
+    }
+    int err = ims.read_meta(reinterpret_cast<uint8_t*>(buffer),size);
+    if(err == STATUS_OPERATION_SUCCESS){
+        pr_debug("nvme write success");
+        err = COMMAND_SUCCESS;
+    }
+    else{
+        pr_debug("nvme write failed");
+        pr_debug("error code: 0x%x", err);
+        err = COMMAND_FAILED;
+    }
+    return err;
+}
+
 
 int MyNVMeDriver::nvme_write_block(uint32_t lbn, char* buffer){
     int err = OPERATION_FAILURE;
@@ -182,3 +223,10 @@ int MyNVMeDriver::nvme_read_block(uint32_t lbn, char* buffer){
     err = ims.read_block(lbn,reinterpret_cast<uint8_t*>(buffer));
     return err;
 }
+
+// int MyNVMeDriver::nvme_set_sstable_info(uint32_t *data_len){
+
+// }
+// int MyNVMeDriver::nvme_set_log_info(uint32_t *data_len){
+
+// }

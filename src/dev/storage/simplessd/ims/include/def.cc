@@ -39,6 +39,8 @@ std::string DB_INIT::encode() {
     append_u32(next_lbn);
     append_u32(current_lbn);
     append_u32(page_offset);
+    append_u32(byte_offset);
+    append_u32(first_block_offset);
     append_str(log_list);
     append_str(node_list);
 
@@ -85,6 +87,8 @@ std::optional<DB_INIT> DB_INIT::decode(const std::string& buf) {
     if (!read_u32(result.next_lbn))    return std::nullopt;
     if (!read_u32(result.current_lbn)) return std::nullopt;
     if (!read_u32(result.page_offset)) return std::nullopt;
+    if (!read_u32(result.byte_offset)) return std::nullopt;
+    if (!read_u32(result.first_block_offset)) return std::nullopt;
 
     if (!read_str(result.log_list))    return std::nullopt;
     if (!read_str(result.node_list))   return std::nullopt;
@@ -95,11 +99,13 @@ std::optional<DB_INIT> DB_INIT::decode(const std::string& buf) {
 
 void DB_INIT::dump() const {
     std::cout << "========== DB_INIT Dump ==========\n";
-    std::cout << "SSTable Seq   : " << sstable_seq << "\n";
-    std::cout << "Global Seq    : " << global_seq << "\n";
-    std::cout << "Current LBN   : " << current_lbn << "\n";
-    std::cout << "Next LBN      : " << next_lbn << "\n";
-    std::cout << "Page Offset   : " << page_offset << "\n";
+    std::cout << "SSTable Seq           : " << sstable_seq << "\n";
+    std::cout << "Global Seq            : " << global_seq << "\n";
+    std::cout << "Current LBN           : " << current_lbn << "\n";
+    std::cout << "Next LBN              : " << next_lbn << "\n";
+    std::cout << "Page Offset           : " << page_offset << "\n";
+    std::cout << "Byte Offset           : " << byte_offset << "\n";
+    std::cout << "First Block Offset    : " << page_offset << "\n";
 
     std::cout << "Log List Size : " << log_list.size() << " bytes\n";
     if (!log_list.empty()) {

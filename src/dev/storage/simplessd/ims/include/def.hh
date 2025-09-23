@@ -116,6 +116,12 @@ struct AlignedBuf {
 #define INVALID_CHANNEL -1
 #define INVALID_KEY_TYPE 0xFF
 
+// [lbn:4B]
+// [filename_len:4B][filename_bytes]
+// [levelInfo:4B]
+// [channelInfo:4B]
+// [min_len:4B][min_key_bytes]
+// [max_len:4B][max_key_bytes]
 
 struct hostInfo {
     uint32_t lbn;
@@ -124,6 +130,8 @@ struct hostInfo {
     int channelInfo;
     Key rangeMin;
     Key rangeMax;
+
+    hostInfo() : lbn(INVALIDLBN), filename(""),levelInfo(INVALID_LEVEL), channelInfo(INVALID_CHANNEL) {}
 
     hostInfo(std::string name, int level, int ch, Key min, Key max) :
         filename(std::move(name)),
@@ -146,7 +154,70 @@ struct hostInfo {
         std::cout << "  maxKey: ";
         rangeMax.dumpString();
     }
+    std::string encode() const {
+        std::ostringstream oss;
 
+        // lbn
+        oss.write(reinterpret_cast<const char*>(&lbn), sizeof(lbn));
+
+        // filename (長度 + 資料)
+        uint32_t fname_len = static_cast<uint32_t>(filename.size());
+        oss.write(reinterpret_cast<const char*>(&fname_len), sizeof(fname_len));
+        oss.write(filename.data(), fname_len);
+
+        // levelInfo + channelInfo
+        oss.write(reinterpret_cast<const char*>(&levelInfo), sizeof(levelInfo));
+        oss.write(reinterpret_cast<const char*>(&channelInfo), sizeof(channelInfo));
+
+        // rangeMin
+        std::string minEnc = rangeMin.encode();
+        uint32_t min_len = static_cast<uint32_t>(minEnc.size());
+        oss.write(reinterpret_cast<const char*>(&min_len), sizeof(min_len));
+        oss.write(minEnc.data(), min_len);
+
+        // rangeMax
+        std::string maxEnc = rangeMax.encode();
+        uint32_t max_len = static_cast<uint32_t>(maxEnc.size());
+        oss.write(reinterpret_cast<const char*>(&max_len), sizeof(max_len));
+        oss.write(maxEnc.data(), max_len);
+
+        return oss.str();
+    }
+
+    // --- Decode 從 string ---
+    static hostInfo decode(const std::string& buf) {
+        std::istringstream iss(buf);
+        hostInfo info;
+
+        // lbn
+        iss.read(reinterpret_cast<char*>(&info.lbn), sizeof(info.lbn));
+
+        // filename
+        uint32_t fname_len;
+        iss.read(reinterpret_cast<char*>(&fname_len), sizeof(fname_len));
+        info.filename.resize(fname_len);
+        iss.read(&info.filename[0], fname_len);
+
+        // level + channel
+        iss.read(reinterpret_cast<char*>(&info.levelInfo), sizeof(info.levelInfo));
+        iss.read(reinterpret_cast<char*>(&info.channelInfo), sizeof(info.channelInfo));
+
+        // rangeMin
+        uint32_t min_len;
+        iss.read(reinterpret_cast<char*>(&min_len), sizeof(min_len));
+        std::string minEnc(min_len, '\0');
+        iss.read(&minEnc[0], min_len);
+        info.rangeMin = Key::decode(minEnc.data());
+
+        // rangeMax
+        uint32_t max_len;
+        iss.read(reinterpret_cast<char*>(&max_len), sizeof(max_len));
+        std::string maxEnc(max_len, '\0');
+        iss.read(&maxEnc[0], max_len);
+        info.rangeMax = Key::decode(maxEnc.data());
+
+        return info;
+    }
 };
 
 
@@ -168,6 +239,8 @@ struct super_page{
     uint64_t currentLogLBN;    
     uint64_t nextLogLBN;        
     uint64_t logOffset;
+    uint64_t byteOffset;
+    uint64_t firstBlockOffset;
     uint64_t usedLBN_num;
     uint64_t global_sequence;
     uint64_t sstable_sequence;
@@ -182,6 +255,8 @@ struct super_page{
         sizeof(currentLogLBN) +
         sizeof(nextLogLBN) +
         sizeof(logOffset) +
+        sizeof(byteOffset) +
+        sizeof(firstBlockOffset) +
         sizeof(usedLBN_num) +
         sizeof(lastUsedChannel) +
         sizeof(global_sequence) +
@@ -193,6 +268,8 @@ struct super_page{
         mapping_page_num(0),
         log_store(log_store),
         log_page_num(0),
+        byteOffset(0),
+        firstBlockOffset(0),
         currentLogLBN(INVALIDLBN),
         nextLogLBN(INVALIDLBN),
         logOffset(0),
@@ -208,6 +285,8 @@ struct super_page{
         std::cout << "currentLogLBN     : " << currentLogLBN << std::endl;
         std::cout << "nextLogLBN        : " << nextLogLBN << std::endl;
         std::cout << "logOffset         : " << logOffset << std::endl;
+        std::cout << "byteOffset        : " << byteOffset << std::endl;
+        std::cout << "firstBlockOffset  : " << firstBlockOffset << std::endl;
         std::cout << "usedLBN_num       : " << usedLBN_num << std::endl;
         std::cout << "lastUsedChannel   : " << static_cast<int>(lastUsedChannel) << std::endl;
         std::cout << "global_sequence   : " << global_sequence << std::endl;
@@ -358,6 +437,8 @@ struct  DB_INIT {
     uint32_t next_lbn;
     uint32_t current_lbn;
     uint32_t page_offset;
+    uint32_t byte_offset;
+    uint32_t first_block_offset;
     std::string log_list;
     std::string node_list;
     DB_INIT() : 
@@ -365,7 +446,9 @@ struct  DB_INIT {
         global_seq(0), 
         next_lbn(0), 
         current_lbn(0), 
-        page_offset(0) {}
+        page_offset(0),
+        byte_offset(0),
+        first_block_offset(0){}
     void dump() const; 
     std::string encode();
     static std::optional<DB_INIT> decode(const std::string& buf);

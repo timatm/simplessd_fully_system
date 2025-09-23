@@ -1,7 +1,7 @@
 #include "IMS_interface.hh"
 #include <algorithm>
 #include <numeric>
-
+#include <mutex>
 #include "def.hh"
 #include "lbn_pool.hh"
 #include "persistence.hh"
@@ -10,6 +10,30 @@
 #include "print.hh"
 #include "log.hh"
 
+
+
+void IMS_interface::alloc_device_buffer(size_t bytes) {
+    if (buffer_) return;
+    buffer_ = static_cast<uint8_t*>(aligned_alloc_4k(bytes));
+    if (!buffer_) throw std::bad_alloc();
+    buffer_size_ = bytes;
+    std::memset(buffer_, 0, buffer_size_);
+}
+
+void IMS_interface::free_device_buffer() {
+    if (buffer_) {
+        aligned_free_4k(buffer_);
+        buffer_ = nullptr;
+    }
+    buffer_size_ = 0;
+}
+
+int IMS_interface::reset_IMS_buffer() {
+    std::lock_guard<std::mutex> lk(buf_mu_);
+    if (buffer_ && buffer_size_) std::memset(buffer_, 0, buffer_size_);
+    // 其他状态重置...
+    return 0;
+}
 
 IMS_interface::IMS_interface() {
     pr_info("Constructing IMS_interface...");
@@ -36,12 +60,16 @@ IMS_interface::IMS_interface() {
 }
 
 
-int IMS_interface::write_sstable(hostInfo *request, uint8_t *buffer) {
+int IMS_interface::write_sstable(uint8_t *buffer) {
     int err = OPERATION_SUCCESS;
-    std::string filename = request->filename;
-    int level = request->levelInfo;
-    Key rangeMin = request->rangeMin;
-    Key rangeMax = request->rangeMax;
+    
+    size_t hostInfo_len = buffer_valid_size_;
+    std::string buf(buffer_, buffer_ + hostInfo_len);
+    hostInfo request = hostInfo::decode(buf);
+    std::string filename = request.filename;
+    int level = request.levelInfo;
+    Key rangeMin = request.rangeMin;
+    Key rangeMax = request.rangeMax;
 
     std::cout << "Write request for Filename: " << filename.c_str() << " | Level: " << level << 
         " | Range:" << rangeMin.toString() << " ~ " << rangeMax.toString() << std::endl;
@@ -132,9 +160,12 @@ int IMS_interface::write_sstable(hostInfo *request, uint8_t *buffer) {
     return OPERATION_SUCCESS;
 }
 
-int IMS_interface::read_sstable(hostInfo *request, uint8_t *buffer) {
+int IMS_interface::read_sstable(uint8_t *buffer) {
     int err = OPERATION_SUCCESS;
-    std::string filename = request->filename;
+    size_t hostInfo_len = buffer_valid_size_;
+    std::string buf(buffer_, buffer_ + hostInfo_len);
+    hostInfo request = hostInfo::decode(buf);
+    std::string filename = request.filename;
 
     // 檢查 mapping table 是否有紀錄
     auto mappingTable = mappingTable_->get_table();
@@ -151,33 +182,38 @@ int IMS_interface::read_sstable(hostInfo *request, uint8_t *buffer) {
     auto it = mappingTable.find(filename);
     if (it == mappingTable.end()) {
         pr_debug("ERROR: File %s not found in mapping table", filename.c_str());
-        request->lbn = INVALIDLBN;
+        request.lbn = INVALIDLBN;
         return OPERATION_FAILURE;
     }
 
-    request->lbn = it->second;
+    request.lbn = it->second;
 
     if (ENABLE_DISK) {
-        err = persistenceManager_->readBlock(request->lbn, buffer, BLOCK_SIZE);
+        err = persistenceManager_->readBlock(request.lbn, buffer, BLOCK_SIZE);
     }
 
     if (err == OPERATION_SUCCESS) {
-        pr_info("Read data from LBN %lu for file: %s successfully", request->lbn, filename.c_str());
+        pr_info("Read data from LBN %lu for file: %s successfully", request.lbn, filename.c_str());
     } else {
-        pr_debug("Failed to read block from LBN %lu for file: %s", request->lbn, filename.c_str());
+        pr_debug("Failed to read block from LBN %lu for file: %s", request.lbn, filename.c_str());
         return OPERATION_FAILURE;
     }
 
     return err;
 }
 
-int IMS_interface::erase_sstable(hostInfo *request){
+int IMS_interface::erase_sstable(){
     int err = OPERATION_SUCCESS;
-    std::string filename = request->filename;
+    size_t hostInfo_len = buffer_valid_size_;
+    std::string buf(buffer_, buffer_ + hostInfo_len);
+    hostInfo request = hostInfo::decode(buf);
+    std::string filename = request.filename;
     auto lbn = mappingTable_->getLBN(filename);
     err = persistenceManager_->eraseBlock(lbn);
     if(err == OPERATION_SUCCESS){
         mappingTable_->remove_mapping(filename);
+        auto node  = tree_->find_node(filename);
+        tree_->remove_node(node);
     }
     return err;
 }
@@ -290,9 +326,37 @@ int IMS_interface::rebuild_super_page() {
     return OPERATION_SUCCESS;
 }
 
+int IMS_interface::write_meta(uint8_t *host_buffer, size_t size){
+    if (!host_buffer || size == 0) return -2;
+    if (!in_range(0, size)) return -4;
+
+    std::lock_guard<std::mutex> lk(buf_mu_);
+    std::memcpy(buffer_, host_buffer, size);
+    buffer_valid_size_ = size;
+    return 0;
+}
+int IMS_interface::read_meta(uint8_t *host_buffer, size_t size){
+    
+    if (!host_buffer || size == 0) return -2;
+    if (size > buffer_valid_size_) return -5;
+    // 可选：强制 4K 对齐
+    // if ((dev_offset % 4096) || (len % 4096)) return -3;
+
+    if (!in_range(0, size)) return -4;
+
+    std::lock_guard<std::mutex> lk(buf_mu_);
+    std::memcpy(host_buffer, buffer_, size);
+    return 0;
+}
+
+
 int IMS_interface::init_IMS() {
     int err = OPERATION_FAILURE;
     pr_info("Initialize IMS interface");
+
+    // init IMS buffer
+    alloc_device_buffer(kDefaultDeviceDramSize);
+
 
     uint8_t* buffer = (uint8_t*)malloc(IMS_PAGE_SIZE);
     if (!buffer) {
@@ -409,6 +473,13 @@ int IMS_interface::close_IMS() {
     sp->nextLogLBN = logManager_->nextLogLBN;
     sp->logOffset = logManager_->logOffset;
 
+    sp->global_sequence = sp_ptr_old_->global_sequence;
+    sp->sstable_sequence = sp_ptr_old_->sstable_sequence;
+    sp->logOffset = logManager_->logOffset;
+    sp->byteOffset = sp_ptr_old_->byteOffset;
+    sp->firstBlockOffset = sp_ptr_old_->firstBlockOffset;
+
+
     size_t total_used_lbn = 0;
     for (const auto& q : lbnPool_->get_usedLBNList()) {
         total_used_lbn += q.size();
@@ -428,6 +499,10 @@ int IMS_interface::close_IMS() {
         free(buffer);
         return OPERATION_FAILURE;
     }
+
+    // free IMS buffer
+    free_device_buffer();
+
 
     free(buffer);
     // lsmTree_->clear();             
@@ -545,37 +620,94 @@ int IMS_interface::dump_IMS(){
     return OPERATION_SUCCESS;
 }
 
-int IMS_interface::open_DB(uint8_t* buffer, size_t buffer_size) {
+int IMS_interface::open_DB(uint32_t *datalen) {
     std::string result;
     DB_INIT info;
 
-    get_oldSuperPage()->dump();
+    
 
     info.current_lbn  = get_logManager()->currentLogLBN;
     info.next_lbn     = get_logManager()->nextLogLBN;
-    info.page_offset  = get_logManager()->logOffset;
+    info.page_offset  = get_oldSuperPage()->logOffset;
+    info.byte_offset  = get_oldSuperPage()->byteOffset;
+    info.first_block_offset = get_oldSuperPage()->firstBlockOffset;
     info.global_seq   = get_oldSuperPage()->global_sequence;
     info.sstable_seq  = get_oldSuperPage()->sstable_sequence;
     info.log_list     = get_logManager()->encode();
     info.node_list    = get_lsmTree()->encode();
+
+
+    // info.dump();
     result = info.encode();
 
-    if (result.size() > buffer_size) return OPERATION_FAILURE;  
-    std::memcpy(buffer, result.data(), result.size());
-
+    if (result.size() > buffer_size_) return OPERATION_FAILURE;
+    std::lock_guard<std::mutex> lk(buf_mu_);
+    std::memcpy(buffer_, result.data(), result.size());
+    buffer_valid_size_ = result.size();
+    *datalen = result.size();
     return OPERATION_SUCCESS;
 }
 
 
-int write_metadata(uint8_t *buffer, size_t size){
-    if (buffer == nullptr || size == 0) {
-        pr_debug("Write metadata failed: null buffer or size is zero");
+// int write_metadata(uint8_t *buffer, size_t size){
+//     if (buffer == nullptr || size == 0) {
+//         pr_debug("Write metadata failed: null buffer or size is zero");
+//         return OPERATION_FAILURE;
+//     }
+
+//     int err = OPERATION_SUCCESS;
+//     if (err != OPERATION_SUCCESS) {
+//         return OPERATION_FAILURE;
+//     }
+//     return OPERATION_SUCCESS;
+// }
+
+int IMS_interface::set_sstable_info(uint32_t *size){
+    std::string sstable_enc = lsmTree_->encode();
+    uint32_t enc_size = sstable_enc.size();
+    if (enc_size > buffer_size_) {
         return OPERATION_FAILURE;
+    }
+    {
+        std::lock_guard<std::mutex> lk(buf_mu_);
+        memcpy(buffer_, sstable_enc.data(), enc_size);
+        buffer_valid_size_ = enc_size;
+    }
+    *size = enc_size;
+    return OPERATION_SUCCESS;
+}
+int IMS_interface::set_log_info(uint32_t *size){
+    std::string log_enc = logManager_->encode();
+    uint32_t enc_size = log_enc.size();
+
+    if (enc_size > buffer_size_) {
+        return OPERATION_FAILURE;
+    }
+    {
+        std::lock_guard<std::mutex> lk(buf_mu_);
+        memcpy(buffer_, log_enc.data(), enc_size);
+        buffer_valid_size_ = enc_size;
     }
 
-    int err = OPERATION_SUCCESS;
-    if (err != OPERATION_SUCCESS) {
-        return OPERATION_FAILURE;
-    }
+    *size = enc_size;
     return OPERATION_SUCCESS;
+}
+
+int IMS_interface::close_DB(uint8_t *host_buffer, size_t size){
+    if (!host_buffer || size == 0) return -2;
+    if (!sp_ptr_old_) {
+        pr_debug("close_DB: super_page(old) not initialized");
+        return -5;
+    }
+
+    auto info = DB_INIT::decode(std::string(reinterpret_cast<char*>(host_buffer), size));
+    if(info.has_value()){
+        sp_ptr_old_->global_sequence = info->global_seq;
+        sp_ptr_old_->sstable_sequence = info->sstable_seq;
+        sp_ptr_old_->logOffset = static_cast<uint64_t>(info->page_offset);
+        sp_ptr_old_->byteOffset = static_cast<uint64_t>(info->byte_offset);
+        sp_ptr_old_->firstBlockOffset = static_cast<uint64_t>(info->first_block_offset);
+        // sp_ptr_old_->dump();
+    }
+    return 0;
 }

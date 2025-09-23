@@ -118,6 +118,7 @@ struct sstable_info{
     uint32_t level;
     Key min;
     Key max;
+    sstable_info(): filename(""), level(0), min(), max() {}
     sstable_info(std::string name,uint32_t l,Key min,Key max):
         filename(std::move(name)),
         level(l),
@@ -132,6 +133,7 @@ struct sstable_info{
         max.dumpString();
         std::cout << "============================" << std::endl;
     }
+
 };
 /* -------------------------------------------------------------------------- */
 /*                             NMC related configs                            */

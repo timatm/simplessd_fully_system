@@ -27,12 +27,18 @@ public:
     std::vector<std::vector<std::shared_ptr<TreeNode>>> search_all_level(const Key& queryMin, const Key& queryMax);
     std::vector<std::shared_ptr<TreeNode>> search_one_level(int level,const Key& queryMin, const Key& queryMax);
     std::string encode() const{return tree_->encode();};
-    bool decode(const std::string& buf){ return tree_->decode(buf);};
+    bool decode(const std::string& buf){
+        tree_->clear();
+        return tree_->decode(buf);
+    };
     uint32_t get_level_num(int level) const {
         if (level < 0 || level >= MAX_LEVEL) return 0;
         return level_num_[level];
     }
-
+    void clear(){
+        tree_->clear();
+        std::fill(level_num_.begin(), level_num_.end(), 0);
+    };
     std::shared_ptr<TreeNode> findLevel0Older();
     std::shared_ptr<TreeNode> getLevelFirstNode(int level) const ;
     std::shared_ptr<TreeNode> getNextNode(int level, Key input) const;

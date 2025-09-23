@@ -348,11 +348,12 @@ bool LogManager::decode(const std::string& buf) {
 
 void LogManager::dump() const {
     std::cout << "========== LogManager Dump ==========\n";
-    std::cout << "Current LBN     : " << currenet_lbn_ << "\n";
-    std::cout << "Next LBN        : " << next_lbn_ << "\n";
-    std::cout << "Page Offset     : " << page_offset_ << "\n";
-    std::cout << "Byte Offset     : " << byte_offset_ << "\n";
-    std::cout << "Buffer Size     : " << buffer_.size() << " bytes\n";
+    std::cout << "Current LBN           : " << currenet_lbn_ << "\n";
+    std::cout << "Next LBN              : " << next_lbn_ << "\n";
+    std::cout << "Page Offset           : " << page_offset_ << "\n";
+    std::cout << "Byte Offset           : " << byte_offset_ << "\n";
+    std::cout << "First Block Offset    : " << first_block_offset_ << "\n";
+    std::cout << "Buffer Size           : " << buffer_.size() << " bytes\n";
 
     std::cout << "Log Record Blocks (" << logRecordBlock_.size() << " entries):\n";
     size_t count = 0;

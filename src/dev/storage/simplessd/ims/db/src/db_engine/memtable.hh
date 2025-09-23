@@ -28,6 +28,7 @@ public:
     InternalKey getMinKey(){ return skiplist_.Min()->internal_key ;};
     InternalKey getMaxKey(){ return skiplist_.Max()->internal_key ;};
     void setPackingT(PackingType t){packing_type_ = static_cast<int>(t); }
+    bool isEmpty() const { return node_count_ == 0; }
 private:
     SkipList<Record,RecordComparator> skiplist_;  // SkipList 儲存 Record
     uint32_t node_count_ = 0;              // SkipList 節點數

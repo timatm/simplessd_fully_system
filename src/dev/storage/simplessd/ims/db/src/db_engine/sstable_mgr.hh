@@ -75,6 +75,10 @@ public:
     void setSequenceNumber(uint32_t seq) {
         sequenceNumber_ = seq;
     }
+
+    uint32_t getSequenceNumber() {
+        return sequenceNumber_;
+    }
     void dump(){
         lsmTree_.dump_lsmtere();
     }

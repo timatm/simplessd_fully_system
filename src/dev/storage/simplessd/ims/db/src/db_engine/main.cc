@@ -147,7 +147,7 @@ int main() {
         return -1;
     }
     db.dump_all();
-    for (int i = 0; i < 2000; ++i) {
+    for (int i = 0; i < 1000; ++i) {
         std::string key = "key" + std::to_string(i);
         std::string value = "value" + std::to_string(i);
         Status s = db.put(key, value);
@@ -156,23 +156,23 @@ int main() {
         }
     }
 
-    for (int i = 0; i < 2000; ++i) {
-        std::string key = "key" + std::to_string(i);
-        std::string value = "value" + std::to_string(i+10);
-        Status s = db.put(key, value);
-        if (!s.ok()) {
-            std::cerr << "Put failed at index " << i << " with key: " << key << "\n";
-        }
-    }
-    for (int i = 2001; i < 100000; ++i) {
-        std::string key = "key" + std::to_string(i);
-        std::string value = "value" + std::to_string(i);
-        Status s = db.put(key, value);
-        if (!s.ok()) {
-            std::cerr << "Put failed at index " << i << " with key: " << key << "\n";
-        }
-    }
-    db.getSSTable()->waitAllTasksDone();
+    // for (int i = 0; i < 2000; ++i) {
+    //     std::string key = "key" + std::to_string(i);
+    //     std::string value = "value" + std::to_string(i+10);
+    //     Status s = db.put(key, value);
+    //     if (!s.ok()) {
+    //         std::cerr << "Put failed at index " << i << " with key: " << key << "\n";
+    //     }
+    // }
+    // for (int i = 2001; i < 100000; ++i) {
+    //     std::string key = "key" + std::to_string(i);
+    //     std::string value = "value" + std::to_string(i);
+    //     Status s = db.put(key, value);
+    //     if (!s.ok()) {
+    //         std::cerr << "Put failed at index " << i << " with key: " << key << "\n";
+    //     }
+    // }
+    // db.getSSTable()->waitAllTasksDone();
     // db.getLogManager()->flush_buffer();
     // db.nvme_->nvme_dump_ims();
     InternalKeyComparator icmp;
@@ -180,9 +180,21 @@ int main() {
     // std::cout << "Inserted 129 key-value pairs successfully.\n";
     // db.getSSTable()->waitAllTasksDone();
     // db.dump_memtable();
+    db.getSSTable()->waitAllTasksDone();
     db.dump_all();
     Options opts;
-    
+
+    pr_debug("DB after reboot");
+    db.close();
+    db.open();
+    db.dump_all();
+
+    std::string value;
+    db.get("key20",value);
+    if(!value.empty()){
+        std::cout
+        << "KEY: " <<  "key20" << "  VAL :" << value << std::endl;
+    }
     // SstableIterator iter(db.getSSTable(),db.getLogManager(),&icmp,"00000000000000000000000000000000000",db.getPackType());
     // iter.Init();
     // iter.SeekToFirst();
@@ -195,7 +207,7 @@ int main() {
     //     iter.Next();
     // }
 
-    std::string value;
+    // std::string value;
     std::set<std::string> result;
 
     // db.search("key37",value);

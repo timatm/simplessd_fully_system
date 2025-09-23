@@ -57,10 +57,18 @@ Status API::open() {
     if (!opt) {
         return Status::Corruption("DB_INIT decode failed");
     }
-    DB_INIT info = *opt;                          
+    
+    
+    DB_INIT info = *opt;
+    
+    pr_debug("open DB info");
+    // info.dump();
+
     getLogManager()->setNextLBN(info.next_lbn);
     getLogManager()->setCurrentLBN(info.current_lbn);
     getLogManager()->setPageOffset(info.page_offset);
+    getLogManager()->setByteOffset(info.byte_offset);
+    getLogManager()->setFirstBlockOffset(info.first_block_offset);
     global_seq_ = info.global_seq;
     getSSTable()->setSequenceNumber(info.sstable_seq);
 
@@ -76,7 +84,55 @@ Status API::open() {
 }
 
 Status API::close(){
+    sstableManager_->waitAllTasksDone();
     pr_info("Closing database  .......");
+
+    // 等待過去已經排入的 flush/compaction 都完成
+    
+    std::shared_ptr<MemTable> imm_to_flush;
+
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        if (memtable_ && !memtable_->isEmpty()) {
+            // 关键：先把 unique_ptr 所有权转给 shared_ptr（C++14 起支持）
+            imm_to_flush = std::shared_ptr<MemTable>(std::move(memtable_));
+            // // 现在 memtable_ 已经变成空了，不会析构原对象
+            // memtable_ = std::make_unique<MemTable>();  // 新建一张空表供后续写入
+        }
+    }
+
+    // 离开锁后再做这些 I/O/序列化操作，降低锁粒度
+    if (imm_to_flush) {
+        auto minK = imm_to_flush->getMinKey();
+        auto maxK = imm_to_flush->getMaxKey();
+        const auto& list_ref = imm_to_flush->GetSkipList();
+        auto buffer = sstableManager_->packingTable(list_ref);
+        if (!buffer.data() || buffer.size == 0) {
+            return Status::IOError("Packing failed");
+        }
+        sstableManager_->writeSSTable(0, minK, maxK, std::move(buffer), /*clearImmutableTable=*/true);
+    }
+    sstableManager_->waitAllTasksDone();
+
+    uint32_t page_offset = getLogManager()->get_page_offset();
+    uint32_t byte_offset = getLogManager()->get_byte_offset();
+    uint32_t first_block_offset = getLogManager()->get_first_block_offset();
+    logManager_->flush_buffer();
+
+    DB_INIT info;
+    info.page_offset = page_offset;
+    info.byte_offset = byte_offset;
+    info.first_block_offset = first_block_offset;
+    info.sstable_seq = getSSTable()->getSequenceNumber();
+    info.global_seq = global_seq_;
+    std::string enc_info = info.encode();
+    int err = nvme_->nvme_close_DB(reinterpret_cast<uint8_t*>(enc_info.data()), enc_info.size());   
+    
+    if (err != OPERATION_SUCCESS) {
+        return Status::IOError("nvme_close_DB failed");
+    }
+    lsmTree_->clear();
+    return Status::OK();
 }
 
 
@@ -175,7 +231,11 @@ Status API::get(std::string key,std::string& value){
     // std::cout << "Search key: " << key << std::endl;
     Key interkey(key);
     InternalKey search_key(key);
-    auto result = memtable_->Get(key);
+    auto result = std::optional<std::string>{};
+    if(memtable_){
+        result = memtable_->Get(key);
+    }
+    
     if(!result.has_value() && immutable_memtable_){
         result = immutable_memtable_->Get(key);
     }
@@ -957,7 +1017,7 @@ void API::OnSSTableWriteFailed(const sstable_info& info, int err) {
 void API::log_garbage_collection(){
     int gcBlockNum = GC_BLOCK_NUM;
     while(gcBlockNum > 0){
-        uint32_t valid_offset = logManager_->get_first_block_offset_();
+        uint32_t valid_offset = logManager_->get_first_block_offset();
         uint32_t lbn = logManager_->get_log_list_front();
         if(lbn >= LBN_NUM){
             pr_debug("Invalid LBN for GC: %u", lbn);
