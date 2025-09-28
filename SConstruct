@@ -324,6 +324,15 @@ main.Append(CPPPATH=[Dir('ext')])
 # Add shared top-level headers
 main.Prepend(CPPPATH=Dir('include'))
 
+# --- [Add SimpleSSD IMS headers] ---
+main.Prepend(CPPPATH=[
+    Dir('src/dev/storage/simplessd/ims/include'),
+    Dir('src/dev/storage/simplessd/ims/firmware'),
+])
+# -----------------------------------
+
+
+
 if GetOption('verbose'):
     def MakeAction(action, string, *args, **kwargs):
         return Action(action, *args, **kwargs)
@@ -368,12 +377,14 @@ if main['GCC'] or main['CLANG']:
     # we consistently violate
     main.Append(CCFLAGS=['-Wall', '-Wundef', '-Wextra',
                          '-Wno-sign-compare', '-Wno-unused-parameter'])
+    
     # We always compile using C++11
     main.Append(CXXFLAGS=['-std=c++11'])
     if sys.platform.startswith('freebsd'):
         main.Append(CCFLAGS=['-I/usr/local/include'])
         main.Append(CXXFLAGS=['-I/usr/local/include'])
 
+    main.Append(CCFLAGS=['-Wno-error=register'])
     main.Append(LINKFLAGS='-Wl,--as-needed')
     main['FILTER_PSHLINKFLAGS'] = lambda x: str(x).replace(' -shared', '')
     main['PSHLINKFLAGS'] = main.subst('${FILTER_PSHLINKFLAGS(SHLINKFLAGS)}')

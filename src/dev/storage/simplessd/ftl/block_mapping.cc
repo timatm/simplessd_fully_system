@@ -24,7 +24,7 @@
 #include "ftl/block_mapping.hh"
 #include "util/algorithm.hh"
 #include "util/bitset.hh"
-#include "ims/firmware/def.hh"
+#include "ims/include/def.hh"
 namespace SimpleSSD {
 
 namespace FTL {

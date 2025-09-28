@@ -76,6 +76,8 @@ enum class SelectT {
 };
 #define SELECT_POLICT (static_cast<int>(SelectT::MYPOLICY))
 
+// My enviroment / SimpleSSD =  0 / 1
+#define RUNTYPE_SIMPLESSD 0
 
 // Enable / Disable = 1 / 0
 #define ENABLE_DISK 1

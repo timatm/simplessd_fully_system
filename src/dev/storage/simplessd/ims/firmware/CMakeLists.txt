@@ -6,7 +6,8 @@ set(CMAKE_CXX_STANDARD 17)
 
 # 包含 include/ 目錄的 .hh 檔
 include_directories(
-    ${CMAKE_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}   
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
 # 將 firmware 中所有 .cc 檔設為庫的來源
@@ -14,16 +15,16 @@ add_library(firmware_lib STATIC
     disk.cc
     IMS_interface.cc
     lbn_pool.cc
-    ${CMAKE_SOURCE_DIR}/../include/log.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/log.cc
     mapping_table.cc
     persistence.cc
-    ${CMAKE_SOURCE_DIR}/../include/tree.cc
-    ${CMAKE_SOURCE_DIR}/../include/lsmtree.cc
-    ${CMAKE_SOURCE_DIR}/../include/def.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tree.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/lsmtree.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include/def.cc
 )
 
 # 方便其他 CMakeLists 使用
-target_include_directories(firmware_lib PRIVATE 
+target_include_directories(firmware_lib PUBLIC 
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     # ${CMAKE_CURRENT_SOURCE_DIR}/../db/src/db_engine

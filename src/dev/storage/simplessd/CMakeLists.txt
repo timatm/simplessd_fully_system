@@ -42,6 +42,7 @@ if (NOT EXISTS "${PROJECT_SOURCE_DIR}/lib/mcpat/mcpat.h")
 Check you initialized submodules.")
 endif ()
 
+
 # Set include directories
 include_directories(
   ${PROJECT_SOURCE_DIR}/src/dev/storage/simplessd
@@ -53,8 +54,10 @@ include_directories(
 )
 # Add subproject
 add_subdirectory(${PROJECT_SOURCE_DIR}/lib/mcpat)
-add_subdirectory(${PROJECT_SOURCE_DIR}/ims/firmware)
 
+# ******************************
+add_subdirectory(${PROJECT_SOURCE_DIR}/ims/firmware)
+# ******************************
 
 # Platform specific settings
 if (MSVC)
@@ -65,8 +68,8 @@ if (MSVC)
   add_compile_options(/wd4305)  # Surpress truncation warning
   add_compile_options(/wd4800)  # Surpress int -> boolean waring
 else ()
-  set(CMAKE_CXX_FLAGS "-g -rdynamic -Wall -Wextra -Werror ${CMAKE_CXX_FLAGS}")
-
+  # set(CMAKE_CXX_FLAGS "-g -rdynamic -Wall -Wextra -Werror ${CMAKE_CXX_FLAGS}")
+  set(CMAKE_CXX_FLAGS "-g -rdynamic -Wall -Wextra ${CMAKE_CXX_FLAGS}")
   if (DEBUG_BUILD)
     set(CMAKE_CXX_FLAGS "-O0 ${CMAKE_CXX_FLAGS}")
   else ()
@@ -197,6 +200,7 @@ add_library(simplessd STATIC
   ${SRC_PAL_OLD}
   ${SRC_SIM}
   ${SRC_UTIL}
-  $<TARGET_OBJECTS:mapping_obj>
+  # $<TARGET_OBJECTS:mapping_obj>
 )
-target_link_libraries(simplessd mcpat)
+# target_link_libraries(simplessd mcpat)
+target_link_libraries(simplessd PRIVATE mcpat firmware_lib)

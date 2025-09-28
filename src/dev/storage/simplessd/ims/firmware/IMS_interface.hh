@@ -15,7 +15,7 @@
 #include <stdexcept>
 #include <mutex>
 
-#include "log.hh"
+#include "../include/log.hh"
 #include "mapping_table.hh"
 #include "persistence.hh"
 #include "disk.hh"
