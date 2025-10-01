@@ -50,7 +50,7 @@ std::string DB_INIT::encode() {
 
 
 
-std::optional<DB_INIT> DB_INIT::decode(const std::string& buf) {
+bool DB_INIT::decode(const std::string& buf, DB_INIT& out) {
     size_t offset = 0;
 
     auto read_u32 = [&](uint32_t& val) -> bool {
@@ -82,18 +82,18 @@ std::optional<DB_INIT> DB_INIT::decode(const std::string& buf) {
 
     DB_INIT result;
 
-    if (!read_u64(result.sstable_seq)) return std::nullopt;
-    if (!read_u64(result.global_seq))  return std::nullopt;
-    if (!read_u32(result.next_lbn))    return std::nullopt;
-    if (!read_u32(result.current_lbn)) return std::nullopt;
-    if (!read_u32(result.page_offset)) return std::nullopt;
-    if (!read_u32(result.byte_offset)) return std::nullopt;
-    if (!read_u32(result.first_block_offset)) return std::nullopt;
+    if (!read_u64(result.sstable_seq)) return false;
+    if (!read_u64(result.global_seq))  return false;
+    if (!read_u32(result.next_lbn))    return false;
+    if (!read_u32(result.current_lbn)) return false;
+    if (!read_u32(result.page_offset)) return false;
+    if (!read_u32(result.byte_offset)) return false;
+    if (!read_u32(result.first_block_offset)) return false;
 
-    if (!read_str(result.log_list))    return std::nullopt;
-    if (!read_str(result.node_list))   return std::nullopt;
-
-    return result;
+    if (!read_str(result.log_list))    return false;
+    if (!read_str(result.node_list))   return false;
+    out = result;
+    return true;
 }
 
 
@@ -198,17 +198,17 @@ std::string SearchPatternD::encode() const {
     return out;
 }
 
-std::optional<SearchPatternD> SearchPatternD::decode(const std::string& buf) {
+bool SearchPatternD::decode(const std::string& buf, SearchPatternD& out) {
     SearchPatternD pat{};
     size_t off = 0;
 
-    if (!GetFixed(buf, off, kSSTNameLen, pat.sstable_name)) return std::nullopt;
+    if (!GetFixed(buf, off, kSSTNameLen, pat.sstable_name)) return false;
 
     uint32_t slot = 0;
-    if (!GetU32(buf, off, slot)) return std::nullopt;
+    if (!GetU32(buf, off, slot)) return false;
     pat.slot_index = slot;
-
-    return pat; // 允许 slice 有尾随字节
+    out = pat;
+    return true; // 允许 slice 有尾随字节
 }
 
 
@@ -254,41 +254,43 @@ std::string SearchPackageD::encode() const {
     return out;
 }
 
-std::optional<SearchPackageD> SearchPackageD::decode(const std::string& buf) {
+bool SearchPackageD::decode(const std::string& buf, SearchPackageD& out) {
     SearchPackageD pkg{};
     size_t off = 0;
 
     uint32_t magic = 0, pattern_num = 0, key_len = 0;
-    if (!GetU32(buf, off, magic)) return std::nullopt;
-    if (magic != kMagic_D) return std::nullopt;
+    if (!GetU32(buf, off, magic)) return false;
+    if (magic != kMagic_D) return false;
     pkg.header.magic = magic;
 
-    if (!GetU32(buf, off, pattern_num)) return std::nullopt;
+    if (!GetU32(buf, off, pattern_num)) return false;
     pkg.header.pattern_num = pattern_num;
 
-    if (!GetU32(buf, off, key_len)) return std::nullopt;
-    if (!GetBytes(buf, off, key_len, pkg.search_key)) return std::nullopt;
+    if (!GetU32(buf, off, key_len)) return false;
+    if (!GetBytes(buf, off, key_len, pkg.search_key)) return false;
 
     pkg.searchPatterns.clear();
     pkg.searchPatterns.reserve(pattern_num);
 
     for (uint32_t i = 0; i < pattern_num; ++i) {
         uint32_t pat_len = 0;
-        if (!GetU32(buf, off, pat_len)) return std::nullopt;
-        if (off + pat_len > buf.size()) return std::nullopt;
+        if (!GetU32(buf, off, pat_len)) return false;
+        if (off + pat_len > buf.size()) return false;
 
         std::string slice(buf.data() + off, pat_len);
         off += pat_len;
 
-        auto pat = SearchPatternD::decode(slice);
-        if (!pat) return std::nullopt;
-        pkg.searchPatterns.push_back(std::move(*pat));
+        SearchPatternD pat;
+        if( SearchPatternD::decode(slice,pat) == false){
+            return false;
+        }
+        pkg.searchPatterns.push_back(std::move(pat));
     }
 
     // 严格模式：必须刚好消费完
-    if (off != buf.size()) return std::nullopt;
-
-    return pkg;
+    if (off != buf.size()) return false;
+    out = pkg;
+    return true;
 }
 
 void SearchPackageD::dump() const {
@@ -322,18 +324,18 @@ std::string SearchPatternH::encode() const {
     return out;
 }
 
-std::optional<SearchPatternH> SearchPatternH::decode(const std::string& buf) {
+bool SearchPatternH::decode(const std::string& buf, SearchPatternH& out) {
     SearchPatternH pat{};
     size_t off = 0;
 
-    if (!GetFixed(buf, off, kSSTNameLen, pat.sstable_name)) return std::nullopt;
+    if (!GetFixed(buf, off, kSSTNameLen, pat.sstable_name)) return false;
     // 不做裁剪
 
     uint32_t patt_len = 0;
-    if (!GetU32(buf, off, patt_len)) return std::nullopt;
-    if (!GetBytes(buf, off, patt_len, pat.search_pattern)) return std::nullopt;
-
-    return pat;
+    if (!GetU32(buf, off, patt_len)) return false;
+    if (!GetBytes(buf, off, patt_len, pat.search_pattern)) return false;
+    out = pat;
+    return true;
 }
 
 
@@ -378,39 +380,41 @@ std::string SearchPackageH::encode() const {
     return out;
 }
 
-std::optional<SearchPackageH> SearchPackageH::decode(const std::string& buf) {
+bool SearchPackageH::decode(const std::string& buf, SearchPackageH& out) {
     SearchPackageH pkg{};
     size_t off = 0;
 
     uint32_t magic = 0, pattern_num = 0, key_len = 0;
-    if (!GetU32(buf, off, magic)) return std::nullopt;
-    if (magic != kMagic_H) return std::nullopt;
+    if (!GetU32(buf, off, magic)) return false;
+    if (magic != kMagic_H) return false;
     pkg.header.magic = magic;
 
-    if (!GetU32(buf, off, pattern_num)) return std::nullopt;
+    if (!GetU32(buf, off, pattern_num)) return false;
     pkg.header.pattern_num = pattern_num;
 
-    if (!GetU32(buf, off, key_len)) return std::nullopt;
-    if (!GetBytes(buf, off, key_len, pkg.search_key)) return std::nullopt;
+    if (!GetU32(buf, off, key_len)) return false;
+    if (!GetBytes(buf, off, key_len, pkg.search_key)) return false;
 
     pkg.searchPatterns.clear();
     pkg.searchPatterns.reserve(pattern_num);
 
     for (uint32_t i = 0; i < pattern_num; ++i) {
         uint32_t pat_len = 0;
-        if (!GetU32(buf, off, pat_len)) return std::nullopt;
-        if (off + pat_len > buf.size()) return std::nullopt;
+        if (!GetU32(buf, off, pat_len)) return false;
+        if (off + pat_len > buf.size()) return false;
 
         std::string slice(buf.data() + off, pat_len);
         off += pat_len;
-
-        auto pat = SearchPatternH::decode(slice);
-        if (!pat) return std::nullopt;
-        pkg.searchPatterns.push_back(std::move(*pat));
+        SearchPatternH pat;
+        if(SearchPatternH::decode(slice,pat) == false){
+            return false;
+        }
+        pkg.searchPatterns.push_back(std::move(pat));
     }
 
-    if (off != buf.size()) return std::nullopt;
-    return pkg;
+    if (off != buf.size()) return false;
+    out = pkg;
+    return true;
 }
 
 void SearchPackageH::dump() const {

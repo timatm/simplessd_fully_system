@@ -17,8 +17,9 @@ namespace logger {
 enum class Level { Info, Debug };
 
 // ANSI 色碼
-inline constexpr const char* RED   = "\033[31m";
-inline constexpr const char* RESET = "\033[0m";
+static constexpr char RED[]   = "\033[31m";
+static constexpr char RESET[] = "\033[0m";
+
 
 // 基本輸出格式（Debug 使用紅色）
 inline void print(Level lvl, const std::string& msg) {

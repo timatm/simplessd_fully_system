@@ -30,7 +30,7 @@ int Log::init_logRecordList(uint64_t logStoreLBN, uint64_t page_num) {
 
         auto* logRecordPtr = reinterpret_cast<logLBNListRecord*>(buffer);
         for (int i = 0; i < IMS_PAGE_SIZE / sizeof(uint64_t); ++i) {
-            if (logRecordPtr->lbn[i] != INVALIDLBN && logRecordPtr->lbn[i] != 0) {
+            if (logRecordPtr->lbn[i] != INVALID_32 && logRecordPtr->lbn[i] != 0) {
                 logRecordList.push_back(logRecordPtr->lbn[i]);
             }
         }
@@ -78,7 +78,7 @@ int Log::flush_logRecordList() {
         uint32_t lbn = logRecordList.front();
         logRecordList.pop_front();
 
-        if (lbn == INVALIDLBN) {
+        if (lbn == INVALID_32) {
             pr_info("Invalid LBN encountered in log record list, skipping");
             continue;
         }

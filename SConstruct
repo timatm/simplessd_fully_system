@@ -333,6 +333,7 @@ main.Prepend(CPPPATH=[
 
 
 
+
 if GetOption('verbose'):
     def MakeAction(action, string, *args, **kwargs):
         return Action(action, *args, **kwargs)
@@ -970,8 +971,10 @@ if ret > 0:
           "Error: Build of SimpleSSD failed." + termcap.Normal)
     Exit(1)
 
+
+print("workdir =", workdir)
 main.Append(LINKFLAGS=['-L' + workdir])
-main.Append(LIBS=['simplessd', 'mcpat'])
+main.Append(LIBS=['simplessd', 'firmware_lib','mcpat'])
 
 # Remove previous binaries to force scons to link newly built library
 for t in BUILD_TARGETS:

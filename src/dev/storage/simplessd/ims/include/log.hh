@@ -41,8 +41,8 @@ public:
     void clear();
     void dump() const;
     std::deque<uint32_t> logRecordList;
-    uint32_t currentLogLBN = INVALIDLBN;
-    uint32_t nextLogLBN = INVALIDLBN;
+    uint32_t currentLogLBN = INVALID_32;
+    uint32_t nextLogLBN = INVALID_32;
     uint32_t logOffset = 0;
 
 private:

@@ -56,7 +56,8 @@ struct TreeNode : public std::enable_shared_from_this<TreeNode> {
         pad(); std::cout << "}\n";
 
         if (recursive) {
-            for (const auto& [name, child] : children) {
+            for (const auto& sstable : children) {
+                auto child = sstable.second; 
                 if (child) {
                     child->dump(indent + 1, true);
                 }

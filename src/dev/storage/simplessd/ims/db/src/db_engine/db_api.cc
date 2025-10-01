@@ -53,13 +53,10 @@ Status API::open() {
     std::string buf(reinterpret_cast<char*>(buffer), IMS_PAGE_SIZE);
     free(buffer);
 
-    auto opt = DB_INIT::decode(buf);        
-    if (!opt) {
+    DB_INIT info;
+    if(DB_INIT::decode(buf, info) == false){
         return Status::Corruption("DB_INIT decode failed");
-    }
-    
-    
-    DB_INIT info = *opt;
+    }      
     
     pr_debug("open DB info");
     // info.dump();

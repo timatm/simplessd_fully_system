@@ -59,7 +59,8 @@
 #define OPERATION_SUCCESS 0
 #define OPERATION_FAILURE 1
 
-
+static constexpr uint64_t INVALID_64 = 0xFFFFFFFFFFFFFFFFull;
+static constexpr uint32_t INVALID_32 = 0xFFFFFFFFu;
 
 #define INVALIDLBN 0xFFFFFFFFFFFFFFFF
 #define INVALIDCH  0xFF
@@ -133,7 +134,7 @@ struct hostInfo {
     Key rangeMin;
     Key rangeMax;
 
-    hostInfo() : lbn(INVALIDLBN), filename(""),levelInfo(INVALID_LEVEL), channelInfo(INVALID_CHANNEL) {}
+    hostInfo() : lbn(INVALID_32), filename(""),levelInfo(INVALID_LEVEL), channelInfo(INVALID_CHANNEL) {}
 
     hostInfo(std::string name, int level, int ch, Key min, Key max) :
         filename(std::move(name)),
@@ -270,11 +271,11 @@ struct super_page{
         mapping_page_num(0),
         log_store(log_store),
         log_page_num(0),
-        byteOffset(0),
-        firstBlockOffset(0),
         currentLogLBN(INVALIDLBN),
         nextLogLBN(INVALIDLBN),
         logOffset(0),
+        byteOffset(0),
+        firstBlockOffset(0),
         usedLBN_num(0),
         lastUsedChannel(INVALIDCH){}
     void dump() {
@@ -453,7 +454,7 @@ struct  DB_INIT {
         first_block_offset(0){}
     void dump() const; 
     std::string encode();
-    static std::optional<DB_INIT> decode(const std::string& buf);
+    static bool decode(const std::string& buf,DB_INIT& out);
 };
 
 // [search key setting]
@@ -464,7 +465,7 @@ struct SearchPatternD{
     std::string sstable_name;  //36B
     uint32_t slot_index;
     std::string encode() const;
-    static std::optional<SearchPatternD> decode(const std::string& buf);
+    static bool decode(const std::string& buf, SearchPatternD& out);
     void dump() const; 
 };
 
@@ -476,7 +477,7 @@ struct SearchPackageD{
     std::string search_key;
     std::vector<SearchPatternD> searchPatterns;
     std::string encode() const;
-    static std::optional<SearchPackageD> decode(const std::string& buf);
+    static bool decode(const std::string& buf, SearchPackageD& out);
     void dump() const;
 };
 
@@ -484,7 +485,7 @@ struct SearchPatternH{
     std::string sstable_name;  // 36B
     std::string search_pattern; // 16KB 
     std::string encode() const;
-    static std::optional<SearchPatternH> decode(const std::string& buf);
+    static bool decode(const std::string& buf, SearchPatternH& out);
     void dump() const; 
 };
 
@@ -496,7 +497,7 @@ struct SearchPackageH{
     std::string search_key;
     std::vector<SearchPatternH> searchPatterns;
     std::string encode() const;
-    static std::optional<SearchPackageH> decode(const std::string& buf);
+    static bool decode(const std::string& buf, SearchPackageH& out);
     void dump() const;
 };
 

@@ -182,7 +182,7 @@ int IMS_interface::read_sstable(uint8_t *buffer) {
     auto it = mappingTable.find(filename);
     if (it == mappingTable.end()) {
         pr_debug("ERROR: File %s not found in mapping table", filename.c_str());
-        request.lbn = INVALIDLBN;
+        request.lbn = INVALID_32;
         return OPERATION_FAILURE;
     }
 
@@ -236,7 +236,7 @@ int IMS_interface::read_ssKeyRange(hostInfo *request, uint8_t* buffer){
     auto it = mappingTable.find(filename);
     if (it == mappingTable.end()) {
         pr_debug("ERROR: File %s not found in mapping table", filename.c_str());
-        request->lbn = INVALIDLBN;
+        request->lbn = INVALID_32;
         return OPERATION_FAILURE;
     }
 
@@ -699,15 +699,17 @@ int IMS_interface::close_DB(uint8_t *host_buffer, size_t size){
         pr_debug("close_DB: super_page(old) not initialized");
         return -5;
     }
+    DB_INIT info;
+    if( DB_INIT::decode(std::string(reinterpret_cast<char*>(host_buffer), size),info) == false){
+        pr_debug("DB_INIT decode failed");
+        return -6;
 
-    auto info = DB_INIT::decode(std::string(reinterpret_cast<char*>(host_buffer), size));
-    if(info.has_value()){
-        sp_ptr_old_->global_sequence = info->global_seq;
-        sp_ptr_old_->sstable_sequence = info->sstable_seq;
-        sp_ptr_old_->logOffset = static_cast<uint64_t>(info->page_offset);
-        sp_ptr_old_->byteOffset = static_cast<uint64_t>(info->byte_offset);
-        sp_ptr_old_->firstBlockOffset = static_cast<uint64_t>(info->first_block_offset);
-        // sp_ptr_old_->dump();
     }
+
+    sp_ptr_old_->global_sequence = info.global_seq;
+    sp_ptr_old_->sstable_sequence = info.sstable_seq;
+    sp_ptr_old_->logOffset = static_cast<uint64_t>(info.page_offset);
+    sp_ptr_old_->byteOffset = static_cast<uint64_t>(info.byte_offset);
+    sp_ptr_old_->firstBlockOffset = static_cast<uint64_t>(info.first_block_offset);
     return 0;
 }

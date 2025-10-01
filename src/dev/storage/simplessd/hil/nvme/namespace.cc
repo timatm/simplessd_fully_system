@@ -778,7 +778,7 @@ void Namespace::write_sstable(SQEntryWrapper &req, RequestFunction &func) {
   uint8_t *buffer  = new uint8_t[2]; // dummy buffer not real data
   hostInfo request(filename,level,min,max);
   request.lbn = INVALIDLBN;
-  err = (bool)ims.write_sstable(&request,buffer);
+  err = (bool)ims.write_sstable(buffer);
   
   // uint64_t slba = ((uint64_t)req.entry.dword11 << 32) | req.entry.dword10;
   // uint16_t nlb = (req.entry.dword12 & 0xFFFF) + 1;
@@ -1005,7 +1005,7 @@ void Namespace::read_sstable(SQEntryWrapper &req, RequestFunction &func) {
   // bool fua = req.entry.dword12 & 0x40000000;
   hostInfo request(filename);
   uint8_t *buffer  = new uint8_t[2]; // dummy buffer not real data
-  err = (bool)ims.read_sstable(&request,buffer);
+  err = (bool)ims.read_sstable(buffer);
   if (!attached) {
     err = true;
     resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
