@@ -29,9 +29,9 @@
 #include "ims/firmware/mapping_table.hh"
 #include "ims/include/tree.hh"
 
-extern Tree tree;
-extern LBNPool lbnPoolManager; 
-extern Mapping mappingManager;
+// extern Tree tree;
+// extern LBNPool lbnPoolManager; 
+// extern Mapping mappingManager;
 
 
 namespace SimpleSSD {
@@ -107,12 +107,12 @@ void Namespace::submitCommand(SQEntryWrapper &req, RequestFunction &func) {
                      req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
           init_IMS(req, func);
           break;
-        case OPCODE_MONITOR_IMS:
-          debugprint(LOG_IMS,
-                     "IMS     | Monitor IMS | SQ %u:%u | CID %u | NSID %-5d",
-                     req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
-          monitor_IMS(req, func);
-          break;
+        // case OPCODE_MONITOR_IMS:
+        //   debugprint(LOG_IMS,
+        //              "IMS     | Monitor IMS | SQ %u:%u | CID %u | NSID %-5d",
+        //              req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
+        //   monitor_IMS(req, func);
+        //   break;
         case OPCODE_WRITE_SSTABLE:
           debugprint(LOG_IMS,
                      "IMS     | Write SSTable | SQ %u:%u | CID %u | NSID %-5d",
@@ -1274,35 +1274,35 @@ void Namespace::close_IMS(SQEntryWrapper &req, RequestFunction &func) {
   func(resp);
 }
 
-void Namespace::monitor_IMS(SQEntryWrapper &req, RequestFunction &func) {
-  MonitorType type = static_cast<MonitorType>(req.entry.dword13);
-  CQEntryWrapper resp(req);
+// void Namespace::monitor_IMS(SQEntryWrapper &req, RequestFunction &func) {
+//   MonitorType type = static_cast<MonitorType>(req.entry.dword13);
+//   CQEntryWrapper resp(req);
 
-  debugprint(LOG_IMS,
-             "NVM     | Monitor IMS start");
-  switch(type) {
+//   debugprint(LOG_IMS,
+//              "NVM     | Monitor IMS start");
+//   switch(type) {
 
-    case MonitorType::DUMP_MAPPING_INFO:
-      mappingManager.dump_mapping();
-      resp.makeStatus(false, false, TYPE_GENERIC_COMMAND_STATUS,
-                    STATUS_SUCCESS);
-      break;
+//     case MonitorType::DUMP_MAPPING_INFO:
+//       mappingManager.dump_mapping();
+//       resp.makeStatus(false, false, TYPE_GENERIC_COMMAND_STATUS,
+//                     STATUS_SUCCESS);
+//       break;
 
-    case MonitorType::DUMP_LBNPOOL_INFO:
-      lbnPoolManager.dump_LBNPool();
-      resp.makeStatus(false, false, TYPE_GENERIC_COMMAND_STATUS,
-                    STATUS_SUCCESS);
-      break;
+//     case MonitorType::DUMP_LBNPOOL_INFO:
+//       lbnPoolManager.dump_LBNPool();
+//       resp.makeStatus(false, false, TYPE_GENERIC_COMMAND_STATUS,
+//                     STATUS_SUCCESS);
+//       break;
 
-    default:
-      debugprint(LOG_IMS,
-             "NVM     | monitor IMS | error type : %d",type);
-      resp.makeStatus(false, false, TYPE_COMMAND_SPECIFIC_STATUS,
-                      STATUS_MONITOR_FAILD);
-      break;
-  }
-  func(resp);
-}
+//     default:
+//       debugprint(LOG_IMS,
+//              "NVM     | monitor IMS | error type : %d",type);
+//       resp.makeStatus(false, false, TYPE_COMMAND_SPECIFIC_STATUS,
+//                       STATUS_MONITOR_FAILD);
+//       break;
+//   }
+//   func(resp);
+// }
 
 void Namespace::allocate_lbn(SQEntryWrapper &req, RequestFunction &func) {
   bool err = false;

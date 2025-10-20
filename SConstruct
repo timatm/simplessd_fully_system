@@ -973,8 +973,15 @@ if ret > 0:
 
 
 print("workdir =", workdir)
-main.Append(LINKFLAGS=['-L' + workdir])
-main.Append(LIBS=['simplessd', 'firmware_lib','mcpat'])
+# main.Append(LINKFLAGS=['-L' + workdir])
+# main.Append(LIBS=['simplessd', 'firmware_lib','mcpat'])
+
+main.AppendUnique(CCFLAGS=['-pthread'])
+main.AppendUnique(LINKFLAGS=['-L' + workdir, '-pthread'])
+
+# 库的顺序很关键：先使用者(simple ssd/firmware/mcpat)，最后再 pthread
+main.AppendUnique(LIBS=['simplessd', 'firmware_lib', 'mcpat', 'pthread'])
+
 
 # Remove previous binaries to force scons to link newly built library
 for t in BUILD_TARGETS:
