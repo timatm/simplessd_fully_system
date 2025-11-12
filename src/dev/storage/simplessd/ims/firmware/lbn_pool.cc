@@ -10,7 +10,6 @@
 #include <numeric>
 
 #include "tree.hh"
-#include "def.hh"
 #include "print.hh"
 #include "persistence.hh"
 #include "mapping_table.hh"
@@ -40,7 +39,7 @@ int LBNPool::init_lbn_pool(const std::vector<uint64_t>& used_lbn_list) {
     for (uint64_t lbn : used_lbn_list) {
         int channel = LBN2CH(lbn);
         if (channel >= CHANNEL_NUM) {
-            pr_info("Invalid channel %d for LBN %lu", channel, lbn);
+            pr_error("Invalid channel %d for LBN %lu", channel, lbn);
             continue;
         }
         if(lbn != 0){
@@ -68,7 +67,7 @@ void LBNPool::insert_freeLBNList(uint64_t lbn) {
     // pr_info("insert free LBN:%8lu to [CH]: %lu [PACK]: %lu [DIE]: %lu [PLANE]: %lu", lbn, channel, package, die, plane);
     auto it = std::find(freeLBNList_[ch].begin(),freeLBNList_[ch].end(),lbn);
     if(it != freeLBNList_[ch].end()){
-        pr_debug("This LBN:%lld hae been in freeLBNList",lbn);
+        pr_error("This LBN:%lld hae been in freeLBNList",lbn);
         return;
     }
     freeLBNList_[ch].push_back(lbn);
@@ -113,11 +112,11 @@ void LBNPool::insert_usedLBNList(uint64_t lbn) {
     int ch = LBN2CH(lbn);
     auto it = std::find(usedLBNList_[ch].begin(),usedLBNList_[ch].end(),lbn);
     if(it != usedLBNList_[ch].end()){
-        pr_debug("This LBN:%lld have been in usedLBNList",lbn);
+        pr_error("This LBN:%lld have been in usedLBNList",lbn);
         return;
     }
     usedLBNList_[ch].push_back(lbn);
-    pr_info("IMS insert LBN:%lld in CH[%d] to used list ",lbn,LBN2CH(lbn));
+    pr_debug("IMS insert LBN:%lld in CH[%d] to used list ",lbn,LBN2CH(lbn));
 }
 
 bool LBNPool::remove_usedLBNList(uint64_t lbn) {
@@ -146,7 +145,7 @@ void LBNPool::insert_valueLogList(uint64_t lbn){
     int ch = LBN2CH(lbn);
     auto it = std::find(valueLogList_.begin(),valueLogList_.end(),lbn);
     if(it != valueLogList_.end()){
-        pr_debug("This LBN:%lld hae been in valueLogList",lbn);
+        pr_error("This LBN:%lld hae been in valueLogList",lbn);
         return;
     }
     valueLogList_.push_back(lbn);
@@ -243,7 +242,7 @@ uint64_t LBNPool::RRpolicy(){
         }
         ch = (ch + 1) % CHANNEL_NUM;
     } while (ch != start_ch);
-    pr_info("LBN pool(RRpolicy) doesn't have free LBN");
+    pr_error("LBN pool(RRpolicy) doesn't have free LBN");
     return INVALIDLBN;
 
 }
@@ -251,7 +250,7 @@ uint64_t LBNPool::RRpolicy(){
 uint64_t LBNPool::level2CH(int level){
     uint64_t lbn = INVALIDLBN;
     if (level < 0 || level >= CHANNEL_NUM) {
-        pr_info("Invalid level index: %d", level);
+        pr_error("Invalid level index: %d", level);
         return INVALIDLBN;
     }
     if(!freeLBNList_[level].empty()){
@@ -260,7 +259,7 @@ uint64_t LBNPool::level2CH(int level){
         return lbn;
     }
     else{
-        pr_info("LBN pool(level2CH) doesn't have free LBN");
+        pr_error("LBN pool(level2CH) doesn't have free LBN");
     }
     return INVALIDLBN;
 }
@@ -278,7 +277,7 @@ uint64_t LBNPool::my_policy(const std::vector<int>& relate_ch_list) {
         int ch = relate_ch_list[i];
         if (!freeLBNList_[ch].empty()) {
             lbn = getFront_freeLBNList(ch);
-            pr_info("My policy selected LBN: %lu from channel: %d", lbn, ch);
+            pr_debug("My policy selected LBN: %lu from channel: %d", lbn, ch);
             return lbn;
         }
     }

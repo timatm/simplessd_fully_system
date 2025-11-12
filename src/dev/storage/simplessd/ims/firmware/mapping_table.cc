@@ -3,6 +3,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <memory>
+#include "print.hh"
 
 Mapping::Mapping(Persistence& persistence, LBNPool& pool, Tree& tree)
     : persistenceManager_(persistence), lbnPool_(pool), tree_(tree) {
@@ -11,14 +12,14 @@ Mapping::Mapping(Persistence& persistence, LBNPool& pool, Tree& tree)
 int Mapping::init_mapping_table(uint64_t mappingPageLBN, uint64_t page_num) {
     int err = OPERATION_FAILURE;
     if (mappingPageLBN == INVALIDLBN) {
-        pr_info("Invalid mapping page LBN, cannot initialize mapping table");
+        pr_error("Invalid mapping page LBN, cannot initialize mapping table");
         return err;
     }
 
     size_t size = IMS_PAGE_SIZE;
     uint8_t* buffer = (uint8_t*)malloc(size);
     if (!buffer) {
-        pr_info("Failed to allocate buffer for mapping table");
+        pr_error("Failed to allocate buffer for mapping table");
         return err;
     }
 
@@ -28,14 +29,14 @@ int Mapping::init_mapping_table(uint64_t mappingPageLBN, uint64_t page_num) {
     for (int page = 0; page < page_num; page++) {
         err = persistenceManager_.readMappingTable(lpn, buffer, size);
         if (err != OPERATION_SUCCESS) {
-            pr_info("Failed to read mapping table at LPN: %lu", lpn);
+            pr_error("Failed to read mapping table at LPN: %lu", lpn);
             free(buffer);
             return OPERATION_FAILURE;
         }
 
         mappingTablePerPage* mappingTablePtr = (mappingTablePerPage*)buffer;
         if (mappingTablePtr->entry_num > MAPPING_TABLE_ENTRIES) {
-            pr_info("Mapping table entry num is error: %d", mappingTablePtr->entry_num);
+            pr_error("Mapping table entry num is error: %d", mappingTablePtr->entry_num);
         }
 
         pr_info("Mapping table[%d] entry num: %d", page, mappingTablePtr->entry_num);
@@ -64,7 +65,7 @@ void Mapping::insert_mapping(const std::string& filename, uint64_t lbn) {
     auto& list = lbnPool_.get_freeLBNList_ref(LBN2CH(lbn)); 
     auto it = std::find(list.begin(), list.end(), lbn);
     if (it == list.end()) {
-        pr_debug("Free list does not have LBN: %llu(CH:%d)", lbn,LBN2CH(lbn));
+        pr_error("Free list does not have LBN: %llu(CH:%d)", lbn,LBN2CH(lbn));
         return;
     }
 
@@ -81,7 +82,7 @@ uint64_t Mapping::getLBN(const std::string& filename) const {
 void Mapping::remove_mapping(const std::string& filename) {
     auto it = mappingTable_.find(filename);
     if (it == mappingTable_.end()) {
-        pr_info("File \"%s\" does not exist in the mapping table", filename.c_str());
+        pr_error("File \"%s\" does not exist in the mapping table", filename.c_str());
         return;
     }
 

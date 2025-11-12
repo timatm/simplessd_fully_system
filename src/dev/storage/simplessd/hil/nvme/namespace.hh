@@ -135,13 +135,26 @@ class Namespace {
   // Custom commands
   void write_sstable(SQEntryWrapper &, RequestFunction &);
   void read_sstable(SQEntryWrapper &, RequestFunction &);
+  void erase_sstable(SQEntryWrapper &, RequestFunction &);
+
   void write_log(SQEntryWrapper &, RequestFunction &);
   void read_log(SQEntryWrapper &, RequestFunction &);
+  void write_block(SQEntryWrapper &, RequestFunction &);
+  void read_block(SQEntryWrapper &, RequestFunction &);
+  
+
+  void open_DB(SQEntryWrapper &, RequestFunction &);
+  void close_DB(SQEntryWrapper &, RequestFunction &);
+
+  void read_buffer(SQEntryWrapper &, RequestFunction &);
+  void write_buffer(SQEntryWrapper &, RequestFunction &);
+
   void allocate_lbn(SQEntryWrapper &, RequestFunction &);
   void init_IMS(SQEntryWrapper &, RequestFunction &);
   void close_IMS(SQEntryWrapper &, RequestFunction &);
   void monitor_IMS(SQEntryWrapper &, RequestFunction &);
   void search_key(SQEntryWrapper &, RequestFunction &);
+
  public:
   Namespace(Subsystem *, ConfigData &);
   ~Namespace();

@@ -150,9 +150,51 @@ void Namespace::submitCommand(SQEntryWrapper &req, RequestFunction &func) {
           break;
         case OPCODE_READ_LOG:
           debugprint(LOG_IMS,
-                     "IMS     | Read Log  | SQ %u:%u | CID %u | NSID %-5d",
+                     "IMS     | Read Log | SQ %u:%u | CID %u | NSID %-5d",
                      req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
           read_log(req, func);
+          break;
+        case OPCODE_WRITE_BLOCK:
+          debugprint(LOG_IMS,
+                     "IMS     | Write Block | SQ %u:%u | CID %u | NSID %-5d",
+                     req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
+          write_block(req, func);
+          break;
+        case OPCODE_READ_BLOCK:
+          debugprint(LOG_IMS,
+                     "IMS     | Read Block | SQ %u:%u | CID %u | NSID %-5d",
+                     req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
+          read_block(req, func);
+          break;
+        case OPCODE_WRITE_BUFFER:
+          debugprint(LOG_IMS,
+                     "IMS     | Write Buffer | SQ %u:%u | CID %u | NSID %-5d",
+                     req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
+          write_buffer(req, func);
+          break;
+        case OPCODE_READ_BUFFER:
+          debugprint(LOG_IMS,
+                     "IMS     | Read Buffer | SQ %u:%u | CID %u | NSID %-5d",
+                     req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
+          read_buffer(req, func);
+          break;
+        case OPCODE_OPEN_DB:
+          debugprint(LOG_IMS,
+                     "IMS     | Open DB | SQ %u:%u | CID %u | NSID %-5d",
+                     req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
+          open_DB(req, func);
+          break;
+        case OPCODE_CLOSE_DB:
+          debugprint(LOG_IMS,
+                     "IMS     | Close DB | SQ %u:%u | CID %u | NSID %-5d",
+                     req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
+          close_DB(req, func);
+          break;
+        case OPCODE_ERASE_SSTABLE:
+          debugprint(LOG_IMS,
+                     "IMS     | Erase SStable | SQ %u:%u | CID %u | NSID %-5d",
+                     req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
+          close_DB(req, func);
           break;
         default:
           debugprint(
@@ -757,29 +799,7 @@ void Namespace::datasetManagement(SQEntryWrapper &req, RequestFunction &func) {
 void Namespace::write_sstable(SQEntryWrapper &req, RequestFunction &func) {
   bool err = false;
 
-  CQEntryWrapper resp(req);
-
-  // Parse IMS command
-  char buf[25] = {0};
-  uint32_t dwords[5] = {
-    req.entry.dword11,
-    req.entry.dword12,
-    req.entry.dword13,
-    req.entry.dword14,
-    req.entry.dword15
-  };
-  memcpy(buf, dwords, sizeof(dwords));
-  std::string filename(buf);
-  uint32_t level = req.entry.dword10;
-  Key min;
-  Key max;
-  // uint32_t min =  req.entry.reserved1;
-  // uint32_t max = req.entry.reserved2;
-  uint8_t *buffer  = new uint8_t[2]; // dummy buffer not real data
-  hostInfo request(filename,level,min,max);
-  request.lbn = INVALIDLBN;
-  err = (bool)ims.write_sstable(buffer);
-  
+  CQEntryWrapper resp(req);  
   // uint64_t slba = ((uint64_t)req.entry.dword11 << 32) | req.entry.dword10;
   // uint16_t nlb = (req.entry.dword12 & 0xFFFF) + 1;
 
@@ -788,14 +808,9 @@ void Namespace::write_sstable(SQEntryWrapper &req, RequestFunction &func) {
     resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
                     STATUS_NAMESPACE_NOT_ATTACHED);
   }
-  if(request.lbn == INVALIDLBN){
-    debugprint(LOG_IMS,
-             "NVM     | WRITE_SSTABLE | Allocate LBN is invalid");
-    err = true;
-    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
-                    STATUS_LBN_INVALID);
-  }
-  if(err){
+  uint64_t lbn = INVALIDLBN;
+  err = ims.write_sstable(lbn);
+  if(lbn == INVALIDLBN){
     debugprint(LOG_IMS,
              "NVM     | WRITE_SSTABLE | Command failed");
     resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
@@ -805,10 +820,7 @@ void Namespace::write_sstable(SQEntryWrapper &req, RequestFunction &func) {
   //   err = true;
   //   warn("nvme_namespace: host tried to write 0 blocks");
   // }
-  pr_info("TEST !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-  debugprint(LOG_IMS,
-             "NVM     | WRITE_SSTABLE | Filename: %s | Level: %d | Range: [%d ~ %d] | LBN: %ld",
-             request.filename.c_str(), request.levelInfo, request.rangeMin, request.rangeMax, request.lbn);
+  
   if (!err) {
     DMAFunction doread = [this](uint64_t tick, void *context) {
       DMAFunction dmaDone = [this](uint64_t tick, void *context) {
@@ -860,11 +872,11 @@ void Namespace::write_sstable(SQEntryWrapper &req, RequestFunction &func) {
     IOContext *pContext = new IOContext(func, resp);
 
     pContext->beginAt = getTick();
-    pContext->lpn = LBN2LPN(request.lbn);
+    pContext->lpn = LBN2LPN(lbn);
     pContext->nlpn = IMS_PAGE_NUM;
-    pContext->lbn = request.lbn;
+    pContext->lbn = lbn;
     debugprint(LOG_IMS,
-              "NVM     | WRITE_SSTABLE | IOContext | LPN: %ld (LBN: %ld)| number of LPN: %ld",pContext->lpn ,request.lbn,pContext->nlpn);
+              "NVM     | WRITE_SSTABLE | IOContext | LPN: %ld (LBN: %ld)| number of LPN: %ld",pContext->lpn ,lbn,pContext->nlpn);
 
     CPUContext *pCPU =
         new CPUContext(doread, pContext, CPU::NVME__NAMESPACE, CPU::WRITE);
@@ -893,8 +905,8 @@ void Namespace::write_log(SQEntryWrapper &req, RequestFunction &func) {
   
   uint64_t lpn = ((uint64_t)req.entry.reserved2) << 32 | req.entry.reserved1;
 
-  uint8_t *buffer  = new uint8_t[2]; // dummy buffer not real data
-  err = (bool)ims.write_log(lpn,buffer);
+  // uint8_t *buffer  = new uint8_t[2]; // dummy buffer not real data
+  // err = (bool)ims.write_log(lpn,buffer);
   
   // uint64_t slba = ((uint64_t)req.entry.dword11 << 32) | req.entry.dword10;
   // uint16_t nlb = (req.entry.dword12 & 0xFFFF) + 1;
@@ -923,7 +935,7 @@ void Namespace::write_log(SQEntryWrapper &req, RequestFunction &func) {
         if (pContext->beginAt == 2) {
           debugprint(
               LOG_IMS,
-              "NVM     | WRITE_SSTABLE | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
+              "NVM     | WRITE LOG | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
               "%" PRIX64 " + %d | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
               pContext->resp.cqID, pContext->resp.entry.dword2.sqID,
               pContext->resp.sqUID, pContext->resp.entry.dword3.commandID, nsid,
@@ -932,7 +944,7 @@ void Namespace::write_log(SQEntryWrapper &req, RequestFunction &func) {
           pContext->function(pContext->resp);
 
           if (pContext->buffer) {
-            pDisk->writePage(pContext->lbn,pContext->buffer);
+            pDisk->writePage(pContext->lpn,pContext->buffer);
 
             free(pContext->buffer);
           }
@@ -968,7 +980,7 @@ void Namespace::write_log(SQEntryWrapper &req, RequestFunction &func) {
     pContext->nlpn = 1;
     pContext->lbn = LPN2LBN(lpn);
     debugprint(LOG_IMS,
-              "NVM     | WRITE_SSTABLE | IOContext | LPN: %ld (LBN: %ld)| number of LPN: %ld",pContext->lpn ,pContext->lbn,pContext->nlpn);
+              "NVM     | WRITE LOG  | IOContext | LPN: %ld (LBN: %ld)| number of LPN: %ld",pContext->lpn ,pContext->lbn,pContext->nlpn);
 
     CPUContext *pCPU =
         new CPUContext(doread, pContext, CPU::NVME__NAMESPACE, CPU::WRITE);
@@ -988,30 +1000,133 @@ void Namespace::write_log(SQEntryWrapper &req, RequestFunction &func) {
   }
 }
 
-void Namespace::read_sstable(SQEntryWrapper &req, RequestFunction &func) {
+void Namespace::write_block(SQEntryWrapper &req, RequestFunction &func) {
   bool err = false;
 
   CQEntryWrapper resp(req);
-  char buf[25] = {0};
-  uint32_t dwords[5] = {
-    req.entry.dword11,
-    req.entry.dword12,
-    req.entry.dword13,
-    req.entry.dword14,
-    req.entry.dword15
-  };
-  memcpy(buf, dwords, sizeof(dwords));
-  std::string filename(buf);
-  // bool fua = req.entry.dword12 & 0x40000000;
-  hostInfo request(filename);
-  uint8_t *buffer  = new uint8_t[2]; // dummy buffer not real data
-  err = (bool)ims.read_sstable(buffer);
+
+  // Parse IMS command
+  
+  uint32_t lbn = req.entry.dword12;
+
+  // uint8_t *buffer  = new uint8_t[2]; // dummy buffer not real data
+  // err = (bool)ims.write_log(lpn,buffer);
+  
+  // uint64_t slba = ((uint64_t)req.entry.dword11 << 32) | req.entry.dword10;
+  // uint16_t nlb = (req.entry.dword12 & 0xFFFF) + 1;
+
   if (!attached) {
     err = true;
     resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
                     STATUS_NAMESPACE_NOT_ATTACHED);
   }
-  if(request.lbn == INVALIDLBN){
+  if(err){
+    debugprint(LOG_IMS,
+             "NVM     | WRITE BLOCK | Command failed");
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_COMMAND_FAILD);
+  }
+  debugprint(LOG_IMS,
+             "NVM     | WRITE BLOCK | LBN: %lu ",
+             lbn);
+  if (!err) {
+    DMAFunction doread = [this](uint64_t tick, void *context) {
+      DMAFunction dmaDone = [this](uint64_t tick, void *context) {
+        IOContext *pContext = (IOContext *)context;
+
+        pContext->beginAt++;
+
+        if (pContext->beginAt == 2) {
+          debugprint(
+              LOG_IMS,
+              "NVM     | WRITE BLOCK | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
+              "%" PRIX64 " + %d | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
+              pContext->resp.cqID, pContext->resp.entry.dword2.sqID,
+              pContext->resp.sqUID, pContext->resp.entry.dword3.commandID, nsid,
+              pContext->slba, pContext->nlb, pContext->tick, tick,
+              tick - pContext->tick);
+          pContext->function(pContext->resp);
+
+          if (pContext->buffer) {
+            pDisk->writeBlock(pContext->lbn,pContext->buffer);
+            free(pContext->buffer);
+          }
+
+          delete pContext->dma;
+          delete pContext;
+        }
+      };
+
+      IOContext *pContext = (IOContext *)context;
+
+      pContext->tick = tick;
+      pContext->beginAt = 0;
+
+      if (pDisk) {
+        pContext->buffer = (uint8_t *)calloc(BLOCK_SIZE, 1);
+
+        pContext->dma->read(0, (uint64_t)BLOCK_SIZE, pContext->buffer,
+                            dmaDone, context);
+      }
+      else {
+        pContext->dma->read(0, (uint64_t)BLOCK_SIZE, nullptr, dmaDone,
+                            context);
+      }
+
+      pParent->writeIMS(this, pContext->lpn, pContext->nlpn, dmaDone, context);
+    };
+
+    IOContext *pContext = new IOContext(func, resp);
+
+    pContext->beginAt = getTick();
+    pContext->lpn = LBN2LPN(lbn);
+    pContext->nlpn = IMS_PAGE_NUM;
+    pContext->lbn = lbn;
+    debugprint(LOG_IMS,
+              "NVM     | WRITE_SSTABLE | IOContext | LPN: %ld (LBN: %ld)| number of LPN: %ld",pContext->lpn ,pContext->lbn,pContext->nlpn);
+
+    CPUContext *pCPU =
+        new CPUContext(doread, pContext, CPU::NVME__NAMESPACE, CPU::WRITE);
+
+    if (req.useSGL) {
+      pContext->dma =
+          new SGL(cfgdata, cpuHandler, pCPU, req.entry.data1, req.entry.data2);
+    }
+    else {
+      pContext->dma =
+          new PRPList(cfgdata, cpuHandler, pCPU, req.entry.data1,
+                      req.entry.data2, (uint64_t)BLOCK_SIZE);
+    }
+  }
+  else {
+    func(resp);
+  }
+}
+
+void Namespace::read_sstable(SQEntryWrapper &req, RequestFunction &func) {
+  bool err = false;
+
+  CQEntryWrapper resp(req);
+  // char buf[25] = {0};
+  // uint32_t dwords[5] = {
+  //   req.entry.dword11,
+  //   req.entry.dword12,
+  //   req.entry.dword13,
+  //   req.entry.dword14,
+  //   req.entry.dword15
+  // };
+  // memcpy(buf, dwords, sizeof(dwords));
+  // std::string filename(buf);
+  // // bool fua = req.entry.dword12 & 0x40000000;
+  // hostInfo request(filename);
+  uint64_t lbn = INVALIDLBN;
+  err = (bool)ims.read_sstable(lbn);
+  if (!attached) {
+    err = true;
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_NAMESPACE_NOT_ATTACHED);
+  }
+  if(lbn == INVALIDLBN){
     err = true;
     debugprint(LOG_IMS,
              "NVM     | READ_SSTABLE | Allocate LBN is invalid");
@@ -1024,8 +1139,6 @@ void Namespace::read_sstable(SQEntryWrapper &req, RequestFunction &func) {
     resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
                     STATUS_COMMAND_FAILD);
   }
-  debugprint(LOG_IMS,
-             "NVM     | READ_SSTABLE | Filename: %s",filename.c_str());
 
   if (!err) {
     DMAFunction doRead = [this](uint64_t tick, void *context) {
@@ -1074,11 +1187,11 @@ void Namespace::read_sstable(SQEntryWrapper &req, RequestFunction &func) {
     IOContext *pContext = new IOContext(func, resp);
 
     pContext->beginAt = getTick();
-    pContext->lpn = LBN2LPN(request.lbn);
+    pContext->lpn = LBN2LPN(lbn);
     pContext->nlpn = IMS_PAGE_NUM;
-    pContext->lbn = request.lbn;
+    pContext->lbn = lbn;
     debugprint(LOG_IMS,
-              "NVM     | READ_SSTABLE | IOContext | LPN: %ld (LBN: %ld)| number of LPN: %ld",pContext->lpn ,request.lbn,pContext->nlpn);
+              "NVM     | READ_SSTABLE | IOContext | LPN: %ld (LBN: %ld)| number of LPN: %ld",pContext->lpn ,lbn,pContext->nlpn);
 
 
     CPUContext *pCPU =
@@ -1105,21 +1218,21 @@ void Namespace::read_log(SQEntryWrapper &req, RequestFunction &func) {
   CQEntryWrapper resp(req);
 
   uint64_t lpn = ((uint64_t)req.entry.reserved2) << 32 | req.entry.reserved1;
-  uint8_t *buffer  = new uint8_t[2]; // dummy buffer not real data
-  err = (bool)ims.read_log(lpn,buffer);
+  // uint8_t *buffer  = new uint8_t[2]; // dummy buffer not real data
+  // err = (bool)ims.read_log(lpn,buffer);
   if (!attached) {
     err = true;
     resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
                     STATUS_NAMESPACE_NOT_ATTACHED);
   }
-  if(err){
-    debugprint(LOG_IMS,
-             "NVM     | READ LOG | Command failed");
-    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
-                    STATUS_COMMAND_FAILD);
-  }
+  // if(err){
+  //   debugprint(LOG_IMS,
+  //            "NVM     | READ LOG | Command failed");
+  //   resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+  //                   STATUS_COMMAND_FAILD);
+  // }
   debugprint(LOG_IMS,
-             "NVM     | READ LOG | LBN: %lu | PAGE OFFSET: %lu",LPN2LBN(lpn),lpn);
+             "NVM     | READ LOG | LBN: %lu | LPN: %lu",LPN2LBN(lpn),lpn);
 
   if (!err) {
     DMAFunction doRead = [this](uint64_t tick, void *context) {
@@ -1158,7 +1271,7 @@ void Namespace::read_log(SQEntryWrapper &req, RequestFunction &func) {
       pContext->buffer = (uint8_t *)calloc(IMS_PAGE_SIZE, 1);
 
       if (pDisk) {
-        pDisk->readPage(pContext->lbn, pContext->buffer);
+        pDisk->readPage(pContext->lpn, pContext->buffer);
       }
       
       pContext->dma->write(0, (uint64_t)IMS_PAGE_SIZE, pContext->buffer,
@@ -1198,6 +1311,111 @@ void Namespace::read_log(SQEntryWrapper &req, RequestFunction &func) {
     else {
       debugprint(LOG_IMS, "PRPList created: %p", pContext->dma);
     }
+  }
+  else {
+    func(resp);
+  }
+}
+
+void Namespace::read_block(SQEntryWrapper &req, RequestFunction &func) {
+  bool err = false;
+
+  CQEntryWrapper resp(req);
+
+  uint32_t lbn = req.entry.dword12;
+  // uint8_t *buffer  = new uint8_t[2]; // dummy buffer not real data
+  // err = (bool)ims.read_log(lpn,buffer);
+  if (!attached) {
+    err = true;
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_NAMESPACE_NOT_ATTACHED);
+  }
+  if(err){
+    debugprint(LOG_IMS,
+             "NVM     | READ LOG | Command failed");
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_COMMAND_FAILD);
+  }
+  debugprint(LOG_IMS,
+             "NVM     | READ LOG | LBN: %lu",lbn);
+
+  if (!err) {
+    DMAFunction doRead = [this](uint64_t tick, void *context) {
+      DMAFunction dmaDone = [this](uint64_t tick, void *context) {
+        IOContext *pContext = (IOContext *)context;
+        pContext->beginAt++;
+
+        if (pContext->beginAt == 2) {
+          debugprint(
+              LOG_HIL_NVME,
+              "NVM     | READ LOG  | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
+              "%" PRIX64 " + %d | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
+              pContext->resp.cqID, pContext->resp.entry.dword2.sqID,
+              pContext->resp.sqUID, pContext->resp.entry.dword3.commandID, nsid,
+              pContext->slba, pContext->nlb, pContext->tick, tick,
+              tick - pContext->tick);
+
+          pContext->function(pContext->resp);
+
+          if (pContext->buffer) {
+            free(pContext->buffer);
+          }
+
+          delete pContext->dma;
+          delete pContext;
+        }
+      };
+
+      IOContext *pContext = (IOContext *)context;
+
+      pContext->tick = tick;
+      pContext->beginAt = 0;
+
+      pParent->readIMS(this, pContext->lpn, pContext->nlpn, dmaDone, pContext);
+
+      pContext->buffer = (uint8_t *)calloc(BLOCK_SIZE, 1);
+
+      if (pDisk) {
+        pDisk->readBlock(pContext->lbn, pContext->buffer);
+      }
+      
+      pContext->dma->write(0, (uint64_t)BLOCK_SIZE, pContext->buffer,
+                           dmaDone, context);
+    };
+
+    IOContext *pContext = new IOContext(func, resp);
+
+    pContext->beginAt = getTick();
+    pContext->nlpn = IMS_PAGE_NUM;
+    pContext->lpn = LBN2LPN(lbn);
+    pContext->lbn = lbn;
+    debugprint(LOG_IMS,
+              "NVM     | READ LOG | IOContext | LPN:%ld (LBN: %ld) | number of LPN: %ld",pContext->lpn,pContext->lbn,pContext->nlpn);
+
+
+    CPUContext *pCPU =
+        new CPUContext(doRead, pContext, CPU::NVME__NAMESPACE, CPU::READ);
+
+    if (req.useSGL) {
+      pContext->dma =
+          new SGL(cfgdata, cpuHandler, pCPU, req.entry.data1, req.entry.data2);
+    }
+    else {
+      debugprint(LOG_IMS,
+              "NVM     | READ LOG | req.entry.data1 : 0x%x",req.entry.data1);
+      debugprint(LOG_IMS,
+              "NVM     | READ LOG | req.entry.data2 : 0x%x",req.entry.data2);
+      pContext->dma =
+          new PRPList(cfgdata, cpuHandler, pCPU, req.entry.data1,
+                      req.entry.data2, (uint64_t)BLOCK_SIZE);
+    }
+    // if (!pContext->dma) {
+    //   debugprint(LOG_IMS, "FATAL: PRPList allocation failed!");
+    //   abort();
+    // } 
+    // else {
+    //   debugprint(LOG_IMS, "PRPList created: %p", pContext->dma);
+    // }
   }
   else {
     func(resp);
@@ -1321,7 +1539,7 @@ void Namespace::allocate_lbn(SQEntryWrapper &req, RequestFunction &func) {
   }
   if(err){
     debugprint(LOG_IMS,
-             "NVM     | READ_SSTABLE | Command failed");
+             "NVM     | ALLOCATE LBN | Command failed");
     resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
                     STATUS_COMMAND_FAILD);
   }
@@ -1339,7 +1557,7 @@ void Namespace::allocate_lbn(SQEntryWrapper &req, RequestFunction &func) {
         if (pContext->beginAt == 1) {
           debugprint(
               LOG_HIL_NVME,
-              "NVM     | READ_SSTABLE  | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
+              "NVM     | ALLOCATE LBN  | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
               "%" PRIX64 " + %d | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
               pContext->resp.cqID, pContext->resp.entry.dword2.sqID,
               pContext->resp.sqUID, pContext->resp.entry.dword3.commandID, nsid,
@@ -1390,6 +1608,332 @@ void Namespace::allocate_lbn(SQEntryWrapper &req, RequestFunction &func) {
 }
 
 
+void Namespace::write_buffer(SQEntryWrapper &req, RequestFunction &func) {
+  bool err = false;
+
+  CQEntryWrapper resp(req);
+  uint32_t numberOfSize = req.entry.dword12;
+  if (!attached) {
+    err = true;
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_NAMESPACE_NOT_ATTACHED);
+  }
+  if(err){
+    debugprint(LOG_IMS,
+             "NVM     | WRITE_BUFFER | Command failed");
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_COMMAND_FAILD);
+  }
+  
+
+  if (!err) {
+    DMAFunction doRead = [this](uint64_t tick, void *context) {
+      DMAFunction dmaDone = [this](uint64_t tick, void *context) {
+        IOContext *pContext = (IOContext *)context;
+        pContext->beginAt++;
+        if (pContext->beginAt == 1) {
+          debugprint(
+              LOG_HIL_NVME,
+              "WRITE_BUFFER is done");
+
+          pContext->function(pContext->resp);
+
+          if (pContext->buffer) {
+            int err = ims.write_meta(pContext->buffer,pContext->nlb);
+            free(pContext->buffer);
+          }
+
+          delete pContext->dma;
+          delete pContext;
+        }
+      };
+
+      IOContext *pContext = (IOContext *)context;
+
+      pContext->tick = tick;
+      pContext->beginAt = 0;
+      pContext->buffer = (uint8_t *)calloc(pContext->nlb, sizeof(uint8_t));
+      pContext->dma->read(0, pContext->nlb, pContext->buffer,
+                            dmaDone, context);
+    };
+
+    IOContext *pContext = new IOContext(func, resp);
+
+    pContext->beginAt = getTick();
+    // Using nlb to transfer the variable of my data size
+    pContext->nlb     = numberOfSize;
+    CPUContext *pCPU =
+        new CPUContext(doRead, pContext, CPU::NVME__NAMESPACE, CPU::READ);
+
+    if (req.useSGL) {
+      pContext->dma =
+          new SGL(cfgdata, cpuHandler, pCPU, req.entry.data1, req.entry.data2);
+    }
+    else {
+      pContext->dma =
+          new PRPList(cfgdata, cpuHandler, pCPU, req.entry.data1,
+                      req.entry.data2, (uint64_t)sizeof(numberOfSize));
+    }
+  }
+  else {
+    func(resp);
+  }
+}
+
+
+void Namespace::read_buffer(SQEntryWrapper &req, RequestFunction &func) {
+  bool err = false;
+
+  CQEntryWrapper resp(req);
+  uint32_t numberOfSize = req.entry.dword12;
+  if (!attached) {
+    err = true;
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_NAMESPACE_NOT_ATTACHED);
+  }
+  if(err){
+    debugprint(LOG_IMS,
+             "NVM     | READ_BUFFER | Command failed");
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_COMMAND_FAILD);
+  }
+  
+
+  if (!err) {
+    DMAFunction doRead = [this](uint64_t tick, void *context) {
+      DMAFunction dmaDone = [this](uint64_t tick, void *context) {
+        IOContext *pContext = (IOContext *)context;
+        pContext->beginAt++;
+        if (pContext->beginAt == 1) {
+          debugprint(
+              LOG_HIL_NVME,
+              "READ_BUFFER is done");
+
+          pContext->function(pContext->resp);
+
+          if (pContext->buffer) {
+            free(pContext->buffer);
+          }
+
+          delete pContext->dma;
+          delete pContext;
+        }
+      };
+
+      IOContext *pContext = (IOContext *)context;
+
+      pContext->tick = tick;
+      pContext->beginAt = 0;
+      pContext->buffer = (uint8_t *)calloc(pContext->nlb, sizeof(uint8_t));
+      int err = ims.read_meta(pContext->buffer,pContext->nlb);
+      pContext->dma->write(0, pContext->nlb, pContext->buffer,
+                            dmaDone, context);
+      
+    };
+
+    IOContext *pContext = new IOContext(func, resp);
+
+    pContext->beginAt = getTick();
+    // Using nlb to transfer the variable of my data size
+    pContext->nlb     = numberOfSize;
+    CPUContext *pCPU =
+        new CPUContext(doRead, pContext, CPU::NVME__NAMESPACE, CPU::READ);
+
+    if (req.useSGL) {
+      pContext->dma =
+          new SGL(cfgdata, cpuHandler, pCPU, req.entry.data1, req.entry.data2);
+    }
+    else {
+      pContext->dma =
+          new PRPList(cfgdata, cpuHandler, pCPU, req.entry.data1,
+                      req.entry.data2, (uint64_t)sizeof(numberOfSize));
+    }
+  }
+  else {
+    func(resp);
+  }
+}
+
+
+void Namespace::open_DB(SQEntryWrapper &req, RequestFunction &func) {
+  bool err = false;
+
+  CQEntryWrapper resp(req);
+  // bool fua = req.entry.dword12 & 0x40000000;
+  uint32_t dataLen = INVALID_32;
+  err = (bool)ims.open_DB(&dataLen);
+  if (!attached) {
+    err = true;
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_NAMESPACE_NOT_ATTACHED);
+  }
+  if(dataLen == INVALID_32){
+    err = true;
+  }
+  if(err){
+    debugprint(LOG_IMS,
+             "NVM     | OPEN DB | Command failed");
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_COMMAND_FAILD);
+  }
+  else{
+    debugprint(LOG_IMS,
+             "NVM     | OPEN DB | open DB is success ,need read datalen: %lu",dataLen);
+  }
+  
+
+  if (!err) {
+    DMAFunction doRead = [this](uint64_t tick, void *context) {
+      DMAFunction dmaDone = [this](uint64_t tick, void *context) {
+        IOContext *pContext = (IOContext *)context;
+        pContext->beginAt++;
+        if (pContext->beginAt == 1) {
+          debugprint(
+              LOG_HIL_NVME,
+              "NVM     | OPEN DB  | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
+              "%" PRIX64 " + %d | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
+              pContext->resp.cqID, pContext->resp.entry.dword2.sqID,
+              pContext->resp.sqUID, pContext->resp.entry.dword3.commandID, nsid,
+              pContext->slba, pContext->nlb, pContext->tick, tick,
+              tick - pContext->tick);
+
+          pContext->function(pContext->resp);
+
+          if (pContext->buffer) {
+            free(pContext->buffer);
+          }
+
+          delete pContext->dma;
+          delete pContext;
+        }
+      };
+
+      IOContext *pContext = (IOContext *)context;
+
+      pContext->tick = tick;
+      pContext->beginAt = 0;
+      pContext->buffer = (uint8_t *)calloc(1,sizeof(uint32_t));
+      uint32_t datalen = static_cast<uint32_t>(pContext->lbn);
+      memcpy(pContext->buffer, &datalen, sizeof(uint32_t));
+      pContext->dma->write(0, sizeof(uint32_t), pContext->buffer,
+                           dmaDone, context);
+    };
+
+    IOContext *pContext = new IOContext(func, resp);
+
+    pContext->beginAt = getTick();
+    pContext->nlb     = static_cast<uint64_t>(dataLen);
+    CPUContext *pCPU = 
+        new CPUContext(doRead, pContext, CPU::NVME__NAMESPACE, CPU::READ);
+
+    if (req.useSGL) {
+      pContext->dma =
+          new SGL(cfgdata, cpuHandler, pCPU, req.entry.data1, req.entry.data2);
+    }
+    else {
+      pContext->dma =
+          new PRPList(cfgdata, cpuHandler, pCPU, req.entry.data1,
+                      req.entry.data2, (uint64_t)sizeof(uint64_t));
+    }
+  }
+  else {
+    func(resp);
+  }
+}
+
+
+void Namespace::close_DB(SQEntryWrapper &req, RequestFunction &func) {
+  bool err = false;
+
+  CQEntryWrapper resp(req);
+  uint32_t numberOfSize = req.entry.dword12;
+  if (!attached) {
+    err = true;
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_NAMESPACE_NOT_ATTACHED);
+  }
+  if(err){
+    debugprint(LOG_IMS,
+             "NVM     | CLOSE DB | Command failed");
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_COMMAND_FAILD);
+  }
+  
+
+  if (!err) {
+    DMAFunction doRead = [this](uint64_t tick, void *context) {
+      DMAFunction dmaDone = [this](uint64_t tick, void *context) {
+        IOContext *pContext = (IOContext *)context;
+        pContext->beginAt++;
+        if (pContext->beginAt == 1) {
+          pContext->function(pContext->resp);
+          if (pContext->buffer) {
+            int err = ims.close_DB(pContext->buffer,pContext->nlb);
+            free(pContext->buffer);
+          }
+          debugprint(
+              LOG_HIL_NVME,
+              "Close DB is done");
+          delete pContext->dma;
+          delete pContext;
+        }
+      };
+
+      IOContext *pContext = (IOContext *)context;
+
+      pContext->tick = tick;
+      pContext->beginAt = 0;
+      pContext->buffer = (uint8_t *)calloc(pContext->nlb, sizeof(uint8_t));
+      pContext->dma->read(0, pContext->nlb, pContext->buffer,
+                            dmaDone, context);
+    };
+
+    IOContext *pContext = new IOContext(func, resp);
+
+    pContext->beginAt = getTick();
+    // Using nlb to transfer the variable of my data size
+    pContext->nlb     = numberOfSize;
+    CPUContext *pCPU =
+        new CPUContext(doRead, pContext, CPU::NVME__NAMESPACE, CPU::READ);
+
+    if (req.useSGL) {
+      pContext->dma =
+          new SGL(cfgdata, cpuHandler, pCPU, req.entry.data1, req.entry.data2);
+    }
+    else {
+      pContext->dma =
+          new PRPList(cfgdata, cpuHandler, pCPU, req.entry.data1,
+                      req.entry.data2, static_cast<uint64_t>(numberOfSize));
+    }
+  }
+  else {
+    func(resp);
+  }
+}
+
+
+void Namespace::erase_sstable(SQEntryWrapper &req, RequestFunction &func) {
+  bool err = false;
+
+  CQEntryWrapper resp(req);  
+  // uint64_t slba = ((uint64_t)req.entry.dword11 << 32) | req.entry.dword10;
+  // uint16_t nlb = (req.entry.dword12 & 0xFFFF) + 1;
+
+  if (!attached) {
+    err = true;
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_NAMESPACE_NOT_ATTACHED);
+  }
+  debugprint(LOG_HIL_NVME,
+             "NVM     | ERASE SSTABLE | SQ %u:%u | CID %u | NSID %-5d",
+             req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
+  err = ims.erase_sstable();
+  // if (nlb == 0) {
+  //   err = true;
+  //   warn("nvme_namespace: host tried to write 0 blocks");
+  // }
+  func(resp);
+}
 
 }  // namespace NVMe
 

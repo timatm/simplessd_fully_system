@@ -45,4 +45,10 @@ compile_flags.txt
 /src/dev/storage/simplessd/ims/db/libnvme
 disk.bin
 *.img
-src/dev/storage/simplessd/ims/db/test.img
+/src/dev/storage/simplessd/ims/db/test.img
+
+/workload/YCSB-C/*.o
+/workload/YCSB-C/mydb
+/workload/YCSB-C/log
+/workload/YCSB-C/redis
+/db_engine/build-static

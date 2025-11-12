@@ -90,7 +90,7 @@ int Disk::writeBlock(uint64_t lbn ,uint8_t *buffer) {
             // pr_debug("Write block at page: %d LPN: %lu", i, lpn);
             uint16_t written = writePage(lpn+i, page_ptr);
             if (written != 0) {
-                pr_info("[ERROR] write block failed at page: %d LPN: %lu", i, lpn);
+                pr_error("write block failed at page: %d LPN: %lu", i, lpn);
             }
             ret += written;
         }
@@ -109,7 +109,7 @@ int Disk::readBlock(uint64_t lbn ,uint8_t *buffer) {
 
         int read_result = readPage(lpn+i, page_ptr);
         if (read_result != 0) {
-            pr_info("[ERROR] read block failed at page: %d LPN: %lu", i, lpn);
+            pr_error("read block failed at page: %d LPN: %lu", i, lpn);
             break;
         }
         ret += read_result;

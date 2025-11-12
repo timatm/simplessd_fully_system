@@ -31,3 +31,12 @@ target_include_directories(firmware_lib PUBLIC
     # ${CMAKE_CURRENT_SOURCE_DIR}/../db/src/db_nvme
 )
 
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../include/
+        DESTINATION include
+        FILES_MATCHING
+          PATTERN "*.hh"
+        # 需要的话还能排除子目录：
+        # PATTERN "internal/*" EXCLUDE
+)
+
+

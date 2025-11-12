@@ -10,11 +10,11 @@
 int Persistence::readMappingTable(uint64_t lpn,uint8_t *buffer,size_t size) {
     int err;
     if (buffer == nullptr) {
-        std::cerr << "[ERROR] Memory allocation failed.\n";
+        pr_error("[ERROR] Memory allocation failed.");
         return OPERATION_FAILURE;
     }
     if (size != IMS_PAGE_SIZE){
-        pr_debug("[ERROR] Memory allocation failed.");
+        pr_error("Memory allocation failed.");
         return OPERATION_FAILURE;
     }
     err = pDisk_->readPage(lpn, buffer);
@@ -84,11 +84,11 @@ int Persistence::flushMappingTable(const std::unordered_map<std::string, uint64_
 int  Persistence::readBlock(uint64_t lbn,uint8_t *buffer,size_t size){
     int err;
     if (buffer == nullptr) {
-        std::cerr << "[ERROR] Memory allocation failed.\n";
+        pr_error("[ERROR] Memory allocation failed.");
         return OPERATION_FAILURE;
     }
     if (size != BLOCK_SIZE){
-        pr_debug("[ERROR] Memory allocation failed.");
+        pr_error("[ERROR] Memory allocation failed.");
         return OPERATION_FAILURE;
     }
     err = pDisk_->readBlock(lbn, buffer);
@@ -104,15 +104,15 @@ int Persistence::writeBlock(uint64_t lbn,uint8_t *buffer,size_t size){
         return OPERATION_SUCCESS;
     }
     if(!pDisk_->file_){
-        pr_debug("Disk does't open");
+        pr_error("Disk does't open");
         return OPERATION_FAILURE;
     }
     if (buffer == nullptr) {
-        std::cerr << "[ERROR] Memory allocation failed.\n";
+        pr_error("[ERROR] Memory allocation failed.");
         return OPERATION_FAILURE;
     }
     if (size != BLOCK_SIZE){
-        pr_debug("[ERROR] Memory allocation failed.");
+        pr_error("Memory allocation failed.");
         return OPERATION_FAILURE;
     }
     err = pDisk_->writeBlock(lbn, buffer);
@@ -142,15 +142,15 @@ int Persistence::writeBlock(uint64_t lbn,uint8_t *buffer,size_t size){
 int Persistence::readPage(uint64_t lpn,uint8_t *buffer,size_t size){
     int err;
     if (pDisk_ == nullptr) {
-        pr_debug("[ERROR] Disk not initialized.");
+        pr_error("Disk not initialized.");
         return OPERATION_FAILURE;
     }
     if (buffer == nullptr) {
-        pr_debug("[ERROR] Memory allocation failed");
+        pr_error("Memory allocation failed");
         return OPERATION_FAILURE;
     }
     if (size != IMS_PAGE_SIZE){
-        pr_debug("[ERROR] data size doesn't match");
+        pr_error("data size doesn't match");
         return OPERATION_FAILURE;
     }
     err = pDisk_->readPage(lpn,buffer);
@@ -163,15 +163,15 @@ int Persistence::readPage(uint64_t lpn,uint8_t *buffer,size_t size){
 int Persistence::writePage(uint64_t lpn,uint8_t *buffer,size_t size){
     int err;
     if (pDisk_ == nullptr) {
-        pr_debug("[ERROR] Disk not initialized");
+        pr_error("Disk not initialized");
         return OPERATION_FAILURE;
     }
     if (buffer == nullptr) {
-        pr_debug("[ERROR] Memory allocation failed");
+        pr_error("Memory allocation failed");
         return OPERATION_FAILURE;
     }
     if (size != IMS_PAGE_SIZE){
-        pr_debug("[ERROR] data size doesn't match");
+        pr_error("data size doesn't match");
         return OPERATION_FAILURE;
     }
     err = pDisk_->writePage(lpn,buffer);
@@ -188,7 +188,7 @@ int Persistence::eraseBlock(uint64_t lbn){
         return OPERATION_SUCCESS;
     }
     if(!pDisk_->file_){
-        pr_debug("Disk does't open");
+        pr_error("Disk does't open");
         return OPERATION_FAILURE;
     }
     std::string buffer(BLOCK_SIZE, static_cast<char>(0xFF));
