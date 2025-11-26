@@ -81,7 +81,7 @@ enum class SelectT {
 #define RUNTYPE_SIMPLESSD 0
 
 // Enable / Disable = 1 / 0
-#define ENABLE_DISK 1
+#define ENABLE_DISK 0
 
 // Enable NVMe driver = 0 / 1  (my NVMe driver) / (simplessd NVMe driver)
 #define NVME_DRIVER 0
@@ -137,6 +137,7 @@ struct hostInfo {
     hostInfo() : lbn(INVALID_32), filename(""),levelInfo(INVALID_LEVEL), channelInfo(INVALID_CHANNEL) {}
 
     hostInfo(std::string name, int level, int ch, Key min, Key max) :
+        lbn(INVALID_32),
         filename(std::move(name)),
         levelInfo(level),
         channelInfo(ch),

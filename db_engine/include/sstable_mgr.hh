@@ -37,7 +37,6 @@ static inline void* allocateAligned(size_t size) {
 
 static AlignedBuf MakeAlignedBlockSize() {
     void* p = nullptr;
-    // 也可用 aligned_alloc(kAlign, kTableSize)；posix_memalign 更通用
     int rc = ::posix_memalign(&p, 4096, BLOCK_SIZE);
     if (rc != 0 || p == nullptr) throw std::bad_alloc();
     std::memset(p, 0xFF, BLOCK_SIZE);

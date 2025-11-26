@@ -18,15 +18,15 @@
  */
 
 #include "hil/nvme/namespace.hh"
-#include "ims/firmware/IMS_interface.hh"
-#include "ims/firmware/persistence.hh"
+#include "ims/include/IMS_interface.hh"
+#include "ims/include/persistence.hh"
 #include "ims/include/log.hh"
 #include "hil/nvme/subsystem.hh"
 #include "util/algorithm.hh"
 
 
-#include "ims/firmware/lbn_pool.hh"
-#include "ims/firmware/mapping_table.hh"
+#include "ims/include/lbn_pool.hh"
+#include "ims/include/mapping_table.hh"
 #include "ims/include/tree.hh"
 
 // extern Tree tree;
@@ -811,6 +811,7 @@ void Namespace::write_sstable(SQEntryWrapper &req, RequestFunction &func) {
   uint64_t lbn = INVALIDLBN;
   err = ims.write_sstable(lbn);
   if(lbn == INVALIDLBN){
+    err = true;
     debugprint(LOG_IMS,
              "NVM     | WRITE_SSTABLE | Command failed");
     resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
@@ -1672,7 +1673,7 @@ void Namespace::write_buffer(SQEntryWrapper &req, RequestFunction &func) {
     else {
       pContext->dma =
           new PRPList(cfgdata, cpuHandler, pCPU, req.entry.data1,
-                      req.entry.data2, (uint64_t)sizeof(numberOfSize));
+                      req.entry.data2, (uint64_t)numberOfSize);
     }
   }
   else {
@@ -1705,9 +1706,7 @@ void Namespace::read_buffer(SQEntryWrapper &req, RequestFunction &func) {
         IOContext *pContext = (IOContext *)context;
         pContext->beginAt++;
         if (pContext->beginAt == 1) {
-          debugprint(
-              LOG_HIL_NVME,
-              "READ_BUFFER is done");
+          debugprint(LOG_HIL_NVME,"READ_BUFFER is done");
 
           pContext->function(pContext->resp);
 
@@ -1746,7 +1745,7 @@ void Namespace::read_buffer(SQEntryWrapper &req, RequestFunction &func) {
     else {
       pContext->dma =
           new PRPList(cfgdata, cpuHandler, pCPU, req.entry.data1,
-                      req.entry.data2, (uint64_t)sizeof(numberOfSize));
+                      req.entry.data2, (uint64_t)numberOfSize);
     }
   }
   else {
@@ -1813,7 +1812,7 @@ void Namespace::open_DB(SQEntryWrapper &req, RequestFunction &func) {
       pContext->tick = tick;
       pContext->beginAt = 0;
       pContext->buffer = (uint8_t *)calloc(1,sizeof(uint32_t));
-      uint32_t datalen = static_cast<uint32_t>(pContext->lbn);
+      uint32_t datalen = static_cast<uint32_t>(pContext->nlb);
       memcpy(pContext->buffer, &datalen, sizeof(uint32_t));
       pContext->dma->write(0, sizeof(uint32_t), pContext->buffer,
                            dmaDone, context);

@@ -1,16 +1,18 @@
 #include "db_api.hh"
 #include "nvme_interface.hh"
 #include "nvme_test.hh"
+#include "nvme_simplessd.hh"
 #include "IMS_interface.hh"
 #include "lsmtree.hh"
 #include "options.hh"
 #include "compaction.hh"
 #include "range_query.hh"
 API::API(){
+
     tree_ = std::make_shared<Tree>();
     lsmTree_ = std::make_unique<LSMTree>(tree_);
     if(NVME_DRIVER == 1){
-
+        nvme_ = std::make_unique<gem5Driver>();
     }
     else{
         nvme_ = std::make_unique<MyNVMeDriver>();
@@ -58,8 +60,7 @@ Status API::open() {
         return Status::Corruption("DB_INIT decode failed");
     }      
     
-    pr_debug("open DB info");
-    // info.dump();
+    // pr_debug("open DB info");
 
     getLogManager()->setNextLBN(info.next_lbn);
     getLogManager()->setCurrentLBN(info.current_lbn);
@@ -76,7 +77,8 @@ Status API::open() {
     if (!getLSMTree()->decode(info.node_list)) {
         return Status::Corruption("LSMTree decode failed");
     }
-
+    info.dump();
+    pr_info("open DB done");
     return Status::OK();
 }
 
@@ -123,10 +125,22 @@ Status API::close(){
     info.sstable_seq = getSSTable()->getSequenceNumber();
     info.global_seq = global_seq_;
     std::string enc_info = info.encode();
-    char *buffer = (char*)aligned_alloc(4096, info.encode().size());
-    memcpy(buffer,enc_info.data(),info.encode().size());
-    int err = nvme_->nvme_close_DB(reinterpret_cast<uint8_t *>(buffer), enc_info.size());   
+
+    void* buf = nullptr;
+    size_t sz = enc_info.size();
+    int ret = posix_memalign(&buf, 4096, enc_info.size());
+    if (ret != 0) {
+        pr_error("posix_memalign failed in close_DB: ret=%d, size=%zu", ret, sz);
+        return Status::IOError("posix_memalign failed in close_DB");
+    }
+    if (sz > 0) {
+        memcpy(buf, enc_info.data(), sz);
+    }
+    memcpy(buf, enc_info.data(), enc_info.size());
+
+    int err = nvme_->nvme_close_DB(reinterpret_cast<uint8_t *>(buf), enc_info.size());   
     
+    free(buf);
     if (err != OPERATION_SUCCESS) {
         return Status::IOError("nvme_close_DB failed");
     }
@@ -148,7 +162,6 @@ Status API::put_impl(std::string key ,std::string value,PutType t){
     std::shared_ptr<MemTable> imm_hold;
     InternalKey minK, maxK;
     bool need_flush = false;
-
     {
         std::lock_guard<std::mutex> lk(mu_);
         if (!memtable_) memtable_ = std::make_unique<MemTable>();
@@ -164,10 +177,11 @@ Status API::put_impl(std::string key ,std::string value,PutType t){
     }
 
     if (need_flush) {
-        const auto& list_ref = imm_hold->GetSkipList();  // 注意：是 const&，不是 shared_ptr
+        const auto& list_ref = imm_hold->GetSkipList(); 
         auto buffer = sstableManager_->packingTable(list_ref);
         if ( buffer.data() == nullptr || buffer.size != BLOCK_SIZE) return Status::IOError("Packing failed");
         sstableManager_->writeSSTable(0, minK, maxK, std::move(buffer), /*clearImmuteTable=*/true);
+        immutable_memtable_.reset();
     }
     compaction();
     uint32_t lpn = 0;

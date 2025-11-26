@@ -39,8 +39,17 @@ int MyNVMeDriver::nvme_write_sstable(sstable_info info,char *buffer){
     }
     int err = 0;
     hostInfo req(info.filename,info.level,info.min,info.max);
+    // pr_debug("[HOST] sstable_info filename=%s level=%d", 
+    //          info.filename.c_str(), info.level);
+    // pr_debug("[HOST] rangeMin (string) = '%s'", info.min.toString().c_str());
+    // pr_debug("[HOST] rangeMax (string) = '%s'", info.max.toString().c_str());
+    // pr_debug("[HOST] rangeMin (hex):");
+    // info.min.dumpUint();
+    // pr_debug("[HOST] rangeMax (hex):");
+    // info.max.dumpUint();
+
     std::string enc_hostinfo = req.encode();
-    err = ims.write_meta(reinterpret_cast<uint8_t*>(const_cast<char*>(enc_hostinfo.data())), enc_hostinfo.size());
+    err = ims.write_meta(reinterpret_cast<uint8_t*>(enc_hostinfo.data()), enc_hostinfo.size());
     if(err != OPERATION_SUCCESS){
         pr_error("Write hostInfo metadata failed");
         return COMMAND_FAILED;
@@ -51,6 +60,7 @@ int MyNVMeDriver::nvme_write_sstable(sstable_info info,char *buffer){
         pr_error("Write sstable is fail");
         return err;
     }
+    pr_debug("write SStable LBN:%d",lbn);
     err = ims.write_block(lbn,reinterpret_cast<uint8_t*>(buffer));
     return err;
 }

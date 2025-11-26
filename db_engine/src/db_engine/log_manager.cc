@@ -13,7 +13,7 @@ LogManager::LogManager(INVMEDriver& nvme)
     : next_lbn_(0), currenet_lbn_(0), page_offset_(0), byte_offset_(0) ,first_block_offset_(0),nvme_(nvme) {}
 
 void LogManager::allocate_lbn() {
-    char *buffer = (char*)calloc(sizeof(uint32_t), 1);
+    char *buffer = (char*)calloc(1,sizeof(uint64_t));
     if (!buffer) {
         std::cerr << "Buffer is null, cannot allocate LBN." << std::endl;
         return;
@@ -25,8 +25,8 @@ void LogManager::allocate_lbn() {
         return;
     }
 
-    uint32_t lbn = *(uint32_t *)(buffer);
-    logRecordBlock_.push_back(lbn);
+    uint64_t lbn = *(uint64_t *)(buffer);
+    logRecordBlock_.push_back(static_cast<uint32_t>(lbn));
     currenet_lbn_ = next_lbn_;
     next_lbn_ = lbn;
 

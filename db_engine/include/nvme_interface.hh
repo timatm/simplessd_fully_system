@@ -44,8 +44,6 @@ public:
     virtual int nvme_ims_close() = 0;
     // virtual int nvme_monitor_IMS(int monitor_type) = 0;
     // virtual void init_nmc_config(nmc_config_t *config) = 0;
-
-
     // TODO
     virtual int nvme_write_metadata(char *buffer,size_t size) = 0;
     virtual int nvme_read_metadata(char *buffer,size_t size) = 0;

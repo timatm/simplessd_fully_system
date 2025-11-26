@@ -11,6 +11,7 @@
 #include <type_traits>
 
 
+#define MYDB_DEBUG 1
 namespace logger {
 
 enum class Level { Info, Debug ,Error};

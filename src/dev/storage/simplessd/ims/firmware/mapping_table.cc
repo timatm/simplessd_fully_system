@@ -95,7 +95,7 @@ void Mapping::remove_mapping(const std::string& filename) {
 void Mapping::dump_mapping() const {
     pr_info("[Mapping Table Dump]");
     for (const auto& [filename, lbn] : mappingTable_) {
-        pr_info("filename: %s -> LBN(%lu)", filename.c_str(), lbn);
+        pr_info("SStable ID: %s -> LBN(%lu)", filename.c_str(), lbn);
     }
     pr_info("================================");
 }

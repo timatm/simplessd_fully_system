@@ -24,7 +24,7 @@
 #include "def.hh"
 #include "lsmtree.hh"
 
-static constexpr size_t kDefaultDeviceDramSize = 1ULL << 30; // 1 GiB
+static constexpr size_t kDefaultDeviceDramSize = 1ULL << 12;
 static constexpr size_t kAlign = 4096;
 namespace {
     inline void* aligned_alloc_4k(size_t bytes) {
@@ -47,7 +47,7 @@ namespace {
 
 class IMS_interface{
 public:
-    uint8_t* buffer_;
+    uint8_t* buffer_ = nullptr;
     size_t buffer_size_;
     size_t buffer_valid_size_;
 #if RUNTYPE_SIMPLESSD

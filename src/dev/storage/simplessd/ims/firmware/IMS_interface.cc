@@ -14,10 +14,12 @@
 
 void IMS_interface::alloc_device_buffer(size_t bytes) {
     if (buffer_) return;
+    pr_debug("alloc_device_buffer: buffer_=%p, bytes=%zu", (void*)buffer_, bytes);
     buffer_ = static_cast<uint8_t*>(aligned_alloc_4k(bytes));
     if (!buffer_) throw std::bad_alloc();
     buffer_size_ = bytes;
     std::memset(buffer_, 0, buffer_size_);
+    pr_debug("alloc_device_buffer: buffer_=%p, bytes=%zu", (void*)buffer_, bytes);
 }
 
 void IMS_interface::free_device_buffer() {
@@ -55,7 +57,9 @@ IMS_interface::IMS_interface() {
     logManager_ = std::make_unique<Log>(*persistenceManager_, *lbnPool_, sp_ptr_old_, sp_ptr_new_);
 
     lsmTree_ = std::make_unique<LSMTree>(tree_);
-
+    buffer_size_ = 0;
+    buffer_valid_size_ = 0;
+    alloc_device_buffer(kDefaultDeviceDramSize);
     init_IMS();
 }
 
@@ -65,13 +69,24 @@ int IMS_interface::write_sstable(uint64_t &lbn) {
     size_t hostInfo_len = buffer_valid_size_;
     std::string buf(buffer_, buffer_ + hostInfo_len);
     hostInfo request = hostInfo::decode(buf);
+    // pr_debug("[FW] Write request for Filename: %s | Level: %d",
+    //          request.filename.c_str(), request.levelInfo);
+
+    // pr_debug("[FW] rangeMin (string) = '%s'", request.rangeMin.toString().c_str());
+    // pr_debug("[FW] rangeMax (string) = '%s'", request.rangeMax.toString().c_str());
+
+    // std::cout << "[FW] rangeMin (hex): ";
+    // request.rangeMin.dumpUint();
+    // std::cout << "[FW] rangeMax (hex): ";
+    // request.rangeMax.dumpUint();
+
     std::string filename = request.filename;
     int level = request.levelInfo;
     Key rangeMin = request.rangeMin;
     Key rangeMax = request.rangeMax;
 
     pr_debug("Write request for Filename: %s | Level: %d | Range:%s ~ %s"
-            ,filename.c_str(),level,rangeMin.toString(),rangeMax.toString());
+            ,filename.c_str(),level,rangeMin.toString().c_str(),rangeMax.toString().c_str());
 
     auto mappingTable = mappingTable_->get_table();
     if (mappingTable.count(filename)) {
@@ -137,9 +152,10 @@ int IMS_interface::write_sstable(uint64_t &lbn) {
         pr_error("Find node is error, filename: %s ", filename.c_str());
         return OPERATION_FAILURE;
     }
-
-    pr_debug("Allocated LBN %lu for file: %s", lbn, filename.c_str());
     lbn = selectLBN;
+    pr_debug("Allocated LBN %lu (CH=%d) for file: %s",lbn, LBN2CH(lbn), filename.c_str());
+    node->channelInfo = LBN2CH(lbn);
+    mappingTable_->insert_mapping(filename, lbn);
     // if (ENABLE_DISK) {
     //     err = persistenceManager_->writeBlock(lbn, buffer, BLOCK_SIZE);
     // }
@@ -327,7 +343,7 @@ int IMS_interface::rebuild_super_page() {
 int IMS_interface::write_meta(uint8_t *host_buffer, size_t size){
     if (!host_buffer || size == 0) return -2;
     if (!in_range(0, size)) return -4;
-
+    // pr_info("Write buffer (host data size:%u) (DRAM size:%u)",size,buffer_size_);
     std::lock_guard<std::mutex> lk(buf_mu_);
     std::memcpy(buffer_, host_buffer, size);
     buffer_valid_size_ = size;
@@ -353,7 +369,7 @@ int IMS_interface::init_IMS() {
     pr_info("Initialize IMS interface");
 
     // init IMS buffer
-    alloc_device_buffer(kDefaultDeviceDramSize);
+    
 
 
     uint8_t* buffer = (uint8_t*)malloc(IMS_PAGE_SIZE);
@@ -692,6 +708,8 @@ int IMS_interface::set_log_info(uint32_t *size){
 }
 
 int IMS_interface::close_DB(uint8_t *host_buffer, size_t size){
+    pr_info("Database is closing ,dump dabase information");
+    dump_all();
     if (!host_buffer || size == 0) return -2;
     if (!sp_ptr_old_) {
         pr_error("close_DB: super_page(old) not initialized");
@@ -701,7 +719,6 @@ int IMS_interface::close_DB(uint8_t *host_buffer, size_t size){
     if( DB_INIT::decode(std::string(reinterpret_cast<char*>(host_buffer), size),info) == false){
         pr_error("DB_INIT decode failed");
         return -6;
-
     }
 
     sp_ptr_old_->global_sequence = info.global_seq;

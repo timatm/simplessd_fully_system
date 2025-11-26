@@ -109,9 +109,34 @@ void DB_INIT::dump() const {
 
     std::cout << "Log List Size : " << log_list.size() << " bytes\n";
     if (!log_list.empty()) {
-        std::cout << "Log List Preview: " 
-                  << log_list.substr(0, std::min<size_t>(64, log_list.size())) 
-                  << (log_list.size() > 64 ? "..." : "") << "\n";
+        // 檢查是不是 4 的倍數（每個 LBN = 4 bytes）
+        if (log_list.size() % 4 != 0) {
+            std::cout << "Log LBNs (CORRUPTED? size not multiple of 4)\n";
+        } else {
+            auto read_u32_le = [](const std::string &s, size_t offset) -> uint32_t {
+                const unsigned char *p =
+                    reinterpret_cast<const unsigned char*>(s.data() + offset);
+                return  static_cast<uint32_t>(p[0])
+                      | (static_cast<uint32_t>(p[1]) << 8)
+                      | (static_cast<uint32_t>(p[2]) << 16)
+                      | (static_cast<uint32_t>(p[3]) << 24);
+            };
+
+            size_t total = log_list.size() / 4;          // 一共有幾個 LBN
+            size_t preview = std::min<size_t>(total, 16); // 最多預覽前 16 個，避免爆版
+
+            std::cout << "Log LBNs Preview (" << preview
+                      << (total > preview ? " of " : " of ")
+                      << total << "): ";
+
+            for (size_t i = 0; i < preview; ++i) {
+                uint32_t lbn = read_u32_le(log_list, i * 4);
+                std::cout << lbn;
+                if (i + 1 < preview) std::cout << ", ";
+            }
+            if (total > preview) std::cout << " ...";
+            std::cout << "\n";
+        }
     }
 
     std::cout << "Node List Size: " << node_list.size() << " bytes\n";

@@ -1,116 +1,192 @@
-# # TBB_PREFIX := /opt/tbb-static
-# # TBB_INC    := $(TBB_PREFIX)/include
-# # TBB_LIB    := $(TBB_PREFIX)/lib
+# ========================================
+# MYDB_PREFIX ?= $(abspath mydb)
+# LOG_DIR := $(abspath log)
 
-# # CC=g++
-# # CFLAGS=-std=c++11 -g -Wall -pthread -I./ -I$(TBB_INC)
-# CFLAGS=-std=c++11 -g -Wall -pthread -I./
-# CC=/home/timatm/x86_64-linux-musl-cross/bin/x86_64-linux-musl-g++
-# # CFLAGS=-g -Wall -pthread -I./
-# LDFLAGS = -static -static-libstdc++ -static-libgcc -pthread
 
+# # 选择 musl 编译器（隐式规则用 CXX！）
+# CXX := /home/timatm/x86_64-linux-musl-cross/bin/x86_64-linux-musl-g++
+
+# # 头文件搜索路径 & 功能开关
+# CPPFLAGS := -I. -Idb -Icore -I/home/timatm/simplessd_fully_system/include -DENABLE_REDIS=0 -DUSE_TBB=0
+# CPPFLAGS += -I$(MYDB_PREFIX)/include
+
+# # 编译/链接选项
+# CXXFLAGS := -std=c++17 -g -Wall -pthread  -mfpmath=sse -msse2 -fno-omit-frame-pointer -fsanitize=addres
+
+# ifeq ($(DEBUG),1)
+#   CPPFLAGS += -DDEBUG
+#   CXXFLAGS += -O0 -g
+# else
+#   CXXFLAGS += -O2
+#   CPPFLAGS += -DNDEBUG   # 可选：禁用 assert
+# endif
+# LDFLAGS  := -static -static-libstdc++ -static-libgcc -pthread -no-pie -fsanitize=address
+# # LDLIBS   := /home/timatm/simplessd_fully_system/util/m5/build/x86/out/libm5.a
+
+# # 禁用的源文件（禁用 Redis 后端）
 # DISABLED_SRCS := db/redis_db.cc
-# # LDFLAGS=-lpthread -lhiredis -libtbb
-# # SUBDIRS=core db redis
+
+# # 采集源码
 # SUBSRCS_ALL := $(wildcard core/*.cc) $(wildcard db/*.cc)
-# SUBSRCS := $(filter-out $(DISABLED_SRCS),$(SUBSRCS_ALL))
-# OBJECTS := $(SUBSRCS:.cc=.o)
-# EXEC=ycsbc
+# SUBSRCS     := $(filter-out $(DISABLED_SRCS),$(SUBSRCS_ALL))
+# OBJECTS     := $(SUBSRCS:.cc=.o)
 
-# all: $(SUBDIRS) $(EXEC)
+# TOP_SRCS    := $(wildcard *.cc)      # e.g., ycsbc.cc（含 main）
+# TOP_OBJS    := $(TOP_SRCS:.cc=.o)    # ← 必须：生成 ycsbc.o
 
-# $(SUBDIRS):
-# 	$(MAKE) -C $@
+# EXEC        := ycsbc
 
-# $(EXEC): $(wildcard *.cc) $(OBJECTS)
-# 	$(CC) $(CFLAGS) $^ $(LDFLAGS) -o $@
+# # 选择你的后端：sim | real（可在命令行覆盖：make NVME_BACKEND=real）
+# NVME_BACKEND ?= sim
+
+# # 把库包进 group，解决相互引用的符号解析
+# LDLIBS_MYDB := -Wl,--start-group \
+#   $(MYDB_PREFIX)/lib/libmydb_engine.a \
+#   $(MYDB_PREFIX)/lib/libmydb_nvme.a \
+#   $(MYDB_PREFIX)/lib/libfirmware_lib.a\
+#   -Wl,--end-group
+
+# # real 后端还需要 libnvme 及其依赖库（必须都有 .a 且与 musl 同工具链编译）
+# ifeq ($(NVME_BACKEND),real)
+#   LDLIBS_MYDB += $(MYDB_PREFIX)/lib/libnvme.a \
+#                  -ludev -luuid -ljson-c -lssl -lcrypto
+# endif
+
+# .PHONY:all clean workloadA-log
+
+# # 只在顶层编译，不再递归进子目录
+# all:clean $(EXEC)
+
+# %.o: %.cc
+# 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+# # # 链接：先放对象文件，再放库；库放最后（已用 $(LDLIBS)）
+# # $(EXEC): $(OBJECTS) $(TOP_OBJS)
+# # $(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
+
+# $(EXEC): $(OBJECTS) $(TOP_OBJS)
+# 	$(CXX) $(LDFLAGS) $^ $(LDLIBS) $(LDLIBS_MYDB) -o $@
+
 
 # clean:
-# 	for dir in $(SUBDIRS); do \
-# 		$(MAKE) -C $$dir $@; \
-# 	done
-# 	$(RM) $(EXEC)
+# 	$(RM) $(OBJECTS) $(TOP_OBJS) $(EXEC)
 
-# .PHONY: $(SUBDIRS) $(EXEC)
+# workloadA-log: ycsbc
+# 	@mkdir -p $(LOG_DIR)
+# 	@ts=$$(date "+%m%d_%H:%M"); \
+# 	out="$(LOG_DIR)/workloadA.$$ts.log"; \
+# 	echo "[ycsbc] writing to $$out"; \
+# 	./ycsbc -db mydb -threads 1 -P workloads/workloada.spec > "$$out" 2>&1
 
-# === MyDB SDK ===
-# .RECIPEPREFIX := >
+# ======================================================
+
+# ===== Build mode switches (MUST be at the very top) =====
+# 用法：
+#   make                 # 等同 BUILD=debug
+#   make BUILD=debug     # 調試（動態），可 gdb/ASan
+#   make BUILD=debug SAN=asan
+#   make BUILD=release   # 發布（musl 靜態）
+BUILD ?= debug            # debug | release
+SAN   ?= none             # none  | asan
+NVME_BACKEND ?= sim       # sim   | real
+
+ifeq ($(filter $(BUILD),debug release),)
+$(warning Unknown BUILD='$(BUILD)', defaulting to debug)
+BUILD := debug
+endif
+
 MYDB_PREFIX ?= $(abspath mydb)
 LOG_DIR := $(abspath log)
 
-
-# 选择 musl 编译器（隐式规则用 CXX！）
-CXX := /home/timatm/x86_64-linux-musl-cross/bin/x86_64-linux-musl-g++
-
-# 头文件搜索路径 & 功能开关
+# ===== Common flags =====
 CPPFLAGS := -I. -Idb -Icore -I/home/timatm/simplessd_fully_system/include -DENABLE_REDIS=0 -DUSE_TBB=0
 CPPFLAGS += -I$(MYDB_PREFIX)/include
+CXXFLAGS := -std=c++17 -Wall -pthread -mfpmath=sse -msse2
+# 產生 .d 依賴檔，增量編譯更穩
+DEPFLAGS := -MMD -MP
 
-# 编译/链接选项
-CXXFLAGS := -std=c++17 -g -Wall -pthread  -mfpmath=sse -msse2 
+# MyDB 静态库（固定最后连）
+LDLIBS_MYDB := -Wl,--start-group \
+	$(MYDB_PREFIX)/lib/libmydb_engine.a \
+	$(MYDB_PREFIX)/lib/libmydb_nvme.a \
+	$(MYDB_PREFIX)/lib/libfirmware_lib.a \
+	$(MYDB_PREFIX)/lib/libnvme.a \
+	-Wl,--end-group
 
-ifeq ($(DEBUG),1)
+# ===== 模式切換 =====
+ifeq ($(BUILD),debug)
+  # glibc + 動態連結，便於 gdb / ASan
+  CXX ?= g++
   CPPFLAGS += -DDEBUG
-  CXXFLAGS += -O0 -g
-else
+  CXXFLAGS += -O0 -g -fno-omit-frame-pointer
+  LDFLAGS  := -pthread
+  ifeq ($(SAN),asan)
+    CXXFLAGS += -fsanitize=address
+    LDFLAGS  += -fsanitize=address
+  endif
+  # DEBUG 模式無法使用 real !!!
+  ifeq ($(NVME_BACKEND),real)
+    LDLIBS_SYS += -lnvme -ludev -luuid -ljson-c -lssl -lcrypto
+  endif
+else ifeq ($(BUILD),release)
+  # musl + 全靜態（部署）
+  CXX ?= /home/timatm/x86_64-linux-musl-cross/bin/x86_64-linux-musl-g++
+  CPPFLAGS += -DNDEBUG
   CXXFLAGS += -O2
-  CPPFLAGS += -DNDEBUG   # 可选：禁用 assert
+  LDFLAGS  := -static -static-libstdc++ -static-libgcc -pthread -no-pie
+  # release 不允許 SAN=asan（ASan 不支援全靜態）
+  ifneq ($(SAN),none)
+    $(warning SAN ignored in release build)
+  endif
+  # 若使用 NVMe 實機後端，release 下需提供相容的 .a（你已有）
+  ifeq ($(NVME_BACKEND),real)
+    LDLIBS_SYS += $(MYDB_PREFIX)/lib/libmydb_nvme.a 
+  endif
 endif
-LDFLAGS  := -static -static-libstdc++ -static-libgcc -pthread -no-pie 
-# LDLIBS   := /home/timatm/simplessd_fully_system/util/m5/build/x86/out/libm5.a
 
-# 禁用的源文件（禁用 Redis 后端）
+
+# ===== Sources =====
 DISABLED_SRCS := db/redis_db.cc
-
-# 采集源码
 SUBSRCS_ALL := $(wildcard core/*.cc) $(wildcard db/*.cc)
 SUBSRCS     := $(filter-out $(DISABLED_SRCS),$(SUBSRCS_ALL))
 OBJECTS     := $(SUBSRCS:.cc=.o)
+DEPS        := $(OBJECTS:.o=.d)
 
-TOP_SRCS    := $(wildcard *.cc)      # e.g., ycsbc.cc（含 main）
-TOP_OBJS    := $(TOP_SRCS:.cc=.o)    # ← 必须：生成 ycsbc.o
+TOP_SRCS    := $(wildcard *.cc)
+TOP_OBJS    := $(TOP_SRCS:.cc=.o)
+TOP_DEPS    := $(TOP_OBJS:.o=.d)
 
 EXEC        := ycsbc
 
-# 选择你的后端：sim | real（可在命令行覆盖：make NVME_BACKEND=real）
-NVME_BACKEND ?= sim
+.PHONY: all clean workloadA-log debug release
 
-# 把库包进 group，解决相互引用的符号解析
-LDLIBS_MYDB := -Wl,--start-group \
-  $(MYDB_PREFIX)/lib/libmydb_engine.a \
-  $(MYDB_PREFIX)/lib/libmydb_nvme.a \
-  $(MYDB_PREFIX)/lib/libfirmware_lib.a\
-  -Wl,--end-group
+all: $(EXEC)
 
-# real 后端还需要 libnvme 及其依赖库（必须都有 .a 且与 musl 同工具链编译）
-ifeq ($(NVME_BACKEND),real)
-  LDLIBS_MYDB += $(MYDB_PREFIX)/lib/libnvme.a \
-                 -ludev -luuid -ljson-c -lssl -lcrypto
-endif
+debug:
+	@$(MAKE) clean
+	@$(MAKE) BUILD=debug $(if $(filter asan,$(SAN)),SAN=asan,)
 
-.PHONY:all clean workloadA-log
+release:
+	@$(MAKE) clean
+	@$(MAKE) BUILD=release
 
-# 只在顶层编译，不再递归进子目录
-all:clean $(EXEC)
-
+# 編譯規則（帶 .d 依賴）
 %.o: %.cc
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DEPFLAGS) -c $< -o $@
 
-# # 链接：先放对象文件，再放库；库放最后（已用 $(LDLIBS)）
-# $(EXEC): $(OBJECTS) $(TOP_OBJS)
-# $(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
-
+# 連結：對象檔 + 系統庫 + MyDB 靜態庫
 $(EXEC): $(OBJECTS) $(TOP_OBJS)
-	$(CXX) $(LDFLAGS) $^ $(LDLIBS) $(LDLIBS_MYDB) -o $@
+	$(CXX) $(LDFLAGS) $^ $(LDLIBS_SYS) $(LDLIBS_MYDB) -o $@
 
+# 讀入依賴（若存在）
+-include $(DEPS) $(TOP_DEPS)
 
 clean:
-	$(RM) $(OBJECTS) $(TOP_OBJS) $(EXEC)
+	$(RM) $(OBJECTS) $(TOP_OBJS) $(EXEC) $(DEPS) $(TOP_DEPS)
 
-workloadA-log: ycsbc
+workloadA-log: $(EXEC)
 	@mkdir -p $(LOG_DIR)
-	@ts=$$(date "+%m%d_%H:%M"); \
+	@ts=$$(date "+%m%d_%H:%M:%S"); \
 	out="$(LOG_DIR)/workloadA.$$ts.log"; \
 	echo "[ycsbc] writing to $$out"; \
-	./ycsbc -db mydb -threads 1 -P workloads/workloada.spec > "$$out" 2>&1
-
+	./ycsbc -db mydb -threads 1 -P workloads/workloada.spec >"$$out" 2>&1

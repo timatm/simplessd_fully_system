@@ -15,6 +15,7 @@ extern "C" {
 #include <cstdint>
 int nvme_fd;
 
+
 int gem5Driver::pass_io_command(nmc_config_t *config){
     int err;
     config->PSDT      = 0;  /* use PRP */
@@ -340,7 +341,6 @@ int gem5Driver::nvme_read_sstable(std::string filename,char *buffer){
     hostInfo req(filename);
     std::string enc_hostinfo = req.encode();
     err = nvme_read_metadata(const_cast<char*>(enc_hostinfo.data()), enc_hostinfo.size());
-    int err;
     nmc_config_t config_obj;
     nmc_config_t *config = &config_obj;
     init_nmc_config(config); 
@@ -511,9 +511,13 @@ int gem5Driver::nvme_open_DB(uint8_t *buffer){
     nmc_config_t config_obj;
     nmc_config_t *config = &config_obj;
     init_nmc_config(config);
-    uint32_t lbn;
     void *p = NULL;
-    posix_memalign(&p, 4096, sizeof(uint32_t));
+    int r = posix_memalign(&p, 4096, sizeof(uint32_t));
+    if (r != 0 || p == nullptr) {
+        pr_error("Open DB failed: posix_memalign failed (%d)", r);
+        free(p);
+        return OPERATION_FAILURE;
+    }
     config->data_len  = (uint32_t)sizeof(uint32_t);
     config->data      = static_cast<char*>(p);
     config->OPCODE    = OPCODE_OPEN_DB;
@@ -523,15 +527,23 @@ int gem5Driver::nvme_open_DB(uint8_t *buffer){
     err = pass_io_command(config);
 
     if(err == 0){
-        pr_debug("nvme read success");
+        uint32_t size = 0;
+        std::memcpy(&size, config->data, sizeof(size));
+        pr_debug("Next, we need to read the data(size:%u)",static_cast<uint32_t>(size));
+        err = nvme_read_metadata(reinterpret_cast<char*>(buffer), size);
+        if(err == 0){
+            pr_debug("nvme_open_DB success.");
+        }
+        else{
+            pr_error("nvme_open_DB failed");
+            pr_error("error code: 0x%x", err);
+        }
     }
     else{
-        pr_error("nvme read log failed");
+        pr_error("nvme_open_DB failed");
         pr_error("error code: 0x%x", err);
     }
-    uint32_t datalen;
-    std::memcpy(&datalen, config->data, sizeof(datalen));
-    err = nvme_read_metadata(reinterpret_cast<char*>(buffer), datalen);
+    free(p);
     return err;
 }
 
@@ -604,5 +616,15 @@ int gem5Driver::nvme_erase_sstable(std::string filename){
         pr_error("error code: 0x%x", err);
         err = COMMAND_FAILED;
     }
+    return err;
+}
+
+int gem5Driver::nvme_dump_ims(){
+    int err;
+    return err;
+    
+}
+int gem5Driver::nvme_read_ssKeyRange(std::string, char* buffer){
+    int err;
     return err;
 }

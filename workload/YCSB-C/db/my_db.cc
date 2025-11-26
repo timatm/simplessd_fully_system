@@ -30,7 +30,7 @@ int MyDB::Read(const string & /*table*/, const string &key,
   string value;
   Status s = db.get(key,value);
 
-  if (!s.ok()) return kNotFound;
+  // if (!s.ok()) return kNotFound;
   result.clear();
   result.emplace_back("field0", value); // YCSB 需要 KVPair 列表
   return kOK;

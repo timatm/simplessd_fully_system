@@ -109,7 +109,15 @@ uint64_t LBNPool::pop_freeLBNList(int ch){
 }
 
 void LBNPool::insert_usedLBNList(uint64_t lbn) {
+    if(lbn < 0 || lbn > LBN_NUM){
+        pr_error("insert_usedLBNList: invalid LBN=%llu", lbn);
+        return;
+    }
     int ch = LBN2CH(lbn);
+    if (ch < 0 || ch >= CHANNEL_NUM) {
+        pr_error("insert_usedLBNList: invalid ch=%d for LBN=%llu", ch, lbn);
+        return;
+    }
     auto it = std::find(usedLBNList_[ch].begin(),usedLBNList_[ch].end(),lbn);
     if(it != usedLBNList_[ch].end()){
         pr_error("This LBN:%lld have been in usedLBNList",lbn);

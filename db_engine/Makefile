@@ -21,7 +21,8 @@ ENABLE_SANITIZERS ?= OFF
 BUILD_STATIC      ?= OFF
 GENERATOR         ?=
 RUN_ARGS          ?=
-NVME_BACKEND	  ?= sim
+NVME_BACKEND	  ?= real
+NVME_DRIVER       ?= 1
 
 # Predefined build dirs for different profiles
 DYNAMIC_BUILD_DIR := $(BUILD_DIR_BASE)
@@ -40,13 +41,15 @@ else
 endif
 
 # Common CMake flags
+# NVME_DRIVER: 0 = my NVMe driver, 1 = SimpleSSD NVMe driver
 CMAKE_FLAGS := \
   -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
   -DCMAKE_INSTALL_PREFIX=$(abspath $(INSTALL_DIR)) \
   -DNVME_PREBUILT_DIR=$(NVME_PREBUILT_DIR) \
   -DENABLE_SANITIZERS=$(ENABLE_SANITIZERS) \
   -DBUILD_STATIC=$(BUILD_STATIC) \
-  -DNVME_BACKEND=$(NVME_BACKEND)
+  -DNVME_BACKEND=$(NVME_BACKEND) \
+  -DNVME_DRIVER=$(NVME_DRIVER)
 
 # === Targets ===
 .PHONY: all configure build install run clean rebuild \
@@ -69,13 +72,13 @@ print-flags:
 
 # ---- Profiles ----
 # glibc + ASan（動態）建置
-# asan:
-# 	@$(MAKE) BUILD_TYPE=RelWithDebInfo ENABLE_SANITIZERS=ON BUILD_STATIC=OFF configure build
+asan:
+	@$(MAKE) BUILD_TYPE=RelWithDebInfo ENABLE_SANITIZERS=ON BUILD_STATIC=OFF configure build
 
-# run-asan:
-# 	@cd "$(ASAN_BUILD_DIR)"; \
-# 	  ASAN_OPTIONS=detect_leaks=1:abort_on_error=1:halt_on_error=1 \
-# 	  ./mydb_engine $(RUN_ARGS)
+run-asan:
+	@cd "$(ASAN_BUILD_DIR)"; \
+	  ASAN_OPTIONS=detect_leaks=1:abort_on_error=1:halt_on_error=1 \
+	  ./mydb_engine $(RUN_ARGS)
 
 # glibc（動態）預設建置
 glibc:
@@ -105,9 +108,9 @@ configure-static:
 
 # === Build / Install / Run ===
 config-sim:
-	@$(MAKE) NVME_BACKEND=sim configure
+	@$(MAKE) NVME_BACKEND=sim NVME_DRIVER=0 configure
 config-real:
-	@$(MAKE) NVME_BACKEND=real configure
+	@$(MAKE) NVME_BACKEND=real NVME_DRIVER=1 configure
 
 build:
 	@echo "🛠️  Building $(BUILD_DIR) ..."
@@ -128,7 +131,9 @@ install:
 install-static:
 	@echo "📦 Installing (musl, static) from $(STATIC_BUILD_DIR) to $(INSTALL_DIR) ..."
 	@cmake --install "$(STATIC_BUILD_DIR)"
-
+install-asan:
+	@echo "📦 Installing (musl, static) from $(ASAN_BUILD_DIR) to $(INSTALL_DIR) ..."
+	@cmake --install "$(ASAN_BUILD_DIR)"
 # === Clean / Rebuild ===
 clean:
 	@echo "🧹 Cleaning build + install ..."

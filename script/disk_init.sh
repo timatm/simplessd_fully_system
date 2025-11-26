@@ -8,14 +8,14 @@ fi
 
 # === 1. Set disk path and source file ===
 DISK_DIRECTORY_PATH="../cp2m5/disks"
-FILE_PATH="../src/dev/storage/simplessd/ims/db/build"
-DB_PATH="../src/dev/storage/simplessd/ims/db"
-if [ -d "$DB_PATH" ]; then
-    echo "Try to rebuild DB engine to check the DB engine is up to date"
-    (cd "$DB_PATH" && make clean && make)
-else
-    echo "DB path is error ,the DB engine maybe is not newest"
-fi
+FILE_PATH="../workload/YCSB-C/"
+# DB_PATH="../src/dev/storage/simplessd/ims/db"
+# if [ -d "$DB_PATH" ]; then
+#     echo "Try to rebuild DB engine to check the DB engine is up to date"
+#     (cd "$DB_PATH" && make clean && make)
+# else
+#     echo "DB path is error ,the DB engine maybe is not newest"
+# fi
 
 if [ ! -d "$DISK_DIRECTORY_PATH" ]; then
     echo "Cannot find disk directory path"
@@ -28,16 +28,8 @@ if [ ! -d "$FILE_PATH" ]; then
 fi  
 
 DISK_IMG="${DISK_DIRECTORY_PATH}/disk.img"
-SRC_FILE="${FILE_PATH}/mydb_engine"
 MOUNT_POINT="/mnt"
 
-
-
-
-if [ ! -f "$SRC_FILE" ]; then
-  echo "Cannot find file: $SRC_FILE"
-  exit 1
-fi
 
 # Unmount if already mounted
 if mountpoint -q "$MOUNT_POINT"; then
@@ -48,7 +40,7 @@ fi
 # === 2. Create disk image and partition if not exists ===
 if [ ! -f "$DISK_IMG" ]; then
     echo "Creating new disk image..."
-    dd if=/dev/zero of="$DISK_IMG" oflag=direct bs=1M count=1024
+    dd if=/dev/zero of="$DISK_IMG" oflag=direct bs=1M count=4096
 
     losetup -f --partscan "$DISK_IMG"
     LOOP_DEV=$(losetup -j "$DISK_IMG" | awk -F: '{print $1}')
@@ -87,10 +79,10 @@ fi
 
 mount "$PART" "$MOUNT_POINT"
 
-echo "Copying $SRC_FILE to $MOUNT_POINT"
-cp "$SRC_FILE" "$MOUNT_POINT"
+echo "Copying $FILE_PATH to $MOUNT_POINT"
+cp -r "$FILE_PATH" "$MOUNT_POINT"
 
-echo "Done: $SRC_FILE copied to virtual disk at $MOUNT_POINT"
+echo "Done: $FILE_PATH copied to virtual disk at $MOUNT_POINT"
 
 # === 4. Unmount and release loop device ===
 if mountpoint -q "$MOUNT_POINT"; then

@@ -15,7 +15,7 @@ std::queue<std::shared_ptr<TreeNode>> LSMTree::search_key(const Key& key) {
     for(const auto& node:nodes){
         if (compareKey(node->rangeMin, key) <= 0 && 
             compareKey(node->rangeMax, key) >= 0){
-            node->dump();
+            // node->dump();
             level0_candidates.insert(node);
         }
     }
@@ -67,8 +67,11 @@ std::vector<int> LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
         Pqueue.pop();
         if (!Pvisited.insert(parent.get()).second) continue;
 
-        if (parent->channelInfo >= 0) {
-            relate_ch_info[parent->channelInfo]++;
+        int ch = parent->channelInfo;
+        if (ch >= 0 && ch < CHANNEL_NUM) {
+            relate_ch_info[ch]++;
+        } else if (ch >= 0) {
+            pr_error("Parent channelInfo=%d out of range [0,%d)", ch, CHANNEL_NUM);
         }
 
         for (auto& gp : parent->parent) {
@@ -90,8 +93,11 @@ std::vector<int> LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
         Cqueue.pop();
         if (!Cvisited.insert(child.get()).second) continue;
 
-        if (child->channelInfo >= 0) {
-            relate_ch_info[child->channelInfo]++;
+        int ch = child->channelInfo;
+        if (ch >= 0 && ch < CHANNEL_NUM) {
+            relate_ch_info[ch]++;
+        } else if (ch >= 0) {
+            pr_error("Child channelInfo=%d out of range [0,%d)", ch, CHANNEL_NUM);
         }
 
         for (auto& [filename, grandchild] : child->children) {
@@ -121,14 +127,23 @@ std::vector<int> LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
 
     if (it != nodes.begin()) {
         auto prev = std::prev(it);
-        if ((*prev)->channelInfo >= 0) {
-            relate_ch_info[(*prev)->channelInfo]++;
+        int ch = (*prev)->channelInfo;
+        if (ch >= 0 && ch < CHANNEL_NUM) {
+            relate_ch_info[ch]++;
+        } else if (ch >= 0) {
+            pr_error("Prev channelInfo=%d out of range [0,%d)", ch, CHANNEL_NUM);
         }
     }
 
+
     auto next = std::next(it);
-    if (next != nodes.end() && (*next)->channelInfo >= 0) {
-        relate_ch_info[(*next)->channelInfo]++;
+    if (next != nodes.end()) {
+        int ch = (*next)->channelInfo;
+        if (ch >= 0 && ch < CHANNEL_NUM) {
+            relate_ch_info[ch]++;
+        } else if (ch >= 0) {
+            pr_error("Next channelInfo=%d out of range [0,%d)", ch, CHANNEL_NUM);
+        }
     }
 
     return relate_ch_info;

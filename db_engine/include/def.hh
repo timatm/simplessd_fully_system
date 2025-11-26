@@ -84,7 +84,9 @@ enum class SelectT {
 #define ENABLE_DISK 1
 
 // Enable NVMe driver = 0 / 1  (my NVMe driver) / (simplessd NVMe driver)
-#define NVME_DRIVER 0
+#ifndef NVME_DRIVER
+#define NVME_DRIVER 1 
+#endif
 
 
 struct AlignedBuf {

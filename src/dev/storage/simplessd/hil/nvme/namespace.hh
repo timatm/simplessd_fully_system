@@ -29,8 +29,8 @@
 #include "util/disk.hh"
 #include "util/simplessd.hh"
 #include "ims/include/def.hh"
-#include "ims/firmware/IMS_interface.hh"
-#include "ims/firmware/lbn_pool.hh"
+#include "ims/include/IMS_interface.hh"
+#include "ims/include/lbn_pool.hh"
 
 
 

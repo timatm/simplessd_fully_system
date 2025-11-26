@@ -4,7 +4,7 @@ GEM5DIR := ./build
 M5DIR	:= ${HOME}/m5
 LOG_DIR := ./logs
 
-TIME	:= $(shell date +%y%m%d-%H%M%S)
+TIME	:= $(shell date %m%d-%H%M)
 
 export M5_PATH=${M5DIR}
 
