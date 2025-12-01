@@ -12,7 +12,16 @@ enum PutType{
 };
 
 
-#define PACKING_T (PackingType::kKeyPerPage)
+#ifndef PACKING_TYPE
+#define PACKING_TYPE 0
+#endif
+
+constexpr PackingType kPackingType = static_cast<PackingType>(PACKING_TYPE);
+
+static_assert(
+    PACKING_TYPE == 0 || PACKING_TYPE == 1 || PACKING_TYPE == 2,
+    "PACKING_TYPE must be 0(kKeyPerPage), 1(kHash), or 2(kKeyRange)"
+);
 
 #define LEVEL0_MAX 4
 #define LEVEL1_MAX 10

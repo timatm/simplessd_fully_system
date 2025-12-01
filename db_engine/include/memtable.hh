@@ -29,11 +29,12 @@ public:
     InternalKey getMaxKey(){ return skiplist_.Max()->internal_key ;};
     void setPackingT(PackingType t){packing_type_ = static_cast<int>(t); }
     bool isEmpty() const { return node_count_ == 0; }
+    double space_util();
 private:
     SkipList<Record,RecordComparator> skiplist_;  // SkipList 儲存 Record
     uint32_t node_count_ = 0;              // SkipList 節點數
     size_t size_ = 0;                      // 估計記憶體大小
-    int packing_type_ = static_cast<int>(PACKING_T);
+    int packing_type_ = static_cast<int>(kPackingType);
     std::vector<uint32_t> hash_num_;
     InternalKey minRange_;
     InternalKey maxRange_;

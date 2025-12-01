@@ -61,6 +61,7 @@ public:
 
     virtual int nvme_write_block(uint32_t lbn, char* buffer) = 0;
     virtual int nvme_read_block(uint32_t lbn, char* buffer) = 0;
+    virtual int nvme_search(char* buffer, size_t size) = 0;
 };
 
 #endif

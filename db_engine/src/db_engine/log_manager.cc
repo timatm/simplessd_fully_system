@@ -15,12 +15,12 @@ LogManager::LogManager(INVMEDriver& nvme)
 void LogManager::allocate_lbn() {
     char *buffer = (char*)calloc(1,sizeof(uint64_t));
     if (!buffer) {
-        std::cerr << "Buffer is null, cannot allocate LBN." << std::endl;
+        pr_error("Buffer is null, cannot allocate LBN.");
         return;
     }
 
     if (nvme_.nvme_allcate_lbn(buffer) == COMMAND_FAILED) {
-        std::cerr << "Failed to allocate LBN." << std::endl;
+        pr_error("Failed to allocate LBN.");
         free(buffer);
         return;
     }
@@ -47,7 +47,7 @@ void LogManager::flush_buffer()
     // pr_info("Flushing buffer to LPN: %lu", lpn);
     // printf("[FLUSH] th=%lu currentLPN=%u\n",pthread_self(), lpn);
     if (nvme_.nvme_write_log(lpn, aligned_page) == COMMAND_FAILED) {
-        std::cerr << "Failed to write log at LPN: " << lpn << '\n';
+        pr_error("Failed to write log at LPN: %llu", lpn);
         return;
     }
 
@@ -94,7 +94,7 @@ uint32_t LogManager::findNextLPN(uint32_t lpn) const{
     if (pageOffset + 1 >= IMS_PAGE_NUM) {
         auto blkIt = std::find(logRecordBlock_.begin(), logRecordBlock_.end(), currentLBN);
         if (blkIt == logRecordBlock_.end() || ++blkIt == logRecordBlock_.end()) {
-            std::cerr << "[findNextLPN] No next block after LBN: " << currentLBN << '\n';
+            pr_error("[findNextLPN] No next block after LBN:  %lu", lpn);
             return UINT32_MAX;
         }
 
@@ -113,7 +113,7 @@ std::optional<Record> LogManager::readLog(uint32_t lpn, uint32_t offset)
     auto readPage = [&](uint32_t lpn,char* buffer) -> bool{
         int err = nvme_.nvme_read_log(lpn,buffer);
         if(err == COMMAND_FAILED){
-            pr_debug("NNMe read log is failed");
+            pr_error("NNMe read log is failed");
             return false;
         }
         return true;
@@ -123,7 +123,7 @@ std::optional<Record> LogManager::readLog(uint32_t lpn, uint32_t offset)
     uint32_t curLPN = lpn;
     uint32_t curOffset = offset;
     if (!read_buffer) {
-        std::cerr << "Failed to allocate read buffer." << std::endl;
+        pr_error("Failed to allocate read buffer.");
         return std::nullopt;
     }
     
@@ -163,12 +163,15 @@ std::optional<Record> LogManager::readLog(uint32_t lpn, uint32_t offset)
     uint32_t val_sz = 0;
     memcpy(&ikey_sz,result.data(),sizeof(uint32_t));
     memcpy(&val_sz,result.data() + sizeof(uint32_t),sizeof(uint32_t));
-    uint32_t blobSize = ikey_sz + val_sz;
-    if (ikey_sz > 64) {
-        pr_debug("Reading log at LPN: %u, Offset: %u, Blob Size: %u (Key size: %u,value size: %u)", lpn, offset, blobSize,ikey_sz,val_sz);
+    
+    if (ikey_sz != 64 || val_sz == 0) {
+        pr_error("[readLog] Bad header at LPN=%u, offset=%u, ikey_sz=%u, val_sz=%u",
+                lpn, offset, ikey_sz, val_sz);
         free(read_buffer);
-        return std::nullopt;   
+        return std::nullopt;
     }
+
+    uint32_t blobSize = ikey_sz + val_sz;
     uint32_t copied = 0;
     while (copied < blobSize) {
         if (curOffset == IMS_PAGE_SIZE && curLPN != getLPN()) {       
@@ -207,7 +210,7 @@ std::vector<Record> LogManager::readLogBlock(uint32_t lbn,
     auto readBlock = [&](uint32_t lbn, char* buffer) -> bool {
         int err = nvme_.nvme_read_block(lbn, buffer);
         if (err == COMMAND_FAILED) {
-            pr_debug("NVMe read log failed at LBN %u (err=%d)", lbn, err);
+            pr_error("NVMe read log failed at LBN %u (err=%d)", lbn, err);
             return false;
         }
         return true;
@@ -216,25 +219,25 @@ std::vector<Record> LogManager::readLogBlock(uint32_t lbn,
     std::vector<Record> results;
 
     if (lbn >= LBN_NUM) {
-        pr_debug("LBN %u is out of range (LBN_NUM=%u)", lbn, LBN_NUM);
+        pr_error("LBN %u is out of range (LBN_NUM=%u)", lbn, LBN_NUM);
         nextBlockValidOffset = UINT32_MAX;
         return results;
     }
     if (valid_offset >= BLOCK_SIZE) {
-        pr_debug("Valid offset %u is out of range (BLOCK_SIZE=%u)", valid_offset, BLOCK_SIZE);
+        pr_error("Valid offset %u is out of range (BLOCK_SIZE=%u)", valid_offset, BLOCK_SIZE);
         nextBlockValidOffset = UINT32_MAX;
         return results;
     }
 
     char* read_buffer = (char*)aligned_alloc(4096, BLOCK_SIZE);
     if (!read_buffer) {
-        std::cerr << "Failed to allocate read buffer." << std::endl;
+        pr_error("Failed to allocate read buffer.");
         nextBlockValidOffset = UINT32_MAX;
         return results;
     }
 
     if (!readBlock(lbn, read_buffer)) {
-        pr_debug("Read block failed at LBN %u", lbn);
+        pr_error("Read block failed at LBN %u", lbn);
         nextBlockValidOffset = UINT32_MAX;
         free(read_buffer);
         return results;
@@ -251,7 +254,7 @@ std::vector<Record> LogManager::readLogBlock(uint32_t lbn,
         std::memcpy(&val_sz,  read_buffer + curOffset + sizeof(uint32_t), sizeof(uint32_t));
 
         if (ikey_sz != 64) {
-            pr_debug("Invalid key size %u at LBN %u, Offset %zu", ikey_sz, lbn, curOffset);
+            pr_error("Invalid key size %u at LBN %u, Offset %zu", ikey_sz, lbn, curOffset);
             nextBlockValidOffset = UINT32_MAX;
             break;
         }
@@ -261,7 +264,7 @@ std::vector<Record> LogManager::readLogBlock(uint32_t lbn,
                                 static_cast<size_t>(val_sz);
 
         if (curOffset + rec_size > BLOCK_SIZE) {
-            pr_debug("Record exceeds block boundary at LBN %u, Offset %zu", lbn, curOffset);
+            pr_error("Record exceeds block boundary at LBN %u, Offset %zu", lbn, curOffset);
             nextBlockValidOffset = UINT32_MAX;
             break;
         }
@@ -289,7 +292,7 @@ std::vector<Record> LogManager::readLogBlock(uint32_t lbn,
 
             if (ikey_sz != 64) {
                 nextBlockValidOffset = UINT32_MAX;
-                pr_debug("Invalid key size %u at LPN %u, Offset %u", ikey_sz, curLPN, curOffsetInLPN);
+                pr_error("Invalid key size %u at LPN %u, Offset %u", ikey_sz, curLPN, curOffsetInLPN);
             }
 
             
@@ -301,7 +304,7 @@ std::vector<Record> LogManager::readLogBlock(uint32_t lbn,
             
         } else {
             nextBlockValidOffset = UINT32_MAX;
-            pr_debug("Failed to read cross-page log at LPN %u, Offset %u", curLPN, curOffsetInLPN);
+            pr_error("Failed to read cross-page log at LPN %u, Offset %u", curLPN, curOffsetInLPN);
         }
     }
     else{
@@ -352,7 +355,7 @@ void LogManager::dump() const {
     std::cout << "Next LBN              : " << next_lbn_ << "\n";
     std::cout << "Page Offset           : " << page_offset_ << "\n";
     std::cout << "Byte Offset           : " << byte_offset_ << "\n";
-    std::cout << "First Block Offset    : " << first_block_offset_ << "\n";
+    std::cout << "First Block Offset     : " << first_block_offset_ << "\n";
     std::cout << "Buffer Size           : " << buffer_.size() << " bytes\n";
 
     std::cout << "Log Record Blocks (" << logRecordBlock_.size() << " entries):\n";

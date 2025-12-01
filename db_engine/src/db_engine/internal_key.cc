@@ -76,7 +76,7 @@ std::string InternalKey::Encode() const {
 InternalKey InternalKey::Decode(const std::string& buf) {
     InternalKey ik{};
     if (buf.size() != sizeof(InternalKey)) {
-        pr_debug("InternalKey size is invalid(%d)",buf.size());
+        pr_error("InternalKey size is invalid(%d)",buf.size());
         return ik;
     }
     size_t off = 0;

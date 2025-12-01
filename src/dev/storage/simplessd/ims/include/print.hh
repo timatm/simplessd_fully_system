@@ -11,10 +11,10 @@
 #include <type_traits>
 
 
-#define MYDB_DEBUG 1
+// #define MYDB_DEBUG 1
 namespace logger {
 
-enum class Level { Info, Debug ,Error};
+enum class Level { Info, Debug ,Error,STAT};
 
 // ANSI 色碼
 static constexpr char RED[]   = "\033[31m";
@@ -33,6 +33,9 @@ inline void print(Level lvl, const std::string& msg) {
             break;
         case Level::Error:
             std::cout << RED << "[ERROR] " << msg << RESET << std::endl;
+            break;
+        case Level::STAT:
+            std::cout << "[MYDB-STAT] " << msg << std::endl;
             break;
     }
 }
@@ -67,12 +70,17 @@ inline void errorf(const char* fmt, Args... args) {
     print(Level::Error, fmt_str(fmt, args...));
 }
 
+template<typename... Args>
+inline void statf(const char* fmt, Args... args) {
+    print(Level::STAT, fmt_str(fmt, args...));
+}
+
 } // namespace logger
 
 // ────────────── 使用者介面 ──────────────
 #define pr_info(...)  logger::infof(__VA_ARGS__)
 #define pr_error(...) logger::errorf(__VA_ARGS__)
-
+#define pr_stat(...) logger::statf(__VA_ARGS__)
 
 #ifdef MYDB_DEBUG
   #define pr_debug(...) logger::debugf(__VA_ARGS__)

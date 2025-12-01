@@ -18,6 +18,7 @@
 #include "db/db_factory.h"
 #include <iostream>
 #include <iomanip>
+#include "print.hh"
 // #include <gem5/m5ops.h> 
 
 using namespace std;
@@ -65,97 +66,119 @@ int main(const int argc, const char *argv[]) {
   wl.Init(props);
 
   const int num_threads = stoi(props.GetProperty("threadcount", "1"));
+  bool run_only  = (props.GetProperty("runonly",  "false") == "true");
+  bool load_only = (props.GetProperty("loadonly", "false") == "true");
+  bool do_load = !run_only;
+  bool do_run  = !load_only;
 
   // Loads data
   vector<future<int>> actual_ops;
-  int total_ops = stoi(props[ycsbc::CoreWorkload::RECORD_COUNT_PROPERTY]);
-  for (int i = 0; i < num_threads; ++i) {
-    actual_ops.emplace_back(async(launch::async,
-        DelegateClient, db, &wl, total_ops / num_threads, true));
-  }
-  assert((int)actual_ops.size() == num_threads);
 
-  int sum = 0;
-  for (auto &n : actual_ops) {
-    assert(n.valid());
-    sum += n.get();
-  }
-  cerr << "# Loading records:\t" << sum << endl;
+  if (do_load) {
+    int total_ops = stoi(props[ycsbc::CoreWorkload::RECORD_COUNT_PROPERTY]);
+    for (int i = 0; i < num_threads; ++i) {
+      actual_ops.emplace_back(async(launch::async,
+          DelegateClient, db, &wl, total_ops / num_threads, true)); // is_loading = true
+    }
+    assert((int)actual_ops.size() == num_threads);
 
+    int sum = 0;
+    for (auto &n : actual_ops) {
+      assert(n.valid());
+      sum += n.get();
+    }
+    cerr << "# Loading records:\t" << sum << endl;
+  } 
+  else {
+    cerr << "# Skip loading phase, reuse existing DB.\n";
+  }
   // Peforms transactions
-  actual_ops.clear();
-  total_ops = stoi(props[ycsbc::CoreWorkload::OPERATION_COUNT_PROPERTY]);
+  if (do_run) {
+    actual_ops.clear();
+    int total_ops = stoi(props[ycsbc::CoreWorkload::OPERATION_COUNT_PROPERTY]);
 
-  // utils::sanity_timer_200ms();
-  // utils::PortableTimer::Sanity200ms();   // 打印一下；若仍为 0，说明只能走 fallback
-  utils::PortableTimer timer;
-  struct timespec t0{}, t1{};
-  if (clock_gettime(CLOCK_MONOTONIC, &t0) != 0) { perror("t0 clock_gettime"); return 1; }
-  // m5_reset_stats(0, 0);
-  // utils::MonotonicTimer timer;
-  timer.Start();
-  for (int i = 0; i < num_threads; ++i) {
-    actual_ops.emplace_back(async(launch::async,
-        DelegateClient, db, &wl, total_ops / num_threads, false));
+    // utils::sanity_timer_200ms();
+    // utils::PortableTimer::Sanity200ms();   // 打印一下；若仍为 0，说明只能走 fallback
+    utils::PortableTimer timer;
+    struct timespec t0{}, t1{};
+    if (clock_gettime(CLOCK_MONOTONIC, &t0) != 0) { perror("t0 clock_gettime"); return 1; }
+    // m5_reset_stats(0, 0);
+    // utils::MonotonicTimer timer;
+    timer.Start();
+    for (int i = 0; i < num_threads; ++i) {
+      actual_ops.emplace_back(async(launch::async,
+          DelegateClient, db, &wl, total_ops / num_threads, false));
+    }
+
+
+
+    // actual_ops.clear();
+    // total_ops = stoi(props[ycsbc::CoreWorkload::OPERATION_COUNT_PROPERTY]);
+    // utils::Timer timer;
+    // timer.Start();
+    // for (int i = 0; i < num_threads; ++i) {
+    //   actual_ops.emplace_back(async(launch::async,
+    //       DelegateClient, db, &wl, total_ops / num_threads, false));
+    // }
+    assert((int)actual_ops.size() == num_threads);
+
+    int sum = 0;
+    for (auto &n : actual_ops) {
+      assert(n.valid());
+      sum += n.get();
+    }
+    double duration = timer.End();
+    if (clock_gettime(CLOCK_MONOTONIC, &t1) != 0) { perror("t1 clock_gettime"); return 1; }
+
+
+    auto ts_sub = [](timespec a, timespec b){
+      if ((a.tv_nsec -= b.tv_nsec) < 0) { a.tv_nsec += 1000000000; a.tv_sec -= 1; }
+      timespec d; d.tv_sec = a.tv_sec - b.tv_sec; d.tv_nsec = a.tv_nsec; return d;
+    };
+    timespec d = ts_sub(t1, t0);
+    unsigned long long ns = (unsigned long long)d.tv_sec * 1000000000ull
+                          + (unsigned long long)d.tv_nsec;
+
+    // 强制浮点：不要用整数链式再乘/除
+    double secs = (double)ns / 1e9;
+    double ms   = (double)ns / 1e6;
+
+
+    std::cout << "time nano second=" << ns << std::endl;
+
+    std::cout << std::fixed << std::setprecision(3)
+              << "elapsed_ms=" << (ns / 1000000.0) << " ";
+    std::cout << std::fixed << std::setprecision(6)
+              << "duration_s=" << (ns / 1000000000.0) << "\n";
+
+
+    // 用同一个 secs 算吞吐，避免“两个计时器两个结果”
+    double ktps = (secs > 0.0) ? ( (double)sum / secs / 1000.0 ) : 0.0;
+
+    // m5_dump_stats(0, 0);
+    // double ktps = (duration > 0.0) ? (static_cast<double>(sum) / duration / 1000.0) : 0.0;
+
+    cerr.setf(std::ios::fixed);
+    cerr.precision(3);
+    cerr << "# Transaction throughput (KTPS)\n";
+    cerr << props["dbname"] << '\t' << file_name << '\t' << num_threads << '\t' << ktps << '\n';
+
+    cerr << "total_ops: " << sum << '\n';  // 打印“实际完成”的操作数
+    cerr.precision(6);
+    cerr << "duration: " << duration << " s\n";
+    pr_stat("time_ns=%lld db=%s file=%s threads=%d total_ops=%lld ktps=%.3f",
+          static_cast<long long>(ns),
+          props["dbname"].c_str(),
+          file_name.c_str(),
+          num_threads,
+          static_cast<long long>(sum),
+          ktps);
   }
-
-
-
-  // actual_ops.clear();
-  // total_ops = stoi(props[ycsbc::CoreWorkload::OPERATION_COUNT_PROPERTY]);
-  // utils::Timer timer;
-  // timer.Start();
-  // for (int i = 0; i < num_threads; ++i) {
-  //   actual_ops.emplace_back(async(launch::async,
-  //       DelegateClient, db, &wl, total_ops / num_threads, false));
-  // }
-  assert((int)actual_ops.size() == num_threads);
-
-  sum = 0;
-  for (auto &n : actual_ops) {
-    assert(n.valid());
-    sum += n.get();
+  else {
+    cerr << "# Skip transaction phase (loadonly).\n";
   }
-  double duration = timer.End();
-  if (clock_gettime(CLOCK_MONOTONIC, &t1) != 0) { perror("t1 clock_gettime"); return 1; }
-
-
-  auto ts_sub = [](timespec a, timespec b){
-    if ((a.tv_nsec -= b.tv_nsec) < 0) { a.tv_nsec += 1000000000; a.tv_sec -= 1; }
-    timespec d; d.tv_sec = a.tv_sec - b.tv_sec; d.tv_nsec = a.tv_nsec; return d;
-  };
-  timespec d = ts_sub(t1, t0);
-  unsigned long long ns = (unsigned long long)d.tv_sec * 1000000000ull
-                        + (unsigned long long)d.tv_nsec;
-
-  // 强制浮点：不要用整数链式再乘/除
-  double secs = (double)ns / 1e9;
-  double ms   = (double)ns / 1e6;
-
-
-  std::cout << "time nano second=" << ns << std::endl;
-
-  std::cout << std::fixed << std::setprecision(3)
-            << "elapsed_ms=" << (ns / 1000000.0) << " ";
-  std::cout << std::fixed << std::setprecision(6)
-            << "duration_s=" << (ns / 1000000000.0) << "\n";
-
-
-  // 用同一个 secs 算吞吐，避免“两个计时器两个结果”
-  double ktps = (secs > 0.0) ? ( (double)sum / secs / 1000.0 ) : 0.0;
-
-  // m5_dump_stats(0, 0);
-  // double ktps = (duration > 0.0) ? (static_cast<double>(sum) / duration / 1000.0) : 0.0;
-
-  cerr.setf(std::ios::fixed);
-  cerr.precision(3);
-  cerr << "# Transaction throughput (KTPS)\n";
-  cerr << props["dbname"] << '\t' << file_name << '\t' << num_threads << '\t' << ktps << '\n';
-
-  cerr << "total_ops: " << sum << '\n';  // 打印“实际完成”的操作数
-  cerr.precision(6);
-  cerr << "duration: " << duration << " s\n";
-
+  delete db;
+  return 0;
 }
 
 string ParseCommandLine(int argc, const char *argv[], utils::Properties &props) {
@@ -202,6 +225,14 @@ string ParseCommandLine(int argc, const char *argv[], utils::Properties &props) 
       }
       props.SetProperty("slaves", argv[argindex]);
       argindex++;
+    } else if (strcmp(argv[argindex], "-runonly") == 0) {
+      // 只跑 transaction phase（跳過 load）
+      props.SetProperty("runonly", "true");
+      argindex++;
+    } else if (strcmp(argv[argindex], "-loadonly") == 0) {
+      // 只跑 load phase（不跑 transaction）
+      props.SetProperty("loadonly", "true");
+      argindex++;
     } else if (strcmp(argv[argindex], "-P") == 0) {
       argindex++;
       if (argindex >= argc) {
@@ -237,6 +268,8 @@ void UsageMessage(const char *command) {
   cout << "Options:" << endl;
   cout << "  -threads n: execute using n threads (default: 1)" << endl;
   cout << "  -db dbname: specify the name of the DB to use (default: basic)" << endl;
+  cout << "  -runonly: only run transactions, skip loading phase" << endl;
+  cout << "  -loadonly: only load records, skip transaction phase" << endl;
   cout << "  -P propertyfile: load properties from the given file. Multiple files can" << endl;
   cout << "                   be specified, and will be processed in the order specified" << endl;
 }

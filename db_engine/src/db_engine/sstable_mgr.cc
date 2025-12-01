@@ -12,7 +12,7 @@
 #include "internal_key.hh"
 
 
-
+static std::atomic<int> g_inflight_write(0);
 
 AlignedBuf SstableManager::packingTable(const SkipList<Record, RecordComparator>& skiplist) const {
     switch (packing_type_) {
@@ -23,7 +23,7 @@ AlignedBuf SstableManager::packingTable(const SkipList<Record, RecordComparator>
         case PackingType::kKeyRange:
             return keyRangePacking(skiplist);
         default:
-            pr_debug("PackingTable type is error");
+            pr_error("PackingTable type is error");
             return {};
     }
 }
@@ -114,7 +114,7 @@ AlignedBuf SstableManager::keyHashPacking(const SkipList<Record, RecordComparato
         }
 
         if (!placed) {
-            pr_debug("Hash key is out of slot");
+            pr_error("Hash key is out of slot");
             key.dump();
             throw std::runtime_error("Hash block full, cannot place key");
         }
@@ -168,7 +168,7 @@ AlignedBuf SstableManager::packingTable(std::queue<std::string> sortedLsit){
         case PackingType::kKeyRange:
             return keyRangePacking(sortedLsit);
         default:
-            pr_debug("PackingTable type is error");
+            pr_error("PackingTable type is error");
             return {};
     }
 }
@@ -249,7 +249,7 @@ AlignedBuf SstableManager::keyHashPacking(std::queue<std::string> sortedList) co
         }
 
         if (!placed) {
-            pr_debug("Hash key is out of slot");
+            pr_error("Hash key is out of slot");
             key.dump();
             throw std::runtime_error("Hash block full, cannot place key");
         }
@@ -355,46 +355,53 @@ void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey
     pr_debug("Dispatching write for SSTable: %s",filename.c_str());
     // info.dump();
 
-    // thread_pool_.Submit([info, buf = std::move(sstable_buffer), clearImmuteTable,this]() {
-    //     pr_debug("[Thread] Entered thread task");
-    //     int err = nvme_.nvme_write_sstable(info,buf.data());
-    //     pr_debug("[Thread] nvme_write_sstable returned %d",err);
-    //     if (err == COMMAND_FAILED) {
-    //         pr_debug("[Thread] Failed to write SSTable: %s",info.filename);
-    //         return;
-    //     }
-    //     pr_debug("[Thread] Write success: %s",info.filename);
+    thread_pool_.Submit([info, buf = std::move(sstable_buffer), clearImmuteTable,this]() {
+        auto tid        = std::this_thread::get_id();
+        auto tid_hash   = std::hash<std::thread::id>{}(tid);
+        // auto t_ender    = clock::now();
+        int now_inflight = g_inflight_write.fetch_add(1,std::memory_order_relaxed)+1;
+        pr_info("[Thread] [ENTER] tid:%zu inflight:%d",static_cast<size_t>(tid_hash),now_inflight);
 
-    //     auto node = std::make_shared<TreeNode>(info.filename,
-    //                                         info.level,
-    //                                         info.min, 
-    //                                         info.max);
-    //     {
-    //         std::unique_lock<std::mutex> lock(tree_mutex_);
-    //         lsmTree_.insert_sstable(node);
-    //     }
+        pr_debug("[Thread] Entered thread task");
+        int err = nvme_.nvme_write_sstable(info,buf.data());
+        pr_debug("[Thread] nvme_write_sstable returned %d",err);
+        if (err == COMMAND_FAILED) {
+            pr_error("[Thread] Failed to write SSTable: %s",info.filename);
+            return;
+        }
+        pr_debug("[Thread] Write success: %s",info.filename);
 
-    //     if (clearImmuteTable) {
-    //         notify_done(info);
-    //     }
-    //     pr_debug("SStable( %s ) written successfully.",info.filename);
-    // });
-    int err = nvme_.nvme_write_sstable(info,sstable_buffer.data());
-    pr_debug("nvme_write_sstable returned %d",err);
-    if (err == COMMAND_FAILED) {
-        pr_debug("Failed to write SSTable: %s",info.filename.c_str());
-        return;
-    }
-    pr_debug("Write success: %s",info.filename.c_str());
+        auto node = std::make_shared<TreeNode>(info.filename,
+                                            info.level,
+                                            info.min, 
+                                            info.max);
+        {
+            std::unique_lock<std::mutex> lock(tree_mutex_);
+            lsmTree_.insert_sstable(node);
+        }
 
-    auto node = std::make_shared<TreeNode>(info.filename,
-                                        info.level,
-                                        info.min, 
-                                        info.max);
-    {
-        std::unique_lock<std::mutex> lock(tree_mutex_);
-        lsmTree_.insert_sstable(node);
-    }
+        if (clearImmuteTable) {
+            notify_done(info);
+        }
+        now_inflight = g_inflight_write.fetch_sub(1,std::memory_order_relaxed)-1;
+        pr_info("[Thread] [LEAVE] tid:%zu inflight:%d",static_cast<size_t>(tid_hash),now_inflight);
+        pr_debug("SStable( %s ) written successfully.",info.filename);
+    });
+    // int err = nvme_.nvme_write_sstable(info,sstable_buffer.data());
+    // if (err == COMMAND_FAILED) {
+    //     pr_error("Failed to write SSTable: %s",info.filename.c_str());
+    //     return;
+    // }
+    // pr_debug("Write success: %s",info.filename.c_str());
+
+    // auto node = std::make_shared<TreeNode>(info.filename,
+    //                                     info.level,
+    //                                     info.min, 
+    //                                     info.max);
+    // {
+    //     std::unique_lock<std::mutex> lock(tree_mutex_);
+    //     lsmTree_.insert_sstable(node);
+    // }
 
     // if (clearImmuteTable) {
     //     notify_done(info);
@@ -405,7 +412,7 @@ void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey
 
 void SstableManager::eraseSSTable(const std::string& filename) {
     if(filename.empty()){
-        pr_debug("DeleteSSTable filename is empty");
+        pr_error("DeleteSSTable filename is empty");
         return;
     }
     int err = nvme_.nvme_erase_sstable(filename);
@@ -442,7 +449,7 @@ void SstableIterator::Seek(std::string_view internal_target) {
 
     // 如果你的 Decode 有 length 版，建议传长度；没有也可直接 memcpy 再比较对象
     if(internal_target.size() != kIKeySize) {
-        pr_debug("SStable iterator seek is error target");
+        pr_error("SStable iterator seek is error target");
         pos_ = -1;
         return;
     }
@@ -475,7 +482,7 @@ Status SstableIterator::ReadValue(std::string& out) const {
     // pr_debug("Read LPN: %lu  ,Offset: %lu",ik.value_ptr.lpn, ik.value_ptr.offset);
     auto rec = log_mgr_->readLog(ik.value_ptr.lpn, ik.value_ptr.offset);
     if (!rec) {
-        pr_debug("ReadValue failed for key: %s", ik.UserKey().c_str());
+        pr_error("ReadValue failed for key: %s", ik.UserKey().c_str());
         return Status::NotFound("value not found in log for key: " + ik.UserKey());
     }
     out = std::move(rec->value);
@@ -544,7 +551,7 @@ std::vector<SstableIterator::EntryRef> SstableIterator::gen_sorted_view() {
             break;
         }
         default:
-            pr_debug("Unknown packing type=%d", static_cast<int>(type_));
+            pr_error("Unknown packing type=%d", static_cast<int>(type_));
             break;
     }
     return v;

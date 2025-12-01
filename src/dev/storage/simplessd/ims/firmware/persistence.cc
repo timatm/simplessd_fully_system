@@ -54,9 +54,10 @@ int Persistence::flushMappingTable(const std::unordered_map<std::string, uint64_
         }
 
         mappingEntry& entry = page->entry[idx++];
-        std::strncpy(entry.fileName, filename.c_str(), sizeof(entry.fileName) - 1);
+        std::memset(&entry, 0, sizeof(entry));
+        std::strncpy(entry.fileName, filename.c_str(),sizeof(entry.fileName) - 1);
+        entry.fileName[sizeof(entry.fileName) - 1] = '\0';
         entry.lbn = lbn;
-
         auto node = tree_.find_node(filename);
         if (node) {
             entry.level = node->levelInfo;

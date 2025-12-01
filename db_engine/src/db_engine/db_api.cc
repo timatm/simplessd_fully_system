@@ -7,6 +7,7 @@
 #include "options.hh"
 #include "compaction.hh"
 #include "range_query.hh"
+#include <algorithm>
 API::API(){
 
     tree_ = std::make_shared<Tree>();
@@ -18,7 +19,7 @@ API::API(){
         nvme_ = std::make_unique<MyNVMeDriver>();
     }
     
-    packing_ = PACKING_T;
+    packing_ = kPackingType;
     memtable_ = std::make_unique<MemTable>();
     immutable_memtable_ = nullptr;
     logManager_ = std::make_unique<LogManager>(*nvme_);
@@ -49,7 +50,8 @@ Status API::open() {
     int err = nvme_->nvme_open_DB(reinterpret_cast<uint8_t*>(buffer));
     if (err != 0) {
         free(buffer);
-        return Status::IOError("nvme_open_DB failed");
+        pr_error("nvme_open_DB fail");
+        return Status::IOError("nvme_open_DB fail");
     }
 
     std::string buf(reinterpret_cast<char*>(buffer), IMS_PAGE_SIZE);
@@ -57,7 +59,8 @@ Status API::open() {
 
     DB_INIT info;
     if(DB_INIT::decode(buf, info) == false){
-        return Status::Corruption("DB_INIT decode failed");
+        pr_error("DB_INIT decode fail");
+        return Status::Corruption("DB_INIT decode fail");
     }      
     
     // pr_debug("open DB info");
@@ -71,16 +74,31 @@ Status API::open() {
     getSSTable()->setSequenceNumber(info.sstable_seq);
 
     if (!getLogManager()->decode(info.log_list)) {
-        return Status::Corruption("LogManager decode failed");
+        pr_error("LogManager decode fail");
+        return Status::Corruption("LogManager decode fail");
     }
 
     if (!getLSMTree()->decode(info.node_list)) {
-        return Status::Corruption("LSMTree decode failed");
+        pr_error("LSMTree decode failed");
+        return Status::Corruption("LSMTree decode fail");
     }
     info.dump();
     pr_info("open DB done");
     return Status::OK();
 }
+
+void API::print_result() {
+    pr_info("================== DB experiment result ==================");
+    double avg_util = total_space_util / total_SStable_num;
+    if (total_SStable_num == 0) {
+        pr_error("The average space utilization: N/A (no SSTables)\n");
+    } else {
+        pr_stat("average_pace_utilization=%.4f",avg_util);
+    }
+    pr_info("================== DB experiment result end ==================");
+}
+
+
 
 Status API::close(){
     sstableManager_->waitAllTasksDone();
@@ -93,14 +111,12 @@ Status API::close(){
     {
         std::lock_guard<std::mutex> lk(mu_);
         if (memtable_ && !memtable_->isEmpty()) {
-            // 关键：先把 unique_ptr 所有权转给 shared_ptr（C++14 起支持）
+            total_space_util    += memtable_->space_util();
+            total_SStable_num   += 1;
             imm_to_flush = std::shared_ptr<MemTable>(std::move(memtable_));
-            // // 现在 memtable_ 已经变成空了，不会析构原对象
-            // memtable_ = std::make_unique<MemTable>();  // 新建一张空表供后续写入
         }
     }
 
-    // 离开锁后再做这些 I/O/序列化操作，降低锁粒度
     if (imm_to_flush) {
         auto minK = imm_to_flush->getMinKey();
         auto maxK = imm_to_flush->getMaxKey();
@@ -145,6 +161,8 @@ Status API::close(){
         return Status::IOError("nvme_close_DB failed");
     }
     lsmTree_->clear();
+    pr_info("Close DB done");
+    print_result();
     return Status::OK();
 }
 
@@ -166,6 +184,8 @@ Status API::put_impl(std::string key ,std::string value,PutType t){
         std::lock_guard<std::mutex> lk(mu_);
         if (!memtable_) memtable_ = std::make_unique<MemTable>();
         if (memtable_->memTableIsFull()) {
+            total_space_util    += memtable_->space_util();
+            total_SStable_num   += 1;
             imm_hold = std::shared_ptr<MemTable>(std::move(memtable_));
             immutable_memtable_ = imm_hold;              
             memtable_ = std::make_unique<MemTable>();
@@ -533,7 +553,7 @@ Status API::search(std::string key ,std::string& value){
     if(key.empty()){
         return Status::IOError("Key string is empty");
     }
-    std::cout << "Search key: " << key << std::endl;
+    pr_info("Search key: %s", key.c_str());
     Key userKey(key);
     InternalKey internalKey(key);
     if (memtable_) {
@@ -544,7 +564,8 @@ Status API::search(std::string key ,std::string& value){
         if (result.has_value()) {
             Record rec = Record::Decode(*result);
             if(rec.internal_key.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion)){
-                return Status::NotFound("The key has been deleted");
+                pr_debug("The key has been deleted");
+                return Status::OK();
             }
             value = rec.value;
             return Status::OK();
@@ -552,17 +573,18 @@ Status API::search(std::string key ,std::string& value){
     }
 
     auto sstables = lsmTree_->search_key(userKey);
+
+    
     if (sstables.empty()){
         pr_info("No candidate SSTables found for key: %s", key.c_str());
         return Status::OK();
     }
     SearchPackageD search_package;
 
-
     while( !sstables.empty() ){
         auto sstable = sstables.front();
-        std::cout   << "Find SStable: " << sstable->filename << "  Key range [ " << sstable->rangeMin.toString() << " ~ "
-                    << sstable->rangeMax.toString() << " ]" <<std::endl;
+        pr_info("Find SStable: %s  Key range [ %s ~ %s ]",sstable->filename.c_str(),sstable->rangeMin.toString().c_str(),sstable->rangeMax.toString().c_str());
+
         sstables.pop();
         SearchPatternD pattern_info;
         switch (packing_){
@@ -574,7 +596,6 @@ Status API::search(std::string key ,std::string& value){
                 pattern_info.slot_index = HashModN(internalKey, SLOT_NUM_PER_PAGE); 
                 break;
             }
-                
             case PackingType::kKeyRange:{
                 auto key_range = keyRangeCache_->get(sstable->filename);
                 if(key_range == std::nullopt){
@@ -603,12 +624,16 @@ Status API::search(std::string key ,std::string& value){
     if (encoded_package.empty()) {
         return Status::IOError("Encoded search package is empty");
     }
-    search_package.dump();
-    char* buffer  = (char*)allocateAligned(encoded_package.size());
+    // search_package.dump();
+    void *buffer;
+    int rc = posix_memalign(&buffer, 4096, encoded_package.size());
+    if (rc != 0) {
+        pr_error("posix_memalign failed in API::search, rc=%d", rc);
+        return Status::IOError("posix_memalign failed");
+    }
     memcpy(buffer, encoded_package.data(), encoded_package.size());
 
-    // TODO  
-    // nvme_->nvme_write_search_package(buffer, encoded_package.size());
+    nvme_->nvme_search(reinterpret_cast<char*>(buffer), encoded_package.size());
 
     free(buffer);
     
@@ -695,11 +720,16 @@ Status API::search(std::string key ,std::string& value){
         return Status::IOError("Encoded search package is empty");
     }
 
-    char* buffer  = (char*)allocateAligned(encoded_package.size());
+    void *buffer;
+    int rc = posix_memalign(&buffer, 4096, encoded_package.size());
+    if (rc != 0) {
+        pr_error("posix_memalign failed in API::search, rc=%d", rc);
+        return Status::IOError("posix_memalign failed");
+    }
     memcpy(buffer, encoded_package.data(), encoded_package.size());
 
-    // TODO  
-    // nvme_->nvme_write_search_package(buffer, encoded_package.size());
+    nvme_->nvme_search(reinterpret_cast<char*>(buffer), encoded_package.size());
+
 
     free(buffer);
     
@@ -994,7 +1024,7 @@ void API::test(){
     if (!node) return;
 
     pr_debug("Dump compaction source info:");
-    node->dump();
+    // node->dump();
 
     // 來源/目的候選：vector
     auto srcNodes = getLSMTree()->search_one_level(0, node->rangeMin, node->rangeMax);
@@ -1082,26 +1112,26 @@ void API::log_garbage_collection(){
         uint32_t valid_offset = logManager_->get_first_block_offset();
         uint32_t lbn = logManager_->get_log_list_front();
         if(lbn >= LBN_NUM){
-            pr_debug("Invalid LBN for GC: %u", lbn);
+            pr_error("Invalid LBN for GC: %u", lbn);
             break;
         }
         if(valid_offset >= BLOCK_SIZE){
-            pr_debug("Invalid offset for GC: %u", valid_offset);
+            pr_error("Invalid offset for GC: %u", valid_offset);
             break;
         }
         uint32_t next_block_valid_offset = 0;
         auto records = logManager_->readLogBlock(lbn,valid_offset,next_block_valid_offset);
 
         if (next_block_valid_offset == UINT32_MAX) {
-            pr_debug("GC cross-page read failed for LBN %u; abort this GC cycle to avoid data loss", lbn);
+            pr_error("GC cross-page read failed for LBN %u; abort this GC cycle to avoid data loss", lbn);
             break;
         }
         if (next_block_valid_offset >= BLOCK_SIZE) {
-            pr_debug("GC got invalid next_block_valid_offset=%u for LBN %u; abort", next_block_valid_offset, lbn);
+            pr_error("GC got invalid next_block_valid_offset=%u for LBN %u; abort", next_block_valid_offset, lbn);
             break;
         }
         if (records.empty() && next_block_valid_offset == 0) {
-            pr_debug("GC readLogBlock returned empty for LBN %u (offset=%u); stop to avoid data loss",
+            pr_error("GC readLogBlock returned empty for LBN %u (offset=%u); stop to avoid data loss",
                      lbn, valid_offset);
             break;
         }
@@ -1120,7 +1150,7 @@ void API::log_garbage_collection(){
                     pr_debug("GC key: %s is deleted", record.internal_key.UserKey().c_str());
                     continue;
                 } else {
-                    pr_debug("Failed to get key: %s during GC", record.internal_key.UserKey().c_str());
+                    pr_error("Failed to get key: %s during GC", record.internal_key.UserKey().c_str());
                     continue;
                 }
             }
@@ -1150,7 +1180,7 @@ void API::log_garbage_collection(){
                 pr_info("GC rewrite live key: %s", record.internal_key.UserKey().c_str());
                 Status ps = put_from_gc(record.internal_key.UserKey(), record.value); // 或 std::move(record.value)
                 if (!ps.ok()) {
-                    pr_debug("GC put() failed for key: %s: %s",
+                    pr_error("GC put() failed for key: %s: %s",
                             record.internal_key.UserKey().c_str(), ps.ToString().c_str());
                 }
             }

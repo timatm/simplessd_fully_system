@@ -89,7 +89,7 @@ public:
     void set_on_write_fail(OnWriteFail cb) { on_write_fail_ = std::move(cb); }
 
 private:
-    ThreadPool thread_pool_{1};
+    ThreadPool thread_pool_{4};
     LSMTree& lsmTree_;
     mutable std::mutex tree_mutex_;
     INVMEDriver& nvme_;
@@ -129,7 +129,7 @@ private:
 
     void  notify_done(const sstable_info& info) noexcept;
     void  notify_fail(const sstable_info& info, int err) noexcept;
-    PackingType packing_type_ = PACKING_T; 
+    PackingType packing_type_ = kPackingType; 
 };
 
 class SstableIterator : public InternalIterator{

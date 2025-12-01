@@ -89,6 +89,32 @@ bool MemTable::memTableIsFull() {
     }
 }
 
+double MemTable::space_util(){
+    double utilization = 0;
+    uint32_t sum = 0;
+    switch (packing_type_) {
+        case static_cast<int>(PackingType::kKeyPerPage):
+            utilization = static_cast<double>(node_count_) / static_cast<double>(SLOT_NUM_PER_BLOCK);
+            break;
+
+        case static_cast<int>(PackingType::kHash):
+            for(uint32_t num : hash_num_){
+                sum += num;
+            }
+            utilization = static_cast<double>(sum) / static_cast<double>(SLOT_NUM_PER_BLOCK);
+            break;
+
+        case static_cast<int>(PackingType::kKeyRange):
+            utilization = static_cast<double>(node_count_) / static_cast<double>(SLOT_NUM_PER_BLOCK);
+            break;
+
+        default:
+            pr_error("Calculate space utilization error,input packing_type is error");
+            break;
+    }
+    return utilization;
+}
+
 static void* AllocateAligned(size_t size) {
     void* ptr = nullptr;
     if (posix_memalign(&ptr, 4096, size) != 0 || ptr == nullptr) {
@@ -178,3 +204,4 @@ Status MemTableIterator::ReadValue(std::string& out) const {
     out = value_buf_;
     return Status::OK();
 }
+

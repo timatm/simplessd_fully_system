@@ -11,6 +11,92 @@
 #include "log.hh"
 
 
+void PrintBuildConfig() {
+    // ---- RUNTYPE 說明 ----
+    const char* runtype_str =
+    #if RUNTYPE == 0
+        "Host environment (RUNTYPE=0)";
+    #elif RUNTYPE == 1
+        "SimpleSSD environment (RUNTYPE=1)";
+    #else
+        "UNKNOWN RUNTYPE (should be 0 or 1)";
+    #endif
+    ;
+
+    const char* enable_disk_str = ENABLE_DISK ? "enabled" : "disabled";
+
+    const char* nvme_driver_str =
+    #if RUNTYPE == 0
+        "Host/test NVMe driver";
+    #elif RUNTYPE == 1
+        "SimpleSSD NVMe backend";
+    #else
+        "UNKNOWN NVME driver mode";
+    #endif
+    ;
+
+    // ---- SELECT_POLICY 說明 ----
+    const char* select_policy_str = nullptr;
+    switch (SELECT_POLICY) {
+        case 0: select_policy_str = "WROSTCASE"; break;
+        case 1: select_policy_str = "RR";        break;
+        case 2: select_policy_str = "LEVEL2CH";  break;
+        case 3: select_policy_str = "MYPOLICY";  break;
+        default: select_policy_str = "UNKNOWN";  break;
+    }
+
+    // ---- PACKING_TYPE 說明 ----
+    const char* packing_type_str = nullptr;
+#ifdef PACKING_TYPE
+    switch (PACKING_TYPE) {
+        case 0: packing_type_str = "kKeyPerPage"; break;
+        case 1: packing_type_str = "kHash";       break;
+        case 2: packing_type_str = "kKeyRange";   break;
+        default: packing_type_str = "UNKNOWN";    break;
+    }
+#endif
+    pr_info("========== MyDB Build Config ==========");
+    pr_info("RUNTYPE        = %d (%s)", RUNTYPE, runtype_str);
+    pr_info("ENABLE_DISK    = %d (%s)", ENABLE_DISK, enable_disk_str);
+    pr_info("NVME_DRIVER    = %d (%s)", NVME_DRIVER, nvme_driver_str);
+    pr_info("SELECT_POLICY  = %d (%s)", SELECT_POLICY, select_policy_str);
+#ifdef PACKING_TYPE
+    pr_info("PACKING_TYPE   = %d (%s)", PACKING_TYPE, packing_type_str);
+#endif
+    // ---- SSD / IMS 幾何資訊 ----
+        // ---- SSD / IMS 幾何資訊 ----
+    pr_info("---------- IMS / SSD Geometry ----------");
+    pr_info("CHANNEL_NUM    = %d (bits=%d)", CHANNEL_NUM, CHANNEL_BITS);
+    pr_info("PACKAGE_NUM    = %d (bits=%d)", PACKAGE_NUM, PACKAGE_BITS);
+    pr_info("DIE_NUM        = %d (bits=%d)", DIE_NUM,     DIE_BITS);
+    pr_info("PLANE_NUM      = %d (bits=%d)", PLANE_NUM,   PLANE_BITS);
+    pr_info("BLOCK_NUM      = %d (bits=%d)", BLOCK_NUM,   BLOCK_BITS);
+
+    // 換成 K / M 單位
+    const int page_kb  = IMS_PAGE_SIZE / 1024;
+    const int block_mb = BLOCK_SIZE    / (1024 * 1024);
+
+    pr_info("IMS_PAGE_NUM   = %d", IMS_PAGE_NUM);
+    pr_info("IMS_PAGE_SIZE  = %d KB", page_kb);
+    pr_info("BLOCK_SIZE     = %d MB", block_mb);
+
+    pr_info("LBN_NUM        = %d", LBN_NUM);
+    pr_info("LBN_SIZE       = %d MB", LBN_SIZE / (1024 * 1024));
+    pr_info("LPN_NUM        = %d", LPN_NUM);
+
+    // SSD 總容量，用 G 表示
+    unsigned long long total_bytes =
+        (unsigned long long)LBN_NUM * (unsigned long long)BLOCK_SIZE;
+    double total_gib = (double)total_bytes / (1024.0 * 1024.0 * 1024.0);
+
+    pr_info("SSD capacity   = %.2f GiB (%llu bytes)",
+            total_gib,
+            (unsigned long long)total_bytes);
+
+    pr_info("========================================");
+
+}
+
 
 void IMS_interface::alloc_device_buffer(size_t bytes) {
     if (buffer_) return;
@@ -38,13 +124,13 @@ int IMS_interface::reset_IMS_buffer() {
 }
 
 IMS_interface::IMS_interface() {
+    PrintBuildConfig();
     pr_debug("Constructing IMS_interface...");
-
     sp_ptr_old_ = new super_page(0, 1, 2);  
     sp_ptr_new_ = new super_page(0, 1, 2);
     lbnPool_ = std::make_unique<LBNPool>();
     tree_ = std::make_shared<Tree>();
-    #if RUNTYPE_SIMPLESSD
+    #if RUNTYPE
     #else
         disk_.open("test.img");
     #endif
@@ -62,6 +148,23 @@ IMS_interface::IMS_interface() {
     alloc_device_buffer(kDefaultDeviceDramSize);
     init_IMS();
 }
+
+IMS_interface::~IMS_interface() {
+    try {
+        int err = close_IMS();
+        if (err != OPERATION_SUCCESS) {
+            pr_error("IMS close failed in destructor");
+        } else {
+            pr_info("IMS close is successful in destructor");
+        }
+    } catch (const std::exception &e) {
+        pr_error("IMS destructor: close_IMS threw exception: %s", e.what());
+    }
+    print_result();
+    delete sp_ptr_old_;
+    delete sp_ptr_new_;
+}
+
 
 
 int IMS_interface::write_sstable(uint64_t &lbn) {
@@ -114,7 +217,7 @@ int IMS_interface::write_sstable(uint64_t &lbn) {
     // 呼叫 my_policy()
     uint64_t selectLBN = INVALIDLBN;
     if(level > 0 && level <= MAX_LEVEL){
-        switch(SELECT_POLICT){
+        switch(SELECT_POLICY){
             case static_cast<int>(SelectT::WROSTCASE):
                 selectLBN = lbnPool_->worst_policy();
                 break;
@@ -454,6 +557,10 @@ int IMS_interface::init_IMS() {
 }
 
 int IMS_interface::close_IMS() {
+    if (closed_) {
+        pr_info("IMS_interface already closed, skip close_IMS");
+        return OPERATION_SUCCESS;
+    }
     int err = OPERATION_FAILURE;
     pr_info("Close IMS interface");
     auto mappingTable = mappingTable_->get_table();
@@ -479,19 +586,21 @@ int IMS_interface::close_IMS() {
     super_page* sp = (super_page*)buffer;
 
     sp->magic = MAGIC;
-    sp->mapping_store = sp_ptr_old_->mapping_store;
+    
     sp->mapping_page_num = sp_ptr_new_->mapping_page_num;
-    sp->log_store = sp_ptr_old_->log_store;
-    sp->log_page_num = sp_ptr_new_->log_page_num;
-    sp->currentLogLBN = logManager_->currentLogLBN;
-    sp->nextLogLBN = logManager_->nextLogLBN;
-    sp->logOffset = logManager_->logOffset;
+    sp->log_page_num     = sp_ptr_new_->log_page_num;
+    sp->currentLogLBN    = logManager_->currentLogLBN;
+    sp->nextLogLBN       = logManager_->nextLogLBN;
+    // sp->logOffset        = logManager_->logOffset;
 
-    sp->global_sequence = sp_ptr_old_->global_sequence;
-    sp->sstable_sequence = sp_ptr_old_->sstable_sequence;
-    sp->logOffset = logManager_->logOffset;
-    sp->byteOffset = sp_ptr_old_->byteOffset;
-    sp->firstBlockOffset = sp_ptr_old_->firstBlockOffset;
+    sp->log_store           = sp_ptr_old_->log_store;
+    sp->mapping_store       = sp_ptr_old_->mapping_store;
+
+    sp->global_sequence     = sp_ptr_old_->global_sequence;
+    sp->sstable_sequence    = sp_ptr_old_->sstable_sequence;
+    sp->logOffset           = sp_ptr_old_->logOffset;
+    sp->byteOffset          = sp_ptr_old_->byteOffset;
+    sp->firstBlockOffset    = sp_ptr_old_->firstBlockOffset;
 
 
     size_t total_used_lbn = 0;
@@ -523,7 +632,7 @@ int IMS_interface::close_IMS() {
     logManager_->clear();        
     reset_superPage(sp_ptr_old_);
     reset_superPage(sp_ptr_new_);
-
+    closed_ = true;
     return OPERATION_SUCCESS;
 }
 int IMS_interface::init_DB(uint8_t *buffer){
@@ -637,9 +746,7 @@ int IMS_interface::dump_IMS(){
 int IMS_interface::open_DB(uint32_t *datalen) {
     std::string result;
     DB_INIT info;
-
-    
-
+    // init_IMS();
     info.current_lbn  = get_logManager()->currentLogLBN;
     info.next_lbn     = get_logManager()->nextLogLBN;
     info.page_offset  = get_oldSuperPage()->logOffset;
@@ -654,7 +761,10 @@ int IMS_interface::open_DB(uint32_t *datalen) {
     // info.dump();
     result = info.encode();
 
-    if (result.size() > buffer_size_) return OPERATION_FAILURE;
+    if (result.size() > buffer_size_){
+        pr_error("Device DRAM space is not enough");
+        return OPERATION_FAILURE;
+    }
     std::lock_guard<std::mutex> lk(buf_mu_);
     std::memcpy(buffer_, result.data(), result.size());
     buffer_valid_size_ = result.size();
@@ -662,19 +772,27 @@ int IMS_interface::open_DB(uint32_t *datalen) {
     return OPERATION_SUCCESS;
 }
 
+int IMS_interface::close_DB(uint8_t *host_buffer, size_t size){
+    pr_info("Database is closing ,dump dabase information");
+    dump_all();
+    if (!host_buffer || size == 0) return -2;
+    if (!sp_ptr_old_) {
+        pr_error("close_DB: super_page(old) not initialized");
+        return -5;
+    }
+    DB_INIT info;
+    if( DB_INIT::decode(std::string(reinterpret_cast<char*>(host_buffer), size),info) == false){
+        pr_error("DB_INIT decode failed");
+        return -6;
+    }
 
-// int write_metadata(uint8_t *buffer, size_t size){
-//     if (buffer == nullptr || size == 0) {
-//         pr_debug("Write metadata failed: null buffer or size is zero");
-//         return OPERATION_FAILURE;
-//     }
-
-//     int err = OPERATION_SUCCESS;
-//     if (err != OPERATION_SUCCESS) {
-//         return OPERATION_FAILURE;
-//     }
-//     return OPERATION_SUCCESS;
-// }
+    sp_ptr_old_->global_sequence = info.global_seq;
+    sp_ptr_old_->sstable_sequence = info.sstable_seq;
+    sp_ptr_old_->logOffset = static_cast<uint64_t>(info.page_offset);
+    sp_ptr_old_->byteOffset = static_cast<uint64_t>(info.byte_offset);
+    sp_ptr_old_->firstBlockOffset = static_cast<uint64_t>(info.first_block_offset);
+    return 0;
+}
 
 int IMS_interface::set_sstable_info(uint32_t *size){
     std::string sstable_enc = lsmTree_->encode();
@@ -707,24 +825,46 @@ int IMS_interface::set_log_info(uint32_t *size){
     return OPERATION_SUCCESS;
 }
 
-int IMS_interface::close_DB(uint8_t *host_buffer, size_t size){
-    pr_info("Database is closing ,dump dabase information");
-    dump_all();
-    if (!host_buffer || size == 0) return -2;
-    if (!sp_ptr_old_) {
-        pr_error("close_DB: super_page(old) not initialized");
-        return -5;
+int IMS_interface::search(std::vector<int> &ch_list){
+    if(ch_list.size() > CHANNEL_NUM){
+        pr_error("Channel list size is error");
+        return OPERATION_FAILURE;
     }
-    DB_INIT info;
-    if( DB_INIT::decode(std::string(reinterpret_cast<char*>(host_buffer), size),info) == false){
-        pr_error("DB_INIT decode failed");
-        return -6;
+    size_t hostInfo_len = buffer_valid_size_;
+    std::string buf(buffer_, buffer_ + hostInfo_len);
+#if (SEARCH_PATTERN == 0)
+    SearchPackageD search_package;
+    if (!SearchPackageD::decode(buf, search_package)) {
+        pr_error("IMS search: decode SearchPackageD failed");
+        return  OPERATION_FAILURE;
     }
+#elif (SEARCH_PATTERN == 1)
+    SearchPackageH search_package;
+    if (!SearchPackageH::decode(buf, search_package)) {
+        pr_error("IMS search: decode SearchPackageD failed");
+        return  OPERATION_FAILURE;
+    }
+#endif
+    for(auto& pattern : search_package.searchPatterns){
+        auto& sstable_ID = pattern.sstable_name;
+        uint64_t lbn = mappingTable_->getLBN(sstable_ID);
+        auto ch = LBN2CH(lbn);
+        if (ch < 0 || ch >= CHANNEL_NUM) {
+            pr_error("IMS search: invalid channel %d for sstable %s", ch, sstable_ID.c_str());
+            continue;
+        }
+        ch_list[ch]++;
+    }
+    auto it = std::max_element(ch_list.begin(),ch_list.end());
+    if (it != ch_list.end()) {
+        searh_parallel_block_num += *it;
+    }
+    return OPERATION_SUCCESS;
+}
 
-    sp_ptr_old_->global_sequence = info.global_seq;
-    sp_ptr_old_->sstable_sequence = info.sstable_seq;
-    sp_ptr_old_->logOffset = static_cast<uint64_t>(info.page_offset);
-    sp_ptr_old_->byteOffset = static_cast<uint64_t>(info.byte_offset);
-    sp_ptr_old_->firstBlockOffset = static_cast<uint64_t>(info.first_block_offset);
-    return 0;
+void IMS_interface::print_result(){
+    pr_info("================= IMS experient result =================");
+
+    pr_stat("searh_parallel_block_num=%u",searh_parallel_block_num);
+    pr_info("================= IMS experient end =================");
 }

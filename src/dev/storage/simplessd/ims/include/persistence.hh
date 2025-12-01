@@ -8,13 +8,13 @@
 
 class Persistence {
 public:
-#if RUNTYPE_SIMPLESSD
+#if RUNTYPE
     SimpleSSD::Disk* pDisk_ = nullptr;
 #else
     Disk* pDisk_ = nullptr;
 #endif
 
-#if RUNTYPE_SIMPLESSD
+#if RUNTYPE
     Persistence(SimpleSSD::Disk* disk, super_page* sp_old, super_page* sp_new, Tree& tree)
         : pDisk_(disk), sp_ptr_old_(sp_old), sp_ptr_new_(sp_new), tree_(tree) {}
 #else

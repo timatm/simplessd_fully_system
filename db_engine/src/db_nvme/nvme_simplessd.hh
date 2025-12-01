@@ -33,6 +33,7 @@ public:
     int nvme_monitor_IMS(int monitor_type);
     int nvme_write_block(uint32_t lbn, char* buffer) override;
     int nvme_read_block(uint32_t lbn, char* buffer) override;
+    int nvme_search(char *buffer,size_t size) override;
 private:
     int pass_io_command(nmc_config_t *config);
     void fill_filename_to_dwords(const std::string& filename, uint32_t* dwords_out);

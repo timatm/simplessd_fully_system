@@ -9,15 +9,15 @@
 #include <memory>
 // [SSD setting start]
 
-#define CHANNEL_NUM 4
-#define PACKAGE_NUM 4
-#define DIE_NUM 2
-#define PLANE_NUM 2
-#define BLOCK_NUM 32
-#define IMS_PAGE_NUM 128
-#define IMS_PAGE_SIZE 16384
+#define CHANNEL_NUM     4
+#define PACKAGE_NUM     4
+#define DIE_NUM         2
+#define PLANE_NUM       2
+#define BLOCK_NUM       32
+#define IMS_PAGE_NUM    128
+#define IMS_PAGE_SIZE   16384
 
-#define BLOCK_SIZE IMS_PAGE_SIZE*IMS_PAGE_NUM
+#define BLOCK_SIZE ((IMS_PAGE_SIZE)*(IMS_PAGE_NUM))
 
 #define LOG2_CEIL(x) ( \
     ((x) <= 1) ? 0 : \
@@ -41,20 +41,20 @@
 #define MAPPINGLBN 1
 
 
-#define LBN_NUM ( CHANNEL_NUM * PACKAGE_NUM * DIE_NUM * PLANE_NUM * BLOCK_NUM )
-#define LBN_SIZE ( IMS_PAGE_SIZE * IMS_PAGE_NUM )
+#define LBN_NUM ( (CHANNEL_NUM) * (PACKAGE_NUM) * (DIE_NUM) * (PLANE_NUM) * (BLOCK_NUM) )
+#define LBN_SIZE ( (IMS_PAGE_SIZE) * (IMS_PAGE_NUM) )
 
-#define LPN_NUM (LBN_NUM * IMS_PAGE_NUM)
+#define LPN_NUM ((LBN_NUM) * (IMS_PAGE_NUM))
 
-#define LBN2CH(lbn)       ((lbn) % CHANNEL_NUM)
-#define LBN2PACKAGE(lbn)  (((lbn) / CHANNEL_NUM) % PACKAGE_NUM)
-#define LBN2DIE(lbn)      (((lbn) / (CHANNEL_NUM * PACKAGE_NUM)) % DIE_NUM)
-#define LBN2PLANE(lbn)    (((lbn) / (CHANNEL_NUM * PACKAGE_NUM * DIE_NUM)) % PLANE_NUM)
+#define LBN2CH(lbn)       ((lbn) % (CHANNEL_NUM))
+#define LBN2PACKAGE(lbn)  (((lbn) / (CHANNEL_NUM)) % (PACKAGE_NUM))
+#define LBN2DIE(lbn)      (((lbn) / ((CHANNEL_NUM) * (PACKAGE_NUM))) % (DIE_NUM))
+#define LBN2PLANE(lbn)    (((lbn) / ((CHANNEL_NUM) * (PACKAGE_NUM) * (DIE_NUM))) % (PLANE_NUM))
 
 
 
-#define LBN2LPN(lbn) (lbn * IMS_PAGE_NUM) 
-#define LPN2LBN(lpn) (lpn / IMS_PAGE_NUM)
+#define LBN2LPN(lbn) ((lbn) * (IMS_PAGE_NUM)) 
+#define LPN2LBN(lpn) ((lpn) / (IMS_PAGE_NUM))
 
 #define OPERATION_SUCCESS 0
 #define OPERATION_FAILURE 1
@@ -75,17 +75,31 @@ enum class SelectT {
     LEVEL2CH  = 2,
     MYPOLICY  = 3
 };
-#define SELECT_POLICT (static_cast<int>(SelectT::MYPOLICY))
+#ifndef SELECT_POLICY
+#define SELECT_POLICY 3
+#endif
 
-// My enviroment / SimpleSSD =  0 / 1
-#define RUNTYPE_SIMPLESSD 0
+// RUNTYPE          : My enviroment / SimpleSSD = 0 / 1
+// ENABLE_DISK      : Disable / Enable = 0 / 1
+// NVME_DRIVER      : My NVMe driver / Simplessd NVMe driver = 0 / 1  
+#ifndef RUNTYPE
+#define RUNTYPE 0
+#endif
 
-// Enable / Disable = 1 / 0
-#define ENABLE_DISK 0
+#if   RUNTYPE == 0
+    #define ENABLE_DISK 1
+    #define NVME_DRIVER 0
+#elif RUNTYPE == 1
+    #define ENABLE_DISK 0
+    #define NVME_DRIVER 1
+#else
+    #error "RUNTYPE must be 0 (host) or 1 (SimpleSSD)"
+#endif
 
-// Enable NVMe driver = 0 / 1  (my NVMe driver) / (simplessd NVMe driver)
-#define NVME_DRIVER 0
-
+// Serach pattern generate by device / Serach pattern generate by host = 0 / 1
+#ifndef SEARCH_PATTERN
+#define SEARCH_PATTERN 0
+#endif
 
 struct AlignedBuf {
     std::unique_ptr<void, void(*)(void*)> ptr{nullptr, &::free};
@@ -107,8 +121,6 @@ struct AlignedBuf {
 #define HAS_NEXT_PAGE 1
 #define NO_NEXT_PAGE  0
 
-
-#define DISPATCH_POLICY 3 // 0: worst case, 1: RR, 2: level2CH, 3: my_policy
 #define MAX_LEVEL 7
 // #define MAX_FILENAME_LENGTH 56 // SStable file name length
 #define MAGIC 0x900118FFFEEFFFEE

@@ -2,13 +2,14 @@ SHELL := /bin/bash
 .SHELLFLAGS := -o pipefail -c
 
 # === Directories ===
-ROOT              := $(abspath .)
-BUILD_DIR_BASE    := build
-INSTALL_DIR       := $(abspath ../workload/YCSB-C/mydb)
-NVME_PREBUILT_DIR := $(abspath src/db_nvme/lib)
-LOG_DIR           ?= logs
-LOG_DIR_ABS       := $(abspath $(LOG_DIR))
-
+ROOT              	:= $(abspath .)
+BUILD_DIR_BASE    	:= build
+INSTALL_DIR       	:= $(abspath ../workload/YCSB-C/mydb)
+NVME_PREBUILT_DIR	:= $(abspath src/db_nvme/lib)
+LOG_DIR           	?= logs
+LOG_DIR_ABS       	:= $(abspath $(LOG_DIR))
+LIB_VARIANT_DIR   	:= $(INSTALL_DIR)/lib_variants
+FIRMWARE_BUILD_DIR 	= $(BUILD_DIR)/firmware_build
 # Optional toolchain (musl) file
 TOOLCHAIN_FILE    := $(abspath toolchains/musl.toolchain.cmake)
 
@@ -16,13 +17,14 @@ TOOLCHAIN_FILE    := $(abspath toolchains/musl.toolchain.cmake)
 NPROC             := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 # === Build switches (override on CLI) ===
-BUILD_TYPE        ?= Debug
+BUILD_TYPE        ?= Release
 ENABLE_SANITIZERS ?= OFF
 BUILD_STATIC      ?= OFF
 GENERATOR         ?=
 RUN_ARGS          ?=
-NVME_BACKEND	  ?= real
-NVME_DRIVER       ?= 1
+NVME_BACKEND	  ?= sim
+SELECT_POLICY     ?= 3
+PACKING_TYPE      ?= 0
 
 # Predefined build dirs for different profiles
 DYNAMIC_BUILD_DIR := $(BUILD_DIR_BASE)
@@ -49,7 +51,8 @@ CMAKE_FLAGS := \
   -DENABLE_SANITIZERS=$(ENABLE_SANITIZERS) \
   -DBUILD_STATIC=$(BUILD_STATIC) \
   -DNVME_BACKEND=$(NVME_BACKEND) \
-  -DNVME_DRIVER=$(NVME_DRIVER)
+  -DSELECT_POLICY=$(SELECT_POLICY) \
+  -DPACKING_TYPE=$(PACKING_TYPE)
 
 # === Targets ===
 .PHONY: all configure build install run clean rebuild \
@@ -90,6 +93,10 @@ default: glibc
 static-musl:
 	@$(MAKE) BUILD_TYPE=Release ENABLE_SANITIZERS=OFF BUILD_STATIC=ON configure-static build
 
+static-musl-variants:
+	@$(MAKE) BUILD_TYPE=Release ENABLE_SANITIZERS=OFF BUILD_STATIC=ON configure-static
+	@$(MAKE) BUILD_TYPE=Release ENABLE_SANITIZERS=OFF BUILD_STATIC=ON build-variants
+
 run-static:
 	@cd "$(STATIC_BUILD_DIR)"; ./mydb_engine $(RUN_ARGS)
 
@@ -108,22 +115,41 @@ configure-static:
 
 # === Build / Install / Run ===
 config-sim:
-	@$(MAKE) NVME_BACKEND=sim NVME_DRIVER=0 configure
+	@$(MAKE) NVME_BACKEND=sim configure
 config-real:
-	@$(MAKE) NVME_BACKEND=real NVME_DRIVER=1 configure
+	@$(MAKE) NVME_BACKEND=real configure
 
 build:
 	@echo "🛠️  Building $(BUILD_DIR) ..."
 	@cmake --build "$(BUILD_DIR)" -- -j"$(NPROC)"
 
 mysim: config-sim
-	@echo "🛠️  Building $(BUILD_DIR) ... in my test enviroment"
-	
-	@cmake --build "$(BUILD_DIR)" -- -j"$(NPROC)"
+	@$(MAKE) NVME_BACKEND=sim build-variants
 
 real: config-real
-	@echo "🛠️  Building $(BUILD_DIR) ... in simpleSSD enviroment"
-	@cmake --build "$(BUILD_DIR)" -- -j"$(NPROC)"
+	@$(MAKE) NVME_BACKEND=real build-variants
+
+
+build-variants:
+	@mkdir -p "$(LIB_VARIANT_DIR)"
+	@for sp in 1 2 3; do \
+	  for pt in 0 1 2; do \
+	    echo "=== Building NVME_BACKEND=$(NVME_BACKEND) SELECT_POLICY=$$sp PACKING_TYPE=$$pt ==="; \
+	    $(MAKE) SELECT_POLICY=$$sp PACKING_TYPE=$$pt configure; \
+	    $(MAKE) build; \
+	    out_engine="$(LIB_VARIANT_DIR)/db_engine_$(NVME_BACKEND)_sp$${sp}_pt$${pt}.a"; \
+	    out_nvme="$(LIB_VARIANT_DIR)/db_nvme_$(NVME_BACKEND)_sp$${sp}_pt$${pt}.a"; \
+	    out_fw="$(LIB_VARIANT_DIR)/firmware_$(NVME_BACKEND)_sp$${sp}_pt$${pt}.a"; \
+	    echo "cp libmydb_engine -> $$out_engine"; \
+	    echo "cp libmydb_nvme   -> $$out_nvme"; \
+	    echo "cp firmware_lib   -> $$out_fw"; \
+	    cp "$(BUILD_DIR)/libmydb_engine.a"  "$$out_engine"; \
+	    cp "$(BUILD_DIR)/libmydb_nvme.a"    "$$out_nvme"; \
+	    cp "$(FIRMWARE_BUILD_DIR)/libfirmware_lib.a" "$$out_fw"; \
+	  done; \
+	done
+
+
 
 install:
 	@echo "📦 Installing to $(INSTALL_DIR) ..."

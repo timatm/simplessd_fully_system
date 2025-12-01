@@ -12,15 +12,15 @@ include_directories(
 
 # 將 firmware 中所有 .cc 檔設為庫的來源
 add_library(firmware_lib STATIC
+    def.cc
     disk.cc
     IMS_interface.cc
     lbn_pool.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include/log.cc
+    log.cc
+    lsmtree.cc
     mapping_table.cc
     persistence.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include/tree.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include/lsmtree.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include/def.cc
+    tree.cc
 )
 
 # 方便其他 CMakeLists 使用

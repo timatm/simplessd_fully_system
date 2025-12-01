@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cstring>
 #include <iostream>
+#include "print.hh"
 Record::Record(const InternalKey& ikey, const std::string& val)
     : internal_key_size(sizeof(ikey)),
       internal_key(ikey),
@@ -45,6 +46,11 @@ Record Record::Decode(const std::string& data) {
                 sizeof(rec.value_size));
     offset += sizeof(rec.value_size);
 
+    if (rec.internal_key_size != sizeof(InternalKey)) {
+        pr_error("[Record::Decode] invalid internal_key_size=%u, total_len=%zu",
+                 rec.internal_key_size, data.size());
+        return rec;   // 或乾脆丟掉
+    }
     // 3) key
     std::string ikey_blob = data.substr(offset, rec.internal_key_size);
     rec.internal_key = InternalKey::Decode(ikey_blob);

@@ -202,7 +202,7 @@ int gem5Driver::nvme_write_sstable(sstable_info info,char *buffer){
         err = COMMAND_SUCCESS;
     }
     else{
-        pr_error("nvme write failed");
+        pr_error("nvme write SStable failed");
         pr_error("error code: 0x%x", err);
         err = COMMAND_FAILED;
     }
@@ -234,7 +234,7 @@ int gem5Driver::nvme_write_log(uint64_t lpn,char *buffer){
         err = COMMAND_SUCCESS;
     }
     else{
-        pr_error("nvme write failed");
+        pr_error("nvme write log failed");
         pr_error("error code: 0x%x", err);
         err = COMMAND_FAILED;
     }
@@ -295,7 +295,7 @@ int gem5Driver::nvme_write_metadata(char *buffer,size_t size){
         err = COMMAND_SUCCESS;
     }
     else{
-        pr_error("nvme write failed");
+        pr_error("nvme write metadata fail");
         pr_error("error code: 0x%x", err);
         err = COMMAND_FAILED;
     }
@@ -562,10 +562,15 @@ int gem5Driver::nvme_open_DB(uint8_t *buffer){
 int gem5Driver::nvme_close_DB(uint8_t* buffer,size_t size){
 
     if(buffer == nullptr){
-        pr_error("Close DB failed ,data buffer is nullptr");
+        pr_error("Write sstable failed ,data buffer is nullptr");
         return COMMAND_FAILED;
     }
-    int err;
+    int err = 0;
+    err = nvme_write_metadata(reinterpret_cast<char*>(buffer),size);
+    if(err == OPERATION_FAILURE){
+        pr_error("nvme_write_metadata fail in nvme_close_DB");
+        return OPERATION_FAILURE;
+    }
     nmc_config_t config_obj;
     nmc_config_t *config = &config_obj;
     init_nmc_config(config); 
@@ -626,5 +631,40 @@ int gem5Driver::nvme_dump_ims(){
 }
 int gem5Driver::nvme_read_ssKeyRange(std::string, char* buffer){
     int err;
+    return err;
+}
+
+
+int gem5Driver::nvme_search(char* buffer,size_t size){
+    if(buffer == nullptr){
+        pr_error("nvme_search failed ,data buffer is nullptr");
+        return COMMAND_FAILED;
+    }
+    int err = 0;
+    int err = 0;
+    err = nvme_write_metadata(reinterpret_cast<char*>(buffer),size);
+    if(err == OPERATION_FAILURE){
+        pr_error("nvme_write_metadata fail in nvme_search");
+        return OPERATION_FAILURE;
+    }
+    nmc_config_t config_obj;
+    nmc_config_t *config = &config_obj;
+    init_nmc_config(config); 
+
+    // config->dry = true;
+    config->OPCODE = OPCODE_SEARCH;
+    config->data = reinterpret_cast<char*>(buffer);
+    config->data_len = size;
+    config->cdw12 = size;
+    err = pass_io_command(config);
+    if(err == STATUS_OPERATION_SUCCESS){
+        pr_debug("nvme_search success");
+        err = COMMAND_SUCCESS;
+    }
+    else{
+        pr_error("nvme close failed");
+        pr_error("error code: 0x%x", err);
+        err = COMMAND_FAILED;
+    }
     return err;
 }

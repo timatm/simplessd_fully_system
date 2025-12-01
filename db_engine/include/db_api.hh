@@ -70,7 +70,7 @@ private:
     void compaction();
     bool compactionTrigger(int level);
     void log_garbage_collection();
-
+    void print_result();
 private:
     std::shared_ptr<Tree> tree_;
     std::unique_ptr<LSMTree> lsmTree_;
@@ -83,5 +83,8 @@ private:
     std::vector<std::optional<InternalKey>> compaction_key_list_;
     InternalKeyComparator icmp_;
     std::mutex mu_;
+
+    double total_space_util  = 0.0;
+    double total_SStable_num = 0.0;
 };
 #endif

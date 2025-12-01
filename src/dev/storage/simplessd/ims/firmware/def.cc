@@ -105,21 +105,41 @@ void DB_INIT::dump() const {
     std::cout << "Next LBN              : " << next_lbn << "\n";
     std::cout << "Page Offset           : " << page_offset << "\n";
     std::cout << "Byte Offset           : " << byte_offset << "\n";
-    std::cout << "First Block Offset    : " << page_offset << "\n";
+    std::cout << "First Block Offset    : " << first_block_offset << "\n";
 
     std::cout << "Log List Size : " << log_list.size() << " bytes\n";
     if (!log_list.empty()) {
-        std::cout << "Log List Preview: " 
-                  << log_list.substr(0, std::min<size_t>(64, log_list.size())) 
-                  << (log_list.size() > 64 ? "..." : "") << "\n";
+        std::cout << "Log List Preview (u32): ";
+
+        // 以 4 bytes 一個 u32 來看，最多預覽前 8 個
+        std::size_t count = std::min<std::size_t>(8, log_list.size() / 4);
+        for (std::size_t i = 0; i < count; ++i) {
+            uint32_t v = load_u32_le(log_list.data() + i * 4);
+            std::cout << v;
+            if (i + 1 < count) std::cout << " ";
+        }
+        if (log_list.size() / 4 > count) {
+            std::cout << " ...";
+        }
+        std::cout << "\n";
     }
 
     std::cout << "Node List Size: " << node_list.size() << " bytes\n";
     if (!node_list.empty()) {
-        std::cout << "Node List Preview: " 
-                  << node_list.substr(0, std::min<size_t>(64, node_list.size())) 
-                  << (node_list.size() > 64 ? "..." : "") << "\n";
+        std::cout << "Node List Preview (u32): ";
+
+        std::size_t count = std::min<std::size_t>(8, node_list.size() / 4);
+        for (std::size_t i = 0; i < count; ++i) {
+            uint32_t v = load_u32_le(node_list.data() + i * 4);
+            std::cout << v;
+            if (i + 1 < count) std::cout << " ";
+        }
+        if (node_list.size() / 4 > count) {
+            std::cout << " ...";
+        }
+        std::cout << "\n";
     }
+
 
     std::cout << "==================================\n";
 }

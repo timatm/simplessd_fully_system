@@ -43,11 +43,29 @@ int Mapping::init_mapping_table(uint64_t mappingPageLBN, uint64_t page_num) {
         for (int i = 0; i < mappingTablePtr->entry_num; i++) {
             mappingEntry* entry = &mappingTablePtr->entry[i];
             if (entry->lbn != INVALIDLBN) {
-                pr_info("Recover mapping entry: filename: %s, lbn: %lu, level: %d, channel: %d, range: [%s, %s]",
-                        entry->fileName, entry->lbn, entry->level, entry->channel, entry->minRange.toString(), entry->maxRange.toString());
-                mappingTable_[entry->fileName] = entry->lbn;
+                const size_t max_len = sizeof(entry->fileName);
+                size_t name_len = strnlen(entry->fileName, max_len);
+                std::string filename(entry->fileName, name_len);
 
-                auto node = std::make_shared<TreeNode>(entry->fileName, entry->level, entry->channel, entry->minRange, entry->maxRange);
+                pr_info(
+                    "Recover mapping entry: filename: %s, lbn: %lu, level: %d, channel: %d, range: [%s, %s]",
+                    filename.c_str(),
+                    entry->lbn,
+                    entry->level,
+                    entry->channel,
+                    entry->minRange.toString().c_str(),    // 這裡具體型別看你原來定義，如果是 std::string 就 .c_str()
+                    entry->maxRange.toString().c_str()
+                );
+
+                mappingTable_[filename] = entry->lbn;
+
+                auto node = std::make_shared<TreeNode>(
+                    filename,
+                    entry->level,
+                    entry->channel,
+                    entry->minRange,
+                    entry->maxRange
+                );
                 tree_.insert_node(node);
             }
         }

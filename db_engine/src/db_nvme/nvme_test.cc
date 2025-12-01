@@ -152,7 +152,15 @@ int MyNVMeDriver::nvme_open_DB(uint8_t *buffer){
     int err;
     uint32_t datalen;
     err = ims.open_DB(&datalen);
+    if(err == OPERATION_FAILURE){
+        pr_error("IMS open DB fail");
+        return err;
+    }
     err = nvme_read_metadata(reinterpret_cast<char*>(buffer), datalen);
+    if(err == OPERATION_FAILURE){
+        pr_error("IMS nvme read metadata fail");
+        return err;
+    }
     return err;
 }
 int MyNVMeDriver::nvme_close_DB(uint8_t* buffer,size_t size){
@@ -191,7 +199,7 @@ int MyNVMeDriver::nvme_write_metadata(char *buffer,size_t size){
         err = COMMAND_SUCCESS;
     }
     else{
-        pr_error("nvme write failed");
+        pr_error("nvme write matadata fail");
         pr_error("error code: 0x%x", err);
         err = COMMAND_FAILED;
     }
@@ -209,7 +217,7 @@ int MyNVMeDriver::nvme_read_metadata(char *buffer,size_t size){
         err = COMMAND_SUCCESS;
     }
     else{
-        pr_error("nvme write failed");
+        pr_error("nvme read failed");
         pr_error("error code: 0x%x", err);
         err = COMMAND_FAILED;
     }
@@ -245,7 +253,24 @@ int MyNVMeDriver::nvme_read_block(uint32_t lbn, char* buffer){
     err = ims.read_block(lbn,reinterpret_cast<uint8_t*>(buffer));
     return err;
 }
-
+int MyNVMeDriver::nvme_search(char *buffer,size_t size){
+    int err = OPERATION_FAILURE;
+    if(buffer == nullptr){
+        pr_error("nvme_search failed ,data buffer is nullptr");
+        return err;
+    }
+    err = ims.write_meta(reinterpret_cast<uint8_t*>(buffer), size);
+    if(err != OPERATION_SUCCESS){
+        pr_error("Write hostInfo metadata failed");
+        return COMMAND_FAILED;
+    }
+    std::vector<int> ch_list(CHANNEL_NUM,0);
+    err = ims.search(ch_list);
+    if(err == OPERATION_FAILURE){
+        pr_error("nvme_search fail");
+    }
+    return err;
+}
 // int MyNVMeDriver::nvme_set_sstable_info(uint32_t *data_len){
 
 // }

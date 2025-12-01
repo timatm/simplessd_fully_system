@@ -52,13 +52,13 @@ Level0Iterator::Level0Iterator( SstableManager* smgr,
             meta.min_key  = LowerSentinel(sstable->rangeMin.toString()).Encode();
             meta.max_key  = UpperSentinel(sstable->rangeMax.toString()).Encode();
             if (meta.min_key.size() != kIKeySize || meta.max_key.size() != kIKeySize){
-                pr_debug("Internal key size is error");
+                pr_error("Internal key size is error");
             }
             // 檔名非純數字時避免丟例外
             try {
                 meta.file_id = to_u64_stoull(sstable->filename);
             } catch (...) {
-                pr_debug("Sstable filename is error");
+                pr_error("Sstable filename is error");
                 meta.file_id = fid_fallback++; // 保底 tie-break
             }
             metas_.push_back(std::move(meta));
@@ -113,7 +113,7 @@ void Level0Iterator::SeekToFirst() {
         if (canon_lower_) {
             std::string_view lo(canon_lower_->data(), canon_lower_->size());
             if(lo.size() != sizeof(InternalKey)){
-                pr_debug("The internal key size is invalid");
+                pr_error("The internal key size is invalid");
                 std::cout << "KEY: " << lo.data() << " size: " << lo.size() << std::endl; 
             }
             ch.it->Seek(lo);
@@ -228,7 +228,7 @@ Status Level0Iterator::open_all_children_() {
     for (size_t i = 0; i < children_.size(); ++i) {
         auto& ch = children_[i];
         if (ch.opened) continue;
-        auto it = std::make_unique<SstableIterator>(smgr_, lmgr_, icmp_, ch.meta.filename,PACKING_T);
+        auto it = std::make_unique<SstableIterator>(smgr_, lmgr_, icmp_, ch.meta.filename,kPackingType);
         auto s = it->Init();
         if (!s.ok()) return s;
         ch.it = std::move(it);
@@ -458,7 +458,7 @@ LevelNIterator::LevelNIterator( SstableManager* smgr,
             meta.min_key  = LowerSentinel(sstable->rangeMin.toString()).Encode();
             meta.max_key  = UpperSentinel(sstable->rangeMax.toString()).Encode();
             if (meta.min_key.size() != kIKeySize || meta.max_key.size() != kIKeySize){
-                pr_debug("Internal key size is error");
+                pr_error("Internal key size is error");
             }
             meta.file_id = std::stoull(sstable->filename);
             metas_.push_back(std::move(meta));
@@ -789,7 +789,7 @@ Status LevelNIterator::ensure_child_open_(size_t i) {
     }
 
     // 先開，後驅逐（避免把自己立刻趕走）
-    auto it = std::make_unique<SstableIterator>(smgr_, lmgr_, icmp_, ch.meta.filename, PACKING_T);
+    auto it = std::make_unique<SstableIterator>(smgr_, lmgr_, icmp_, ch.meta.filename, kPackingType);
     auto s = it->Init();
     if (!s.ok()) return s;
 

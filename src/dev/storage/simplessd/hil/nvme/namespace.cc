@@ -831,13 +831,21 @@ void Namespace::write_sstable(SQEntryWrapper &req, RequestFunction &func) {
 
         if (pContext->beginAt == 2) {
           debugprint(
-              LOG_IMS,
-              "NVM     | WRITE_SSTABLE | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
-              "%" PRIX64 " + %d | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
-              pContext->resp.cqID, pContext->resp.entry.dword2.sqID,
-              pContext->resp.sqUID, pContext->resp.entry.dword3.commandID, nsid,
-              pContext->slba, pContext->nlb, pContext->tick, tick,
-              tick - pContext->tick);
+            LOG_IMS,
+            "NVM     | WRITE_SSTABLE | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
+            "LBN %ld | LPN %ld + %ld | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
+            pContext->resp.cqID,
+            pContext->resp.entry.dword2.sqID,
+            pContext->resp.sqUID,
+            pContext->resp.entry.dword3.commandID,
+            nsid,
+            pContext->lbn,
+            pContext->lpn,
+            pContext->nlpn,
+            pContext->tick,
+            tick,
+            tick - pContext->tick);
+
           pContext->function(pContext->resp);
 
           if (pContext->buffer) {
@@ -1438,7 +1446,7 @@ void Namespace::init_IMS(SQEntryWrapper &req, RequestFunction &func) {
   if (pDisk){
     debugprint(LOG_IMS,
               "NVM     | Init_IMS start");
-  #if RUNTYPE_SIMPLESSD
+  #if RUNTYPE
     ims.disk_ = pDisk;
   #endif
   }
@@ -1909,6 +1917,101 @@ void Namespace::close_DB(SQEntryWrapper &req, RequestFunction &func) {
     func(resp);
   }
 }
+
+
+void Namespace::search_key(SQEntryWrapper &req, RequestFunction &func) {
+  bool err = false;
+  uint32_t numberOfSize = req.entry.dword12;
+  CQEntryWrapper resp(req);
+
+  if (!attached) {
+    err = true;
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_NAMESPACE_NOT_ATTACHED);
+  }
+  // if (nlb == 0) {
+  //   err = true;
+  //   warn("nvme_namespace: host tried to write 0 blocks");
+  // }
+  
+  if (!err) {
+    DMAFunction doRead = [this](uint64_t tick, void *context) {
+      DMAFunction dmaDone = [this](uint64_t tick, void *context) {
+        IOContext *pContext = (IOContext *)context;
+
+        pContext->beginAt++;
+
+        if (pContext->beginAt == 2) {
+          debugprint(
+            LOG_IMS,
+            "NVM     | search_key | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
+            "LBN %ld | LPN %ld + %ld | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
+            pContext->resp.cqID,
+            pContext->resp.entry.dword2.sqID,
+            pContext->resp.sqUID,
+            pContext->resp.entry.dword3.commandID,
+            nsid,
+            pContext->lbn,
+            pContext->lpn,
+            pContext->nlpn,
+            pContext->tick,
+            tick,
+            tick - pContext->tick);
+
+          pContext->function(pContext->resp);
+          pParent->writeIMS(this, pContext->lpn, pContext->nlpn, dmaDone, context);
+          if (pContext->buffer) {
+            // pDisk->writeBlock(pContext->lbn,pContext->buffer);
+
+            free(pContext->buffer);
+          }
+
+          delete pContext->dma;
+          delete pContext;
+        }
+      };
+
+      IOContext *pContext = (IOContext *)context;
+
+      pContext->tick = tick;
+      pContext->beginAt = 0;
+
+      if (pDisk) {
+        pContext->buffer = (uint8_t *)calloc(pContext->nlb, 1);
+
+        pContext->dma->read(0, (uint64_t)pContext->nlb, pContext->buffer,
+                            dmaDone, context);
+      }
+      else {
+        pContext->dma->read(0, (uint64_t)pContext->nlb, nullptr, dmaDone,
+                            context);
+      }
+      // pParent->writeIMS(this, pContext->lpn, pContext->nlpn, dmaDone, context);
+    };
+
+    IOContext *pContext = new IOContext(func, resp);
+
+    pContext->beginAt = getTick();
+    pContext->nlb     = numberOfSize;
+    // Using nlb to transfer the variable of my data size
+    CPUContext *pCPU =
+        new CPUContext(doRead, pContext, CPU::NVME__NAMESPACE, CPU::READ);
+
+    if (req.useSGL) {
+      pContext->dma =
+          new SGL(cfgdata, cpuHandler, pCPU, req.entry.data1, req.entry.data2);
+    }
+    else {
+      pContext->dma =
+          new PRPList(cfgdata, cpuHandler, pCPU, req.entry.data1,
+                      req.entry.data2, (uint64_t)numberOfSize);
+    }
+  }
+  else {
+    func(resp);
+  }
+}
+
 
 
 void Namespace::erase_sstable(SQEntryWrapper &req, RequestFunction &func) {

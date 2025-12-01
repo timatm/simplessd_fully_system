@@ -60,3 +60,5 @@ DB* DBFactory::CreateDB(utils::Properties &props) {
 // ./ycsbc -db lock_stl -threads 4 -P workloads/workloada.spec
 // ./ycsbc -db lock_stl -threads 1 -P workloads/workloada.spec
 // ./ycsbc -db mydb -threads 1 -P workloads/workloada.spec
+
+// ./ycsbc_sp2_pt1_sim -db mydb -threads 1 -P workloads/workloada.spec

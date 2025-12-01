@@ -53,3 +53,13 @@ disk.bin
 /workload/YCSB-C/log
 /workload/YCSB-C/redis
 /db_engine/build-static
+
+workload/YCSB-C/ycsbc_sp1_pt0_sim
+workload/YCSB-C/ycsbc_sp1_pt1_sim
+workload/YCSB-C/ycsbc_sp1_pt2_sim
+workload/YCSB-C/ycsbc_sp2_pt0_sim
+workload/YCSB-C/ycsbc_sp2_pt1_sim
+workload/YCSB-C/ycsbc_sp2_pt2_sim
+workload/YCSB-C/ycsbc_sp3_pt0_sim
+workload/YCSB-C/ycsbc_sp3_pt1_sim
+workload/YCSB-C/ycsbc_sp3_pt2_sim

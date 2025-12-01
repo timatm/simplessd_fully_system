@@ -6,7 +6,7 @@
 // ===== 工具：安全解碼 / 萃取 user-key（translation unit 內可用） =====
 static inline bool DecodeInternal(std::string_view s, InternalKey& out) {
     if (s.size() != sizeof(InternalKey)) {
-        pr_debug("DecodeInternal: bad size=%zu (expect=%zu)", s.size(), sizeof(InternalKey));
+        pr_error("DecodeInternal: bad size=%zu (expect=%zu)", s.size(), sizeof(InternalKey));
         return false;
     }
     out = InternalKey::Decode(std::string(s.data(),s.size()));
@@ -108,7 +108,7 @@ CompactionRunner::CompactionRunner( SstableManager *smgr,
             } else if (level > 0 && level < MAX_LEVEL) {
                 srcLevelIter_ = std::make_unique<LevelNIterator>(smgr_, lmgr_, icmp_, tree_, level, std::move(srcSstables),true);
             } else {
-                pr_debug("CompactionRunner source level is error");
+                pr_error("CompactionRunner source level is error");
             }
 
             dstLevelIter_ = std::make_unique<LevelNIterator>(smgr_, lmgr_, icmp_, tree_, (level+1) , std::move(dstSstables),true);
@@ -151,12 +151,12 @@ Status CompactionRunner::Run() {
     auto s = srcLevelIter_->Init();
     if (!s.ok())
     {
-        pr_debug("Source level iterator initialization is failed");
+        pr_error("Source level iterator initialization is failed");
         return s;
     } 
     auto t = dstLevelIter_->Init();
     if (!t.ok()){
-        pr_debug("Destination level iterator initialization is failed");
+        pr_error("Destination level iterator initialization is failed");
         return t;
     } 
 
@@ -171,7 +171,7 @@ Status CompactionRunner::Run() {
         // 基本防呆
         if (sortedList_.front().size() != sizeof(InternalKey) ||
             sortedList_.back().size()  != sizeof(InternalKey)) {
-            pr_debug("flush: bad internal key size (front/back)");
+            pr_error("flush: bad internal key size (front/back)");
             return Status::IOError("flush: bad internal key size");
         }
         InternalKey minK = InternalKey::Decode(sortedList_.front());

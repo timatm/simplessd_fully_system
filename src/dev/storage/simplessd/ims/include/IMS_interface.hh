@@ -24,7 +24,7 @@
 #include "def.hh"
 #include "lsmtree.hh"
 
-static constexpr size_t kDefaultDeviceDramSize = 1ULL << 12;
+static constexpr size_t kDefaultDeviceDramSize = 1ULL << 20;
 static constexpr size_t kAlign = 4096;
 namespace {
     inline void* aligned_alloc_4k(size_t bytes) {
@@ -50,12 +50,13 @@ public:
     uint8_t* buffer_ = nullptr;
     size_t buffer_size_;
     size_t buffer_valid_size_;
-#if RUNTYPE_SIMPLESSD
+#if RUNTYPE
     SimpleSSD::Disk disk_;
 #else
     Disk disk_;
 #endif
     IMS_interface();
+    ~IMS_interface();
     int rebuild_super_page();
     int write_sstable(uint64_t &lbn);
     int read_sstable(uint64_t &lbn);
@@ -79,7 +80,7 @@ public:
 
     int close_DB(uint8_t *host_buffer, size_t size);
     int open_DB(uint32_t *datalen);
-    
+    int search(std::vector<int> &ch_list);
 
     int init_IMS();
     int close_IMS();
@@ -112,7 +113,7 @@ private:
         return (off <= buffer_size_) && (len <= buffer_size_) &&
                (off + len <= buffer_size_);
     }
-
+    void print_result();
 
 private:
     void reset_superPage(super_page*);
@@ -124,10 +125,8 @@ private:
     std::unique_ptr<LSMTree> lsmTree_;
     super_page* sp_ptr_old_ = nullptr;
     super_page* sp_ptr_new_ = nullptr;
-    
-
+    bool closed_ = false;
+    uint32_t searh_parallel_block_num = 0;
 };
-
-
 
 #endif

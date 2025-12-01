@@ -28,7 +28,7 @@ int MyDB::Read(const string & /*table*/, const string &key,
                vector<KVPair> &result) {
   // assert(tls_ && "InitThread not called?");
   string value;
-  Status s = db.get(key,value);
+  Status s = db.search(key,value);
 
   // if (!s.ok()) return kNotFound;
   result.clear();

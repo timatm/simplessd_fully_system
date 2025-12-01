@@ -33,6 +33,7 @@ public:
 
     int nvme_write_block(uint32_t lbn, char* buffer) override;
     int nvme_read_block(uint32_t lbn, char* buffer) override;
+    int nvme_search(char *buffer,size_t size) override;
 private:
     IMS_interface ims;
 };
