@@ -45,9 +45,9 @@ ifeq ($(BUILD),debug)
     LDFLAGS  += -fsanitize=address
   endif
   # DEBUG 模式無法使用 real !!!
-  ifeq ($(NVME_BACKEND),real)
-    LDLIBS_SYS += -lnvme -ludev -luuid -ljson-c -lssl -lcrypto
-  endif
+#   ifeq ($(NVME_BACKEND),real)
+#     LDLIBS_SYS += -lnvme -ludev -luuid -ljson-c -lssl -lcrypto
+#   endif
 else ifeq ($(BUILD),release)
   # musl + 全靜態（部署）
   CXX ?= /home/timatm/x86_64-linux-musl-cross/bin/x86_64-linux-musl-g++
@@ -60,7 +60,7 @@ else ifeq ($(BUILD),release)
   endif
   # 若使用 NVMe 實機後端，release 下需提供相容的 .a（你已有）
   ifeq ($(NVME_BACKEND),real)
-    LDLIBS_SYS += $(MYDB_PREFIX)/lib/libmydb_nvme.a 
+    LDLIBS_SYS += $(MYDB_PREFIX)/lib/libnvme.a 
   endif
 endif
 
@@ -100,23 +100,36 @@ $(EXEC): $(OBJECTS) $(TOP_OBJS)
 
 # # 讀入依賴（若存在）
 # -include $(DEPS) $(TOP_DEPS)
-
-.PHONY: variants
+ 
+.PHONY: variants-sim variants-real
 
 # 產生 9 個 ycsbc_SPx_PTy 可執行檔
-variants: $(OBJECTS) $(TOP_OBJS)
+# $(LDLIBS_SYS)
+variants-sim: $(OBJECTS) $(TOP_OBJS)
 	@for sp in $(SP_VALUES); do \
 	  for pt in $(PT_VALUES); do \
-	    exe="ycsbc_sp$${sp}_pt$${pt}_$(NVME_BACKEND)"; \
+	    exe="ycsbc_pack$${pt}_place$${sp}_$(NVME_BACKEND)"; \
 	    echo "=== Linking $$exe (SELECT_POLICY=$${sp}, PACKING_TYPE=$${pt}, NVME_BACKEND=$(NVME_BACKEND)) ==="; \
-	    $(CXX) $(LDFLAGS) $^ $(LDLIBS_SYS) \
-	      $(MYDB_PREFIX)/lib_variants/db_engine_$(NVME_BACKEND)_sp$${sp}_pt$${pt}.a \
-	      $(MYDB_PREFIX)/lib_variants/db_nvme_$(NVME_BACKEND)_sp$${sp}_pt$${pt}.a \
-	      $(MYDB_PREFIX)/lib_variants/firmware_$(NVME_BACKEND)_sp$${sp}_pt$${pt}.a \
+	    $(CXX) $(LDFLAGS) $^ \
+	      $(MYDB_PREFIX)/lib_variants/db_engine_$(NVME_BACKEND)_pack$${pt}_place$${sp}.a \
+	      $(MYDB_PREFIX)/lib_variants/db_nvme_$(NVME_BACKEND)_pack$${pt}_place$${sp}.a \
+	      $(MYDB_PREFIX)/lib_variants/firmware_$(NVME_BACKEND)_pack$${pt}_place$${sp}.a \
 	      -o $$exe; \
 	  done; \
 	done
 
+variants-real: $(OBJECTS) $(TOP_OBJS)
+	@for sp in $(SP_VALUES); do \
+	  for pt in $(PT_VALUES); do \
+	    exe="ycsbc_pack$${pt}_place$${sp}_$(NVME_BACKEND)"; \
+	    echo "=== Linking $$exe (SELECT_POLICY=$${sp}, PACKING_TYPE=$${pt}, NVME_BACKEND=$(NVME_BACKEND)) ==="; \
+	    $(CXX) $(LDFLAGS) $^ \
+	      $(MYDB_PREFIX)/lib_variants/db_engine_$(NVME_BACKEND)_pack$${pt}_place$${sp}.a \
+	      $(MYDB_PREFIX)/lib_variants/db_nvme_$(NVME_BACKEND)_pack$${pt}_place$${sp}.a \
+		  $(MYDB_PREFIX)/lib/libnvme.a \
+	      -o $$exe; \
+	  done; \
+	done
 
 clean:
 	$(RM) $(OBJECTS) $(TOP_OBJS) $(EXEC) $(DEPS) $(TOP_DEPS)

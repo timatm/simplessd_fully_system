@@ -355,57 +355,53 @@ void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey
     pr_debug("Dispatching write for SSTable: %s",filename.c_str());
     // info.dump();
 
-    thread_pool_.Submit([info, buf = std::move(sstable_buffer), clearImmuteTable,this]() {
-        auto tid        = std::this_thread::get_id();
-        auto tid_hash   = std::hash<std::thread::id>{}(tid);
-        // auto t_ender    = clock::now();
-        int now_inflight = g_inflight_write.fetch_add(1,std::memory_order_relaxed)+1;
-        pr_info("[Thread] [ENTER] tid:%zu inflight:%d",static_cast<size_t>(tid_hash),now_inflight);
+    // thread_pool_.Submit([info, buf = std::move(sstable_buffer), clearImmuteTable,this]() {
+    //     auto tid        = std::this_thread::get_id();
+    //     auto tid_hash   = std::hash<std::thread::id>{}(tid);
+    //     // auto t_ender    = clock::now();
+    //     int now_inflight = g_inflight_write.fetch_add(1,std::memory_order_relaxed)+1;
+    //     pr_info("[Thread] [ENTER] tid:%zu inflight:%d",static_cast<size_t>(tid_hash),now_inflight);
 
-        pr_debug("[Thread] Entered thread task");
-        int err = nvme_.nvme_write_sstable(info,buf.data());
-        pr_debug("[Thread] nvme_write_sstable returned %d",err);
-        if (err == COMMAND_FAILED) {
-            pr_error("[Thread] Failed to write SSTable: %s",info.filename);
-            return;
-        }
-        pr_debug("[Thread] Write success: %s",info.filename);
+    //     pr_debug("[Thread] Entered thread task");
+    //     int err = nvme_.nvme_write_sstable(info,buf.data());
+    //     pr_debug("[Thread] nvme_write_sstable returned %d",err);
+    //     if (err == COMMAND_FAILED) {
+    //         pr_error("[Thread] Failed to write SSTable: %s",info.filename);
+    //         return;
+    //     }
+    //     pr_debug("[Thread] Write success: %s",info.filename);
 
-        auto node = std::make_shared<TreeNode>(info.filename,
-                                            info.level,
-                                            info.min, 
-                                            info.max);
-        {
-            std::unique_lock<std::mutex> lock(tree_mutex_);
-            lsmTree_.insert_sstable(node);
-        }
+    //     auto node = std::make_shared<TreeNode>(info.filename,
+    //                                         info.level,
+    //                                         info.min, 
+    //                                         info.max);
+    //     {
+    //         std::unique_lock<std::mutex> lock(tree_mutex_);
+    //         lsmTree_.insert_sstable(node);
+    //     }
 
-        if (clearImmuteTable) {
-            notify_done(info);
-        }
-        now_inflight = g_inflight_write.fetch_sub(1,std::memory_order_relaxed)-1;
-        pr_info("[Thread] [LEAVE] tid:%zu inflight:%d",static_cast<size_t>(tid_hash),now_inflight);
-        pr_debug("SStable( %s ) written successfully.",info.filename);
-    });
-    // int err = nvme_.nvme_write_sstable(info,sstable_buffer.data());
-    // if (err == COMMAND_FAILED) {
-    //     pr_error("Failed to write SSTable: %s",info.filename.c_str());
-    //     return;
-    // }
-    // pr_debug("Write success: %s",info.filename.c_str());
+    //     if (clearImmuteTable) {
+    //         notify_done(info);
+    //     }
+    //     now_inflight = g_inflight_write.fetch_sub(1,std::memory_order_relaxed)-1;
+    //     pr_info("[Thread] [LEAVE] tid:%zu inflight:%d",static_cast<size_t>(tid_hash),now_inflight);
+    //     pr_debug("SStable( %s ) written successfully.",info.filename);
+    // });
+    int err = nvme_.nvme_write_sstable(info,sstable_buffer.data());
+    if (err == COMMAND_FAILED) {
+        pr_error("Failed to write SSTable: %s",info.filename.c_str());
+        return;
+    }
+    pr_debug("Write success: %s",info.filename.c_str());
 
-    // auto node = std::make_shared<TreeNode>(info.filename,
-    //                                     info.level,
-    //                                     info.min, 
-    //                                     info.max);
-    // {
-    //     std::unique_lock<std::mutex> lock(tree_mutex_);
-    //     lsmTree_.insert_sstable(node);
-    // }
-
-    // if (clearImmuteTable) {
-    //     notify_done(info);
-    // }
+    auto node = std::make_shared<TreeNode>(info.filename,
+                                        info.level,
+                                        info.min, 
+                                        info.max);
+    {
+        std::unique_lock<std::mutex> lock(tree_mutex_);
+        lsmTree_.insert_sstable(node);
+    }
     pr_debug("SStable( %s ) written successfully.",info.filename.c_str());
     pr_debug("[Main] Async write dispatched.");
 }

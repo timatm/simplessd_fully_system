@@ -20,7 +20,7 @@ make mysim
 make install
 cd "${YCSB_DIR}"
 make clean
-make BUILD=debug NVME_BACKEND=sim variants
+make BUILD=debug NVME_BACKEND=sim variants-sim
 echo "done"
 
 

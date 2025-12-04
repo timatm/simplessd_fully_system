@@ -24,6 +24,10 @@
 #include "def.hh"
 #include "lsmtree.hh"
 
+
+#if RUNTYPE
+#include "util/disk.hh"
+#endif
 static constexpr size_t kDefaultDeviceDramSize = 1ULL << 20;
 static constexpr size_t kAlign = 4096;
 namespace {
@@ -51,10 +55,11 @@ public:
     size_t buffer_size_;
     size_t buffer_valid_size_;
 #if RUNTYPE
-    SimpleSSD::Disk disk_;
+    SimpleSSD::Disk* disk_ = nullptr;  // <--- pointer
 #else
     Disk disk_;
 #endif
+
     IMS_interface();
     ~IMS_interface();
     int rebuild_super_page();
@@ -80,7 +85,7 @@ public:
 
     int close_DB(uint8_t *host_buffer, size_t size);
     int open_DB(uint32_t *datalen);
-    int search(std::vector<int> &ch_list);
+    int search(std::vector<uint64_t> &pbn_list);
 
     int init_IMS();
     int close_IMS();
@@ -93,6 +98,7 @@ public:
     Log* get_logManager() {return logManager_.get() ;}
     LSMTree* get_lsmTree() {return lsmTree_.get() ;}
     super_page* get_oldSuperPage() {return sp_ptr_old_;}
+    LBNPool* get_lbnpool() {return lbnPool_.get();}
 
     void dump_mapping(){mappingTable_->dump_mapping(); }
     void dump_lbn_pool(){lbnPool_->dump_LBNPool();}
@@ -105,6 +111,9 @@ public:
         dump_lsm_tree();
     }
     int reset_IMS_buffer();
+    #if RUNTYPE
+        void attachDisk(SimpleSSD::Disk* d);
+    #endif
 private:
     std::mutex buf_mu_;
     void alloc_device_buffer(size_t bytes);

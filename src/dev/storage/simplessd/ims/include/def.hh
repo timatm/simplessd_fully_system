@@ -9,11 +9,11 @@
 #include <memory>
 // [SSD setting start]
 
-#define CHANNEL_NUM     4
+#define CHANNEL_NUM     8
 #define PACKAGE_NUM     4
 #define DIE_NUM         2
 #define PLANE_NUM       2
-#define BLOCK_NUM       32
+#define BLOCK_NUM       64
 #define IMS_PAGE_NUM    128
 #define IMS_PAGE_SIZE   16384
 
@@ -83,7 +83,7 @@ enum class SelectT {
 // ENABLE_DISK      : Disable / Enable = 0 / 1
 // NVME_DRIVER      : My NVMe driver / Simplessd NVMe driver = 0 / 1  
 #ifndef RUNTYPE
-#define RUNTYPE 0
+#define RUNTYPE 1
 #endif
 
 #if   RUNTYPE == 0

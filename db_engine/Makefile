@@ -95,7 +95,7 @@ static-musl:
 
 static-musl-variants:
 	@$(MAKE) BUILD_TYPE=Release ENABLE_SANITIZERS=OFF BUILD_STATIC=ON configure-static
-	@$(MAKE) BUILD_TYPE=Release ENABLE_SANITIZERS=OFF BUILD_STATIC=ON build-variants
+	@$(MAKE) BUILD_TYPE=Release ENABLE_SANITIZERS=OFF BUILD_STATIC=ON NVME_BACKEND=real build-variants-real
 
 run-static:
 	@cd "$(STATIC_BUILD_DIR)"; ./mydb_engine $(RUN_ARGS)
@@ -111,6 +111,8 @@ configure-static:
 	@echo "🔧 Configuring (musl, static) to $(STATIC_BUILD_DIR) ..."
 	@mkdir -p "$(STATIC_BUILD_DIR)"
 	@cd "$(STATIC_BUILD_DIR)" && cmake .. $(GENERATOR) $(CMAKE_FLAGS) \
+
+
 	  -DCMAKE_TOOLCHAIN_FILE="$(TOOLCHAIN_FILE)"
 
 # === Build / Install / Run ===
@@ -124,22 +126,22 @@ build:
 	@cmake --build "$(BUILD_DIR)" -- -j"$(NPROC)"
 
 mysim: config-sim
-	@$(MAKE) NVME_BACKEND=sim build-variants
+	@$(MAKE) NVME_BACKEND=sim build-variants-sim
 
 real: config-real
-	@$(MAKE) NVME_BACKEND=real build-variants
+	@$(MAKE) NVME_BACKEND=real build-variants-sim
 
 
-build-variants:
+build-variants-sim:
 	@mkdir -p "$(LIB_VARIANT_DIR)"
 	@for sp in 1 2 3; do \
 	  for pt in 0 1 2; do \
 	    echo "=== Building NVME_BACKEND=$(NVME_BACKEND) SELECT_POLICY=$$sp PACKING_TYPE=$$pt ==="; \
 	    $(MAKE) SELECT_POLICY=$$sp PACKING_TYPE=$$pt configure; \
 	    $(MAKE) build; \
-	    out_engine="$(LIB_VARIANT_DIR)/db_engine_$(NVME_BACKEND)_sp$${sp}_pt$${pt}.a"; \
-	    out_nvme="$(LIB_VARIANT_DIR)/db_nvme_$(NVME_BACKEND)_sp$${sp}_pt$${pt}.a"; \
-	    out_fw="$(LIB_VARIANT_DIR)/firmware_$(NVME_BACKEND)_sp$${sp}_pt$${pt}.a"; \
+	    out_engine="$(LIB_VARIANT_DIR)/db_engine_$(NVME_BACKEND)_pack$${pt}_place$${sp}.a"; \
+	    out_nvme="$(LIB_VARIANT_DIR)/db_nvme_$(NVME_BACKEND)_pack$${pt}_place$${sp}.a"; \
+	    out_fw="$(LIB_VARIANT_DIR)/firmware_$(NVME_BACKEND)_pack$${pt}_place$${sp}.a"; \
 	    echo "cp libmydb_engine -> $$out_engine"; \
 	    echo "cp libmydb_nvme   -> $$out_nvme"; \
 	    echo "cp firmware_lib   -> $$out_fw"; \
@@ -149,7 +151,21 @@ build-variants:
 	  done; \
 	done
 
-
+build-variants-real:
+	@mkdir -p "$(LIB_VARIANT_DIR)"
+	@for sp in 1 2 3; do \
+	  for pt in 0 1 2; do \
+	    echo "=== Building NVME_BACKEND=$(NVME_BACKEND) SELECT_POLICY=$$sp PACKING_TYPE=$$pt ==="; \
+	    $(MAKE) SELECT_POLICY=$$sp PACKING_TYPE=$$pt configure; \
+	    $(MAKE) build; \
+	    out_engine="$(LIB_VARIANT_DIR)/db_engine_$(NVME_BACKEND)_pack$${pt}_place$${sp}.a"; \
+	    out_nvme="$(LIB_VARIANT_DIR)/db_nvme_$(NVME_BACKEND)_pack$${pt}_place$${sp}.a"; \
+	    echo "cp libmydb_engine -> $$out_engine"; \
+	    echo "cp libmydb_nvme   -> $$out_nvme"; \
+	    cp "$(BUILD_DIR)/libmydb_engine.a"  "$$out_engine"; \
+	    cp "$(BUILD_DIR)/libmydb_nvme.a"    "$$out_nvme"; \
+	  done; \
+	done
 
 install:
 	@echo "📦 Installing to $(INSTALL_DIR) ..."

@@ -91,6 +91,16 @@ target_include_directories(mydb_nvme
 file(GLOB ENGINE_SRC ${DB_ENGINE_DIR}/*.cc)
 list(FILTER ENGINE_SRC EXCLUDE REGEX ".*/main\\.cc$")
 
+
+if(NVME_BACKEND STREQUAL "real")
+	list(APPEND ENGINE_SRC
+		${IMS_SRC_DIR}/tree.cc
+		${IMS_SRC_DIR}/lsmtree.cc
+		${IMS_SRC_DIR}/def.cc
+	)
+endif()
+
+
 add_library(mydb_engine STATIC ${ENGINE_SRC})
 target_include_directories(mydb_engine
 	PUBLIC  ${DB_ENGINE_DIR} ${CMAKE_SOURCE_DIR}/include ${IMS_INCLUDE_DIR} ${IMS_SRC_DIR}
@@ -100,29 +110,41 @@ target_include_directories(mydb_engine
 target_link_libraries(mydb_engine PUBLIC mydb_nvme)
 
 # ── firmware 子模組（如需要） ──────────────────────────
-add_subdirectory(${CMAKE_SOURCE_DIR}/../src/dev/storage/simplessd/ims/firmware firmware_build)
-if(NVME_BACKEND STREQUAL "real")
-    target_compile_definitions(firmware_lib PUBLIC RUNTYPE=1)
-elseif(NVME_BACKEND STREQUAL "sim")
-    target_compile_definitions(firmware_lib PUBLIC RUNTYPE=0)
+
+if(NVME_BACKEND STREQUAL "sim")
+	add_subdirectory(${CMAKE_SOURCE_DIR}/../src/dev/storage/simplessd/ims/firmware firmware_build)
+	target_compile_definitions(firmware_lib PUBLIC RUNTYPE=0)
+	target_compile_definitions(firmware_lib PUBLIC
+		SELECT_POLICY=${SELECT_POLICY}
+		PACKING_TYPE=${PACKING_TYPE}
+	)
+
+	target_link_libraries(mydb_engine PUBLIC firmware_lib)
+elseif(NVME_BACKEND STREQUAL "real")
+	# add_subdirectory(${CMAKE_SOURCE_DIR}/../src/dev/storage/simplessd/ims/firmware firmware_build)
+	# target_compile_definitions(firmware_lib PUBLIC RUNTYPE=0)
+	# target_compile_definitions(firmware_lib PUBLIC
+	# 	SELECT_POLICY=${SELECT_POLICY}
+	# 	PACKING_TYPE=${PACKING_TYPE}
+	# )
+
+	# target_link_libraries(mydb_engine PUBLIC firmware_lib)
 endif()
 
-target_compile_definitions(firmware_lib PUBLIC
-    SELECT_POLICY=${SELECT_POLICY}
-    PACKING_TYPE=${PACKING_TYPE}
-)
 
-target_link_libraries(mydb_engine PUBLIC firmware_lib)
 
 # 安裝靜態庫
 install(TARGETS mydb_engine mydb_nvme
         ARCHIVE DESTINATION lib)
 
-install(TARGETS firmware_lib
-        ARCHIVE DESTINATION lib)
+
+if(NVME_BACKEND STREQUAL "sim")
+	install(TARGETS firmware_lib ARCHIVE DESTINATION lib)
+endif()
 
 
 # 安裝對外頭檔
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/ DESTINATION include)
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/src/db_nvme/lib/ DESTINATION lib)
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/../src/dev/storage/simplessd/ims/include/ DESTINATION include)
 message(STATUS "NVME_BACKEND=${NVME_BACKEND}")

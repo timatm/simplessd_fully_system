@@ -177,7 +177,9 @@ void Tree::dump() const {
         for (const auto& node : it->second) {
             std::cout << "  - " << node->filename << " | "
                       << "rangeMin: " << node->rangeMin.toString()
-                      << ", rangeMax: " << node->rangeMax.toString() << "\n";
+                      << ", rangeMax: " << node->rangeMax.toString() << " | "
+                      << "channel:" << node->channelInfo
+                      << "\n";
         }
     }
 

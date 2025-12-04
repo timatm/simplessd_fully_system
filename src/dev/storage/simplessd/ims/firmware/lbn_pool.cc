@@ -35,7 +35,10 @@ void LBNPool::reset_lbn_pool(){
 
 int LBNPool::init_lbn_pool(const std::vector<uint64_t>& used_lbn_list) {
     int used_LBN_num = 0;
-
+    used_count_per_ch_.clear();
+    for(int i = 0;i < CHANNEL_NUM;i++){
+        used_count_per_ch_.push_back(0);
+    }
     for (uint64_t lbn : used_lbn_list) {
         int channel = LBN2CH(lbn);
         if (channel >= CHANNEL_NUM) {
@@ -124,6 +127,7 @@ void LBNPool::insert_usedLBNList(uint64_t lbn) {
         return;
     }
     usedLBNList_[ch].push_back(lbn);
+    used_count_per_ch_[ch]++;
     pr_debug("IMS insert LBN:%lld in CH[%d] to used list ",lbn,LBN2CH(lbn));
 }
 
@@ -262,8 +266,7 @@ uint64_t LBNPool::level2CH(int level){
         return INVALIDLBN;
     }
     if(!freeLBNList_[level].empty()){
-        lbn = pop_freeLBNList(level);
-        insert_usedLBNList(lbn);
+        lbn = getFront_freeLBNList(level);
         return lbn;
     }
     else{
@@ -271,18 +274,50 @@ uint64_t LBNPool::level2CH(int level){
     }
     return INVALIDLBN;
 }
-uint64_t LBNPool::my_policy(const std::vector<int>& relate_ch_list) {
+// uint64_t LBNPool::my_policy(const std::vector<int>& relate_ch_list) {
+//     uint64_t lbn = INVALIDLBN;
+
+//     std::vector<int> indices(relate_ch_list.size());
+//     std::iota(indices.begin(), indices.end(), 0);
+
+//     std::sort(indices.begin(), indices.end(), [&](int a, int b) {
+//         if(relate_ch_list[a] == relate_ch_list[b]){
+//             return used_count_per_ch_[a] < used_count_per_ch_[b];
+//         }
+//         return relate_ch_list[a] < relate_ch_list[b];
+//     });
+
+//     for (int i : indices) {
+//         int ch = relate_ch_list[i];
+//         if (!freeLBNList_[ch].empty()) {
+//             lbn = getFront_freeLBNList(ch);
+//             pr_debug("My policy selected LBN: %lu from channel: %d", lbn, ch);
+//             return lbn;
+//         }
+//     }
+
+//     return INVALIDLBN;
+// }
+uint64_t LBNPool::my_policy(const std::vector<int>& relate_ch_info) {
     uint64_t lbn = INVALIDLBN;
 
-    std::vector<int> indices(relate_ch_list.size());
-    std::iota(indices.begin(), indices.end(), 0);
+    // channels = [0, 1, 2, ..., num_channels-1]
+    std::vector<int> channels(relate_ch_info.size());
+    std::iota(channels.begin(), channels.end(), 0);
 
-    std::sort(indices.begin(), indices.end(), [&](int a, int b) {
-        return relate_ch_list[a] < relate_ch_list[b];
-    });
+    // 排序規則：
+    // 1) relate_ch_info 小的 channel 排前面
+    // 2) 若 relate_ch_info 一樣，used_count_per_ch_ 小的排前面
+    std::sort(channels.begin(), channels.end(),
+              [&](int a, int b) {
+                  if (relate_ch_info[a] == relate_ch_info[b]) {
+                      return used_count_per_ch_[a] < used_count_per_ch_[b];
+                  }
+                  return relate_ch_info[a] < relate_ch_info[b];
+              });
 
-    for (int i : indices) {
-        int ch = relate_ch_list[i];
+    // 照排序後的 channel 順序找第一個有 free LBN 的
+    for (int ch : channels) {
         if (!freeLBNList_[ch].empty()) {
             lbn = getFront_freeLBNList(ch);
             pr_debug("My policy selected LBN: %lu from channel: %d", lbn, ch);
@@ -292,6 +327,7 @@ uint64_t LBNPool::my_policy(const std::vector<int>& relate_ch_list) {
 
     return INVALIDLBN;
 }
+
 
 
 

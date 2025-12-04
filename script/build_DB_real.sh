@@ -33,5 +33,5 @@ make static-musl-variants
 make install-static
 cd "${YCSB_DIR}"
 make clean
-make BUILD=release NVME_BACKEND=sim variants
+make BUILD=release NVME_BACKEND=real variants-real
 echo "done"

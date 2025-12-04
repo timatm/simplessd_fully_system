@@ -487,6 +487,11 @@ void Subsystem::write(Namespace *ns, uint64_t slba, uint64_t nlblk,
 void Subsystem::writeIMS(Namespace *ns, uint64_t slpn, uint64_t nlpn,
                       DMAFunction &func, void *context) {
   (void)ns;
+  if (slpn >= totalLogicalPages || slpn + nlpn > totalLogicalPages) {
+        pr_error("IMS writeIMS: LPN out of range: slpn=%" PRIu64
+                         " nlpn=%" PRIu64 " total=%" PRIu64,
+                         slpn, nlpn, totalLogicalPages);
+  }
   Request *req = new Request(func, context);
   DMAFunction doWrite = [this](uint64_t, void *context) {
     auto req = (Request *)context;

@@ -104,10 +104,13 @@ int Persistence::writeBlock(uint64_t lbn,uint8_t *buffer,size_t size){
     if(!ENABLE_DISK){
         return OPERATION_SUCCESS;
     }
-    if(!pDisk_->file_){
-        pr_error("Disk does't open");
-        return OPERATION_FAILURE;
-    }
+    #if !RUNTYPE 
+        if (!pDisk_->file_) {
+            pr_error("Disk does't open");
+            return OPERATION_FAILURE;
+        }
+    #endif
+
     if (buffer == nullptr) {
         pr_error("[ERROR] Memory allocation failed.");
         return OPERATION_FAILURE;
@@ -188,10 +191,12 @@ int Persistence::eraseBlock(uint64_t lbn){
     if(!ENABLE_DISK){
         return OPERATION_SUCCESS;
     }
-    if(!pDisk_->file_){
-        pr_error("Disk does't open");
-        return OPERATION_FAILURE;
-    }
+    #if !RUNTYPE   // 只在 Standalone 用 FILE* 那套檢查
+        if (!pDisk_->file_) {
+            pr_error("Disk does't open");
+            return OPERATION_FAILURE;
+        }
+    #endif
     std::string buffer(BLOCK_SIZE, static_cast<char>(0xFF));
     err = pDisk_->writeBlock(lbn, reinterpret_cast<uint8_t *>(buffer.data()));
     if(!err){

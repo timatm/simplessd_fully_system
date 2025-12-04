@@ -1,23 +1,32 @@
 #include "db_api.hh"
 #include "nvme_interface.hh"
-#include "nvme_test.hh"
-#include "nvme_simplessd.hh"
-#include "IMS_interface.hh"
+
+#if RUNTYPE == 1
+    #include "nvme_simplessd.hh"
+#else
+    #include "nvme_test.hh"
+#endif
+// #include "IMS_interface.hh"
 #include "lsmtree.hh"
 #include "options.hh"
 #include "compaction.hh"
 #include "range_query.hh"
 #include <algorithm>
 API::API(){
-
+    pr_info("API initailizing ...");
     tree_ = std::make_shared<Tree>();
     lsmTree_ = std::make_unique<LSMTree>(tree_);
-    if(NVME_DRIVER == 1){
-        nvme_ = std::make_unique<gem5Driver>();
-    }
-    else{
-        nvme_ = std::make_unique<MyNVMeDriver>();
-    }
+#if RUNTYPE == 1
+    nvme_ = std::make_unique<gem5Driver>();
+#else
+    nvme_ = std::make_unique<MyNVMeDriver>();
+#endif
+    // if(RUNTYPE == 1){
+    //     nvme_ = std::make_unique<gem5Driver>();
+    // }
+    // else{
+    //     nvme_ = std::make_unique<MyNVMeDriver>();
+    // }
     
     packing_ = kPackingType;
     memtable_ = std::make_unique<MemTable>();
@@ -34,7 +43,7 @@ API::API(){
         this->OnSSTableWriteFailed(info, err);
     });
     keyRangeCache_ = std::make_unique<ReadCache>();
-
+    pr_info("API initailizing done ...");
 }
 
 Status API::open() {
@@ -553,7 +562,7 @@ Status API::search(std::string key ,std::string& value){
     if(key.empty()){
         return Status::IOError("Key string is empty");
     }
-    pr_info("Search key: %s", key.c_str());
+    pr_debug("Search key: %s", key.c_str());
     Key userKey(key);
     InternalKey internalKey(key);
     if (memtable_) {
@@ -562,12 +571,7 @@ Status API::search(std::string key ,std::string& value){
             result = immutable_memtable_->Get(key);
         }
         if (result.has_value()) {
-            Record rec = Record::Decode(*result);
-            if(rec.internal_key.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion)){
-                pr_debug("The key has been deleted");
-                return Status::OK();
-            }
-            value = rec.value;
+            value = *result;
             return Status::OK();
         }
     }
@@ -576,14 +580,14 @@ Status API::search(std::string key ,std::string& value){
 
     
     if (sstables.empty()){
-        pr_info("No candidate SSTables found for key: %s", key.c_str());
+        pr_debug("No candidate SSTables found for key: %s", key.c_str());
         return Status::OK();
     }
     SearchPackageD search_package;
 
     while( !sstables.empty() ){
         auto sstable = sstables.front();
-        pr_info("Find SStable: %s  Key range [ %s ~ %s ]",sstable->filename.c_str(),sstable->rangeMin.toString().c_str(),sstable->rangeMax.toString().c_str());
+        pr_debug("Find SStable: %s  Key range [ %s ~ %s ]",sstable->filename.c_str(),sstable->rangeMin.toString().c_str(),sstable->rangeMax.toString().c_str());
 
         sstables.pop();
         SearchPatternD pattern_info;

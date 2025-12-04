@@ -5,6 +5,14 @@
 #include "tree.hh"
 #include "def.hh"
 #include "disk.hh"
+#if RUNTYPE
+namespace SimpleSSD {
+    class Disk;      // forward 宣告，告訴編譯器有這個名字
+}
+#else
+class Disk;         // 你的 ims/disk.hh 那個 Disk，可以 forward 或 include
+#endif
+
 
 class Persistence {
 public:
@@ -13,7 +21,6 @@ public:
 #else
     Disk* pDisk_ = nullptr;
 #endif
-
 #if RUNTYPE
     Persistence(SimpleSSD::Disk* disk, super_page* sp_old, super_page* sp_new, Tree& tree)
         : pDisk_(disk), sp_ptr_old_(sp_old), sp_ptr_new_(sp_new), tree_(tree) {}
@@ -21,7 +28,6 @@ public:
     Persistence(Disk* disk, super_page* sp_old, super_page* sp_new, Tree& tree)
         : pDisk_(disk), sp_ptr_old_(sp_old), sp_ptr_new_(sp_new), tree_(tree) {}
 #endif
-
     int flushMappingTable(const std::unordered_map<std::string, uint64_t>& mappingTable);
     int readMappingTable(uint64_t lpn, uint8_t* buffer, size_t size);
     int writeBlock(uint64_t lbn, uint8_t* buffer, size_t size);

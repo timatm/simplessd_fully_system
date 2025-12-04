@@ -10,7 +10,21 @@
 #include "print.hh"
 #include "log.hh"
 
+#if RUNTYPE
+void IMS_interface::attachDisk(SimpleSSD::Disk* d) {
+    disk_ = d;
 
+    if (persistenceManager_) {
+        // 直接更新底層的 pDisk_
+        persistenceManager_->pDisk_ = d;
+    } else {
+        // 若你打算在 RUNTYPE=1 不在建構子裡建 Persistence，也可以在這邊建
+        persistenceManager_ = std::make_unique<Persistence>(disk_, sp_ptr_old_, sp_ptr_new_, *tree_);
+        mappingTable_ = std::make_unique<Mapping>(*persistenceManager_, *lbnPool_, *tree_);
+        logManager_   = std::make_unique<Log>(*persistenceManager_, *lbnPool_, sp_ptr_old_, sp_ptr_new_);
+    }
+}
+#endif
 void PrintBuildConfig() {
     // ---- RUNTYPE 說明 ----
     const char* runtype_str =
@@ -135,8 +149,12 @@ IMS_interface::IMS_interface() {
         disk_.open("test.img");
     #endif
 
-    persistenceManager_ = std::make_unique<Persistence>(&disk_, sp_ptr_old_, sp_ptr_new_, *tree_);
-
+    // persistenceManager_ = std::make_unique<Persistence>(&disk_, sp_ptr_old_, sp_ptr_new_, *tree_);
+    #if RUNTYPE
+        persistenceManager_ = std::make_unique<Persistence>(disk_, sp_ptr_old_, sp_ptr_new_, *tree_);
+    #else
+        persistenceManager_ = std::make_unique<Persistence>(&disk_, sp_ptr_old_, sp_ptr_new_, *tree_);
+    #endif
 
     mappingTable_ = std::make_unique<Mapping>(*persistenceManager_, *lbnPool_, *tree_);
 
@@ -146,7 +164,11 @@ IMS_interface::IMS_interface() {
     buffer_size_ = 0;
     buffer_valid_size_ = 0;
     alloc_device_buffer(kDefaultDeviceDramSize);
-    init_IMS();
+    // init_IMS();
+    #if RUNTYPE == 0
+        // 只有 host 測試時才在建構子就 init
+        init_IMS();
+    #endif
 }
 
 IMS_interface::~IMS_interface() {
@@ -160,6 +182,7 @@ IMS_interface::~IMS_interface() {
     } catch (const std::exception &e) {
         pr_error("IMS destructor: close_IMS threw exception: %s", e.what());
     }
+    dump_lsm_tree();
     print_result();
     delete sp_ptr_old_;
     delete sp_ptr_new_;
@@ -480,8 +503,12 @@ int IMS_interface::init_IMS() {
         pr_error("Buffer malloc failed");
         return OPERATION_FAILURE;
     }
-
+#if RUNTYPE == 1
+    err = disk_->readPage(0, buffer);
+#else
     err = disk_.readPage(0, buffer);
+#endif
+
     if (err == OPERATION_FAILURE) {
         free(buffer);
         pr_error("Read super page failed");
@@ -616,7 +643,15 @@ int IMS_interface::close_IMS() {
     // }
     sp->usedLBN_num = total_used_lbn;
 
+    // err = disk_.writePage(0, buffer);
+#if RUNTYPE == 1
+    // SimpleSSD 環境，用指標
+    err = disk_->writePage(0, buffer);
+#else
+    // host / my env，用物件
     err = disk_.writePage(0, buffer);
+#endif
+
     if (err != OPERATION_SUCCESS) {
         pr_error("Writing super page to disk failed");
         free(buffer);
@@ -729,7 +764,15 @@ void IMS_interface::reset_superPage(super_page *sp) {
 int IMS_interface::reset_IMS(){
     super_page sp(0,0,0);
     uint8_t *buffer = reinterpret_cast<uint8_t*>(&sp);
+    // int err = disk_.writePage(0, buffer);
+
+
+
+#if RUNTYPE == 1
+    int err = disk_->writePage(0, buffer);
+#else
     int err = disk_.writePage(0, buffer);
+#endif
     if (err != OPERATION_SUCCESS) {
         pr_error("Writing super page to disk failed");
         free(buffer);
@@ -825,7 +868,8 @@ int IMS_interface::set_log_info(uint32_t *size){
     return OPERATION_SUCCESS;
 }
 
-int IMS_interface::search(std::vector<int> &ch_list){
+int IMS_interface::search(std::vector<uint64_t> &pbn_list){
+    std::vector<uint32_t> ch_list(CHANNEL_NUM,0);
     if(ch_list.size() > CHANNEL_NUM){
         pr_error("Channel list size is error");
         return OPERATION_FAILURE;
@@ -848,6 +892,9 @@ int IMS_interface::search(std::vector<int> &ch_list){
     for(auto& pattern : search_package.searchPatterns){
         auto& sstable_ID = pattern.sstable_name;
         uint64_t lbn = mappingTable_->getLBN(sstable_ID);
+        if(lbn != INVALID_64){
+            pbn_list.push_back(lbn);
+        }
         auto ch = LBN2CH(lbn);
         if (ch < 0 || ch >= CHANNEL_NUM) {
             pr_error("IMS search: invalid channel %d for sstable %s", ch, sstable_ID.c_str());
@@ -863,8 +910,15 @@ int IMS_interface::search(std::vector<int> &ch_list){
 }
 
 void IMS_interface::print_result(){
-    pr_info("================= IMS experient result =================");
+    std::vector<uint32_t> ch_info = get_lbnpool()->get_channel_info();
+    if(ch_info.empty() || ch_info.size() != CHANNEL_NUM){
+        pr_error("Channel info size is error");
+    }
 
+    pr_info("================= IMS experient result =================");
+    for(int i = 0;i < CHANNEL_NUM;i++){
+        pr_stat("waer leveling CH[%d]=%u",i,ch_info[i]);
+    }
     pr_stat("searh_parallel_block_num=%u",searh_parallel_block_num);
     pr_info("================= IMS experient end =================");
 }

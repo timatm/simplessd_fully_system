@@ -5,7 +5,7 @@
 #include <fcntl.h>
 #include "debug.hh"
 #include "nvme_test.hh"
-#include "IMS_interface.hh"
+
 #include <stdio.h>
 #include <unistd.h>
 #include <limits.h>
@@ -264,8 +264,8 @@ int MyNVMeDriver::nvme_search(char *buffer,size_t size){
         pr_error("Write hostInfo metadata failed");
         return COMMAND_FAILED;
     }
-    std::vector<int> ch_list(CHANNEL_NUM,0);
-    err = ims.search(ch_list);
+    std::vector<uint64_t> lbn_list;
+    err = ims.search(lbn_list);
     if(err == OPERATION_FAILURE){
         pr_error("nvme_search fail");
     }

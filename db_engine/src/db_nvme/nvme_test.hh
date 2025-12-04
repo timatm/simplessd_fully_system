@@ -2,7 +2,7 @@
 #define __NVME_TEST_HH__
 
 #include "nvme_interface.hh"
-
+#include "IMS_interface.hh"
 class MyNVMeDriver : public INVMEDriver {
 public:
 

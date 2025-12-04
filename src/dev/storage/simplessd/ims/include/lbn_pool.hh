@@ -40,6 +40,7 @@ public:
     void clear();
     uint8_t get_lastUsedChannel(){return lastUsedChannel_;};
     void set_lastUsedChannel(uint8_t ch) {lastUsedChannel_ = ch;}
+    std::vector<uint32_t> get_channel_info(){return used_count_per_ch_;}
     const std::array<std::deque<uint64_t>, CHANNEL_NUM>& get_usedLBNList() const {
         return usedLBNList_;
     }
@@ -50,6 +51,7 @@ public:
 private:
     std::array<std::deque<uint64_t>, CHANNEL_NUM> usedLBNList_;
     std::array<std::deque<uint64_t>, CHANNEL_NUM> freeLBNList_;
+    std::vector<uint32_t> used_count_per_ch_; 
     std::deque<uint64_t> valueLogList_;
     uint8_t lastUsedChannel_;
 };

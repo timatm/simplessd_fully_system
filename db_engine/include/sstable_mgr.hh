@@ -51,7 +51,7 @@ public:
     // SstableManager(INVMEDriver& nvme,LSMTree& tree):lsmTree_(tree) ,nvme_(nvme) ,sequenceNumber_(0){};
     SstableManager(INVMEDriver& nvme, LSMTree& tree)
     : lsmTree_(tree), nvme_(nvme), sequenceNumber_(0) {
-        std::cout << "[ctor] seq=" << sequenceNumber_.load(std::memory_order_relaxed) << "\n";
+        // std::cout << "[ctor] seq=" << sequenceNumber_.load(std::memory_order_relaxed) << "\n";
     }
 
     ~SstableManager() = default;

@@ -489,9 +489,10 @@ int gem5Driver::init_device(){
     const char *dev_path = "/dev/nvme0n1";
     nvme_fd = open(dev_path, O_RDWR);
     if (nvme_fd < 0) {
-        perror("open nvme device");
+        pr_error("Can't open nvme device(/dev/nvme0n1)");
         return COMMAND_FAILED;
     }
+    pr_info("Open nvme device(/dev/nvme0n1) sucess");
     return COMMAND_SUCCESS;
 }
 int gem5Driver::close_device(){
@@ -640,7 +641,6 @@ int gem5Driver::nvme_search(char* buffer,size_t size){
         pr_error("nvme_search failed ,data buffer is nullptr");
         return COMMAND_FAILED;
     }
-    int err = 0;
     int err = 0;
     err = nvme_write_metadata(reinterpret_cast<char*>(buffer),size);
     if(err == OPERATION_FAILURE){

@@ -42,7 +42,7 @@ static_assert(
 // 1: HOST
 #define SEARCH_PATTERN 0
 
-#define LOG_GC_THRESHOLD 1000
+#define LOG_GC_THRESHOLD 100000
 #define GC_BLOCK_NUM 1
 
 #endif  // __OPTIONS__HH__

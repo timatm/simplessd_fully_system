@@ -8,8 +8,9 @@ THREADS="${THREADS:-1}"              # -threads 參數
 WORKLOAD="${WORKLOAD:-workloads/workloada.spec}"  # -P 參數
 loadonly="${loadonly:-false}"
 runonly="${runonly:-false}"
-
+DISK_FILE="test.img"
 # 如果你不想每次刪 log，就把這兩行註解掉第一行
+
 rm -rf "$LOG_DIR"
 mkdir -p "$LOG_DIR"
 
@@ -20,6 +21,7 @@ if [ "$#" -lt 1 ]; then
 fi
 
 for bin in "$@"; do
+  rm -rf "$DISK_FILE"
   if [ ! -x "$bin" ]; then
     echo "⚠️  找不到可執行檔: $bin" >&2
     continue
@@ -42,6 +44,8 @@ for bin in "$@"; do
   if [ "$loadonly" = "true" ]; then
     EXTRA_FLAGS+=("-loadonly")
   fi
+
+  # "$bin" -db "$DB_NAME" -threads "$THREADS" -P "$WORKLOAD"
 
   # 1. 先把完整輸出存到 full_log
   "$bin" -db "$DB_NAME" -threads "$THREADS" "${EXTRA_FLAGS[@]}" -P "$WORKLOAD" \

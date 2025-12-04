@@ -40,7 +40,7 @@ fi
 # === 2. Create disk image and partition if not exists ===
 if [ ! -f "$DISK_IMG" ]; then
     echo "Creating new disk image..."
-    dd if=/dev/zero of="$DISK_IMG" oflag=direct bs=1M count=4096
+    dd if=/dev/zero of="$DISK_IMG" oflag=direct bs=1M count=16384
 
     losetup -f --partscan "$DISK_IMG"
     LOOP_DEV=$(losetup -j "$DISK_IMG" | awk -F: '{print $1}')
