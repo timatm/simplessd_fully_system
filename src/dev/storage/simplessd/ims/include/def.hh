@@ -9,13 +9,13 @@
 #include <memory>
 // [SSD setting start]
 
-#define CHANNEL_NUM     8
-#define PACKAGE_NUM     4
-#define DIE_NUM         2
-#define PLANE_NUM       2
-#define BLOCK_NUM       64
-#define IMS_PAGE_NUM    128
-#define IMS_PAGE_SIZE   16384
+#define CHANNEL_NUM         8
+#define PACKAGE_NUM         4
+#define DIE_NUM             2
+#define PLANE_NUM           2
+#define BLOCK_NUM           64
+#define IMS_PAGE_NUM        128
+#define IMS_PAGE_SIZE       16384
 
 #define BLOCK_SIZE ((IMS_PAGE_SIZE)*(IMS_PAGE_NUM))
 
@@ -40,8 +40,9 @@
 
 #define MAPPINGLBN 1
 
-
-#define LBN_NUM ( (CHANNEL_NUM) * (PACKAGE_NUM) * (DIE_NUM) * (PLANE_NUM) * (BLOCK_NUM) )
+constexpr double SSD_PROVISION_RATIO = 0.1;
+constexpr int LBN_NUM =(int) ( (double)( (CHANNEL_NUM) * (PACKAGE_NUM) * (DIE_NUM) * (PLANE_NUM) * (BLOCK_NUM) ) * (1- SSD_PROVISION_RATIO) );
+// #define LBN_NUM ( (CHANNEL_NUM) * (PACKAGE_NUM) * (DIE_NUM) * (PLANE_NUM) * (BLOCK_NUM) * (1- SSD_PROVISION_RATIO) )
 #define LBN_SIZE ( (IMS_PAGE_SIZE) * (IMS_PAGE_NUM) )
 
 #define LPN_NUM ((LBN_NUM) * (IMS_PAGE_NUM))

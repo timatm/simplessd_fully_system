@@ -174,13 +174,21 @@ void QueryIterator::PopAndAdvanceTop_() {
     }
 }
 
-void QueryIterator::SetInternalRange(std::optional<std::string> lower,std::optional<std::string> upper) {
-        assert(lower->size() == kIKeySize && upper->size() == kIKeySize);
-        opts_.lower = lower;
-        opts_.upper = upper;
-        canon_lower_ = std::move(lower);
-        canon_upper_ = std::move(upper);
+void QueryIterator::SetInternalRange(std::optional<std::string> lower,
+                                     std::optional<std::string> upper) {
+    if (lower) {
+        assert(lower->size() == kIKeySize);
+    }
+    if (upper) {
+        assert(upper->size() == kIKeySize);
+    }
+
+    opts_.lower = lower;
+    opts_.upper = upper;
+    canon_lower_ = std::move(lower);
+    canon_upper_ = std::move(upper);
 }
+
 
 Status QueryIterator::Init() {
     st_ = Status::OK();

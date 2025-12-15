@@ -34,7 +34,7 @@ static_assert(
 
 
 
-#define RANGE_KEY_CACHE_SIZE 30
+#define RANGE_KEY_CACHE_SIZE 60
 
 
 // Search pattern generate in HOST / DEVICE

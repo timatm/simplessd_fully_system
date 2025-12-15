@@ -65,8 +65,8 @@ public:
     int rebuild_super_page();
     int write_sstable(uint64_t &lbn);
     int read_sstable(uint64_t &lbn);
-    int erase_sstable();
-    int read_ssKeyRange(hostInfo *request, uint8_t* buffer);
+    int erase_sstable(uint64_t &lbn);
+    int read_ssKeyRange(uint64_t &lpn);
     // TODO need to finish
     int search_key(Key key);
 

@@ -29,7 +29,7 @@ string ParseCommandLine(int argc, const char *argv[], utils::Properties &props);
 
 int DelegateClient(ycsbc::DB *db, ycsbc::CoreWorkload *wl, const int num_ops,
     bool is_loading) {
-  db->Init();
+  // db->Init();
   ycsbc::Client client(*db, *wl);
   int oks = 0;
   for (int i = 0; i < num_ops; ++i) {
@@ -39,7 +39,7 @@ int DelegateClient(ycsbc::DB *db, ycsbc::CoreWorkload *wl, const int num_ops,
       oks += client.DoTransaction();
     }
   }
-  db->Close();
+  // db->Close();
   return oks;
 }
 
@@ -61,7 +61,7 @@ int main(const int argc, const char *argv[]) {
     cout << "Unknown database name " << props["dbname"] << endl;
     exit(0);
   }
-
+  db->Init();
   ycsbc::CoreWorkload wl;
   wl.Init(props);
 
@@ -109,17 +109,6 @@ int main(const int argc, const char *argv[]) {
       actual_ops.emplace_back(async(launch::async,
           DelegateClient, db, &wl, total_ops / num_threads, false));
     }
-
-
-
-    // actual_ops.clear();
-    // total_ops = stoi(props[ycsbc::CoreWorkload::OPERATION_COUNT_PROPERTY]);
-    // utils::Timer timer;
-    // timer.Start();
-    // for (int i = 0; i < num_threads; ++i) {
-    //   actual_ops.emplace_back(async(launch::async,
-    //       DelegateClient, db, &wl, total_ops / num_threads, false));
-    // }
     assert((int)actual_ops.size() == num_threads);
 
     int sum = 0;
@@ -177,6 +166,7 @@ int main(const int argc, const char *argv[]) {
   else {
     cerr << "# Skip transaction phase (loadonly).\n";
   }
+  db->Close();
   delete db;
   return 0;
 }

@@ -63,7 +63,7 @@ class HIL : public StatObject {
   void trim(Request &);
 
   void write_sstable(Request &);
-
+  void readDirectFTL(Request &req);
   void format(Request &, bool);
 
   void getLPNInfo(uint64_t &, uint32_t &);

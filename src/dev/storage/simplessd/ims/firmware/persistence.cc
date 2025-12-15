@@ -191,12 +191,6 @@ int Persistence::eraseBlock(uint64_t lbn){
     if(!ENABLE_DISK){
         return OPERATION_SUCCESS;
     }
-    #if !RUNTYPE   // 只在 Standalone 用 FILE* 那套檢查
-        if (!pDisk_->file_) {
-            pr_error("Disk does't open");
-            return OPERATION_FAILURE;
-        }
-    #endif
     std::string buffer(BLOCK_SIZE, static_cast<char>(0xFF));
     err = pDisk_->writeBlock(lbn, reinterpret_cast<uint8_t *>(buffer.data()));
     if(!err){

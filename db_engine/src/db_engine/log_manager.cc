@@ -90,7 +90,7 @@ void LogManager::writeLog(const Record& log)
 uint32_t LogManager::findNextLPN(uint32_t lpn) const{
     uint32_t currentLBN = LPN2LBN(lpn);
     size_t pageOffset   = lpn - LBN2LPN(currentLBN);
-    pr_info("Current LBN: %u, Page Offset: %zu", currentLBN, pageOffset);
+    pr_debug("Current LBN: %u, Page Offset: %zu", currentLBN, pageOffset);
     if (pageOffset + 1 >= IMS_PAGE_NUM) {
         auto blkIt = std::find(logRecordBlock_.begin(), logRecordBlock_.end(), currentLBN);
         if (blkIt == logRecordBlock_.end() || ++blkIt == logRecordBlock_.end()) {

@@ -83,45 +83,45 @@ void gem5Driver::fill_uint64_to_dwords(uint64_t input, uint32_t* dwords_out) {
     dwords_out[1] = high;
 }
 
-int gem5Driver::nvme_ims_init(){
-    int err = 0;
-    nmc_config_t config_obj;
-    nmc_config_t *config = &config_obj;
-    init_nmc_config(config); 
-    config->OPCODE = OPCODE_IMS_INIT;
-    config->PSDT      = 0;
-    // config->PRP1      = (uintptr_t)nullptr;
-    err = pass_io_command(config);
-    if(err == STATUS_OPERATION_SUCCESS){
-        err = COMMAND_SUCCESS;
-    }
-    else{
-        pr_error("Init IMS failed");
-        pr_error("error code: 0x%x", err);
-        err = COMMAND_FAILED;
-    }
-    return err;
-}
+// int gem5Driver::nvme_ims_init(){
+//     int err = 0;
+//     nmc_config_t config_obj;
+//     nmc_config_t *config = &config_obj;
+//     init_nmc_config(config); 
+//     // config->OPCODE = OPCODE_IMS_INIT;
+//     config->PSDT      = 0;
+//     // config->PRP1      = (uintptr_t)nullptr;
+//     err = pass_io_command(config);
+//     if(err == STATUS_OPERATION_SUCCESS){
+//         err = COMMAND_SUCCESS;
+//     }
+//     else{
+//         pr_error("Init IMS failed");
+//         pr_error("error code: 0x%x", err);
+//         err = COMMAND_FAILED;
+//     }
+//     return err;
+// }
 
-int gem5Driver::nvme_ims_close(){
-    int err = 0;
-    nmc_config_t config_obj;
-    nmc_config_t *config = &config_obj;
-    init_nmc_config(config); 
-    config->OPCODE = OPCODE_IMS_CLOSE;
-    config->PSDT      = 0;
-    // config->PRP1      = (uintptr_t)nullptr;
-    err = pass_io_command(config);
-    if(err == STATUS_OPERATION_SUCCESS){
-        err = COMMAND_SUCCESS;
-    }
-    else{
-        pr_error("Close IMS failed");
-        pr_error("error code: 0x%x", err);
-        err = COMMAND_FAILED;
-    }
-    return err;
-}
+// int gem5Driver::nvme_ims_close(){
+//     int err = 0;
+//     nmc_config_t config_obj;
+//     nmc_config_t *config = &config_obj;
+//     init_nmc_config(config); 
+//     config->OPCODE = OPCODE_IMS_CLOSE;
+//     config->PSDT      = 0;
+//     // config->PRP1      = (uintptr_t)nullptr;
+//     err = pass_io_command(config);
+//     if(err == STATUS_OPERATION_SUCCESS){
+//         err = COMMAND_SUCCESS;
+//     }
+//     else{
+//         pr_error("Close IMS failed");
+//         pr_error("error code: 0x%x", err);
+//         err = COMMAND_FAILED;
+//     }
+//     return err;
+// }
 
 int gem5Driver::nvme_monitor_IMS(int monitor_type){
     int err;
@@ -503,11 +503,7 @@ int gem5Driver::close_device(){
     return COMMAND_SUCCESS;
 }
 
-int gem5Driver::nvme_open_DB(uint8_t *buffer){
-    if (buffer == nullptr) {
-        pr_error("Open DB failed: null buffer");
-        return OPERATION_FAILURE;
-    }
+int gem5Driver::nvme_open_DB(uint32_t &data_len){
     int err;
     nmc_config_t config_obj;
     nmc_config_t *config = &config_obj;
@@ -516,7 +512,6 @@ int gem5Driver::nvme_open_DB(uint8_t *buffer){
     int r = posix_memalign(&p, 4096, sizeof(uint32_t));
     if (r != 0 || p == nullptr) {
         pr_error("Open DB failed: posix_memalign failed (%d)", r);
-        free(p);
         return OPERATION_FAILURE;
     }
     config->data_len  = (uint32_t)sizeof(uint32_t);
@@ -530,15 +525,8 @@ int gem5Driver::nvme_open_DB(uint8_t *buffer){
     if(err == 0){
         uint32_t size = 0;
         std::memcpy(&size, config->data, sizeof(size));
+        data_len = size;
         pr_debug("Next, we need to read the data(size:%u)",static_cast<uint32_t>(size));
-        err = nvme_read_metadata(reinterpret_cast<char*>(buffer), size);
-        if(err == 0){
-            pr_debug("nvme_open_DB success.");
-        }
-        else{
-            pr_error("nvme_open_DB failed");
-            pr_error("error code: 0x%x", err);
-        }
     }
     else{
         pr_error("nvme_open_DB failed");
@@ -630,8 +618,40 @@ int gem5Driver::nvme_dump_ims(){
     return err;
     
 }
-int gem5Driver::nvme_read_ssKeyRange(std::string, char* buffer){
+int gem5Driver::nvme_read_ssKeyRange(std::string filename, char* buffer){
+    if(buffer == nullptr){
+        pr_error("Read sstable failed ,data buffer is nullptr");
+        return COMMAND_FAILED;
+    }
     int err;
+    hostInfo req(filename);
+    std::string enc_hostinfo = req.encode();
+    err = nvme_read_metadata(const_cast<char*>(enc_hostinfo.data()), enc_hostinfo.size());
+    nmc_config_t config_obj;
+    nmc_config_t *config = &config_obj;
+    init_nmc_config(config); 
+    config->data_len = DB_PAGE_SIZE;
+    config->data     = buffer;
+    config->OPCODE    = OPCODE_SSKEYRANGE;
+    config->PSDT      = 0; /* use PRP */
+    config->meta_addr = (uintptr_t)NULL;
+    config->PRP1      = (uintptr_t)config->data;
+    // uint32_t filename_dwords[5] = {0};
+    // fill_filename_to_dwords(filename,filename_dwords);
+    // config->cdw11 = filename_dwords[0];
+    // config->cdw12 = filename_dwords[1];
+    // config->cdw13 = filename_dwords[2];
+    // config->cdw14 = filename_dwords[3];
+    // config->cdw15 = filename_dwords[4];
+    err = pass_io_command(config);
+
+    if(err == 0){
+        pr_debug("nvme read success");
+    }
+    else{
+        pr_error("nvme read failed");
+        pr_error("error code: 0x%x", err);
+    }
     return err;
 }
 

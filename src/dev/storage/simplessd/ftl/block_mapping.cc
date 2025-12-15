@@ -244,6 +244,11 @@ void blockMapping::format(LPNRange &range, uint64_t &tick) {
       // Do trim
       for (uint32_t idx = 0; idx < bitsetSize; idx++) {
         auto &mapping = mappingList.at(idx);
+        if (mapping.first >= param.totalPhysicalBlocks ||
+            mapping.second >= param.pagesInBlock) {
+          continue;
+        }
+
         auto block = blocks.find(mapping.first);
 
         if (block == blocks.end()) {
@@ -263,13 +268,34 @@ void blockMapping::format(LPNRange &range, uint64_t &tick) {
     }
   }
 
-  // Get blocks to erase
   std::sort(list.begin(), list.end());
   auto last = std::unique(list.begin(), list.end());
   list.erase(last, list.end());
 
-  // Do GC only in specified blocks
-  doGarbageCollection(list, tick);
+  for (uint32_t blockIdx : list) {
+    auto block = blocks.find(blockIdx);
+    if (block == blocks.end()) {
+      debugprint(LOG_FTL_PAGE_MAPPING,
+                 "FORMAT | block %u not in use when erasing", blockIdx);
+      continue;
+    }
+
+    if (block->second.getValidPageCount() != 0) {
+      debugprint(LOG_FTL_PAGE_MAPPING,
+                 "FORMAT | block %u still has %u valid pages, force invalidate",
+                 blockIdx, block->second.getValidPageCount());
+
+      for (uint32_t pageIndex = 0; pageIndex < param.pagesInBlock; ++pageIndex) {
+        for (uint32_t idx = 0; idx < param.ioUnitInPage; ++idx) {
+          block->second.invalidate(pageIndex, idx);
+        }
+      }
+    }
+
+    req.blockIndex = blockIdx;
+    req.pageIndex  = 0;
+    eraseInternal(req, tick);
+  }
 
   tick += applyLatency(CPU::FTL__PAGE_MAPPING, CPU::FORMAT);
 }
@@ -713,13 +739,33 @@ void blockMapping::writeInternal(Request &req, uint64_t &tick, bool sendToPAL) {
     mappingList = ret.first;
   }
 
-  // Write data to free block
-  block = blocks.find(pbn);
-  debugprint(LOG_FTL_PAGE_MAPPING,
-               "WRITE | Selected block %u | Page offset %u", block->first, pageOffset);
-  if (block == blocks.end()) {
-    panic("No such block");
+  // Write data to block which corresponds to this LPN's logical block
+  // 先確定 pbn 沒超出實體 block 範圍
+  if (pbn >= param.totalPhysicalBlocks) {
+    panic("writeInternal: LPN %" PRIu64 " -> PBN %u out of range (totalPhysicalBlocks=%u)",
+          req.lpn, pbn, param.totalPhysicalBlocks);
   }
+
+  block = blocks.find(pbn);
+
+  if (block == blocks.end()) {
+    auto freeIt = std::find_if(
+        freeBlocks.begin(), freeBlocks.end(),
+        [pbn](const Block &b) { return b.getBlockIndex() == pbn; });
+
+    if (freeIt == freeBlocks.end()) {
+      panic("writeInternal: block %u not found in blocks nor freeBlocks", pbn);
+    }
+
+    blocks.emplace(pbn, std::move(*freeIt));
+    freeBlocks.erase(freeIt);
+    nFreeBlocks--;
+
+    block = blocks.find(pbn);
+  }
+
+  debugprint(LOG_FTL_PAGE_MAPPING,
+            "WRITE | Selected block %u | Page offset %u", block->first, pageOffset);
 
   if (sendToPAL) {
     if (bRandomTweak) {
@@ -981,6 +1027,53 @@ void blockMapping::getStatValues(std::vector<double> &values) {
 
 void blockMapping::resetStatValues() {
   memset(&stat, 0, sizeof(stat));
+}
+
+// block_mapping.cc 新增
+void blockMapping::eraseByPBN(uint32_t pbn, uint64_t &tick) {
+  // 1. 找到這顆 block
+  auto blkIt = blocks.find(pbn);
+  if (blkIt == blocks.end()) {
+    // 如果已經在 freeBlocks 裡，表示本來就 erase 好了，直接回傳
+    auto freeIt = std::find_if(
+        freeBlocks.begin(), freeBlocks.end(),
+        [pbn](const Block &b){ return b.getBlockIndex() == pbn; });
+
+    if (freeIt == freeBlocks.end()) {
+      panic("eraseByPBN: block %u not found", pbn);
+    }
+    return;
+  }
+
+  // 2. 把所有 mapping 中用到這顆 PBN 的 LPN 清掉
+  for (auto iter = table.begin(); iter != table.end();) {
+    auto &mappingList = iter->second;
+    bool removeEntry = false;
+
+    for (auto &mapping : mappingList) {
+      if (mapping.first == pbn) {
+        mapping.first  = param.totalPhysicalBlocks;
+        mapping.second = param.pagesInBlock;
+        removeEntry = true;
+      }
+    }
+
+    if (removeEntry) {
+      iter = table.erase(iter);
+    } else {
+      ++iter;
+    }
+  }
+
+  // 3. 真正 erase 這個 block（和 eraseInternal 一樣）
+  blkIt->second.erase();
+
+  // 丟回 freeBlocks
+  freeBlocks.emplace_back(std::move(blkIt->second));
+  nFreeBlocks++;
+  blocks.erase(blkIt);
+
+  tick += applyLatency(CPU::FTL__PAGE_MAPPING, CPU::ERASE_INTERNAL);
 }
 
 }  // namespace FTL

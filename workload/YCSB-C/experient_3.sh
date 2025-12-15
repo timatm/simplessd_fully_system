@@ -5,7 +5,7 @@ set -euo pipefail
 LOG_DIR="${LOG_DIR:-./logs_ycsb}"    # 日誌輸出目錄
 DB_NAME="${DB_NAME:-mydb}"           # -db 參數
 THREADS="${THREADS:-1}"              # -threads 參數
-WORKLOAD="${WORKLOAD:-workloads/workloada.spec}"  # -P 參數
+WORKLOAD="${WORKLOAD:-workloads/workloadc.spec}"  # -P 參數
 loadonly="${loadonly:-false}"
 runonly="${runonly:-false}"
 DISK_FILE="test.img"

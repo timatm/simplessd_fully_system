@@ -50,7 +50,6 @@ int LBNPool::init_lbn_pool(const std::vector<uint64_t>& used_lbn_list) {
             used_LBN_num++;
         }
     }
-
     for (uint64_t lbn = 0; lbn < LBN_NUM; lbn++) {
         if (get_freeLBNList(lbn) || get_usedLBNList(lbn)) {
             continue;

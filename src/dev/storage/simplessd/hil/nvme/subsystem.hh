@@ -76,9 +76,12 @@ class Subsystem : public AbstractSubsystem {
 
   void read(Namespace *, uint64_t, uint64_t, DMAFunction &, void *);
   void readIMS(Namespace *, uint64_t, uint64_t, DMAFunction &, void *);
+  void readIMSDirectFTL(Namespace *ns, uint64_t slpn, uint64_t nlpn,DMAFunction &func, void *context);
   void write(Namespace *, uint64_t, uint64_t, DMAFunction &, void *);
   void writeIMS(Namespace *, uint64_t, uint64_t, DMAFunction &, void *);
   void flush(Namespace *, DMAFunction &, void *);
+  void trimIMS(Namespace *ns, uint64_t slpn, uint64_t nlpn,
+             DMAFunction &func, void *context);
   void trim(Namespace *, uint64_t, uint64_t, DMAFunction &, void *);
 
   void getStatList(std::vector<Stats> &, std::string) override;

@@ -468,6 +468,28 @@ void Subsystem::readIMS(Namespace *ns, uint64_t slpn, uint64_t nlpn,
   execute(CPU::NVME__SUBSYSTEM, CPU::CONVERT_UNIT, doRead, req);
 }
 
+void Subsystem::readIMSDirectFTL(Namespace *ns, uint64_t slpn, uint64_t nlpn,
+                                 DMAFunction &func, void *context) {
+  (void)ns;
+  Request *req = new Request(func, context);
+
+  DMAFunction doRead = [this](uint64_t, void *context) {
+    auto req = (Request *)context;
+
+    // 關鍵：呼叫 HIL 的直通版本
+    pHIL->readDirectFTL(*req);
+
+    delete req;
+  };
+
+  req->range.slpn = slpn;
+  req->range.nlp  = nlpn;
+  req->offset     = 0;
+  req->length     = nlpn * logicalPageSize;
+
+  execute(CPU::NVME__SUBSYSTEM, CPU::CONVERT_UNIT, doRead, req);
+}
+
 void Subsystem::write(Namespace *ns, uint64_t slba, uint64_t nlblk,
                       DMAFunction &func, void *context) {
   Request *req = new Request(func, context);
@@ -519,6 +541,31 @@ void Subsystem::flush(Namespace *ns, DMAFunction &func, void *context) {
 
   pHIL->flush(req);
 }
+
+void Subsystem::trimIMS(Namespace *ns, uint64_t slpn, uint64_t nlpn,
+                        DMAFunction &func, void *context) {
+  (void)ns;
+
+  Request *req = new Request(func, context);
+
+  DMAFunction doTrim = [this](uint64_t, void *context) {
+    auto req = (Request *)context;
+
+    // 這裡會走到 HIL::trim -> ICL::trim -> FTL
+    pHIL->format(*req, true);
+    // pHIL->format(*req,false);
+    delete req;
+  };
+
+  req->range.slpn = slpn;
+  req->range.nlp  = nlpn;
+  req->offset     = 0;
+  req->length     = nlpn * logicalPageSize;
+
+  // 跟 writeIMS 一樣，丟進 SUBSYSTEM CPU queue
+  execute(CPU::NVME__SUBSYSTEM, CPU::CONVERT_UNIT, doTrim, req);
+}
+
 
 void Subsystem::trim(Namespace *ns, uint64_t slba, uint64_t nlblk,
                      DMAFunction &func, void *context) {

@@ -89,11 +89,14 @@ void PrintBuildConfig() {
     // 換成 K / M 單位
     const int page_kb  = IMS_PAGE_SIZE / 1024;
     const int block_mb = BLOCK_SIZE    / (1024 * 1024);
+    
 
     pr_info("IMS_PAGE_NUM   = %d", IMS_PAGE_NUM);
     pr_info("IMS_PAGE_SIZE  = %d KB", page_kb);
     pr_info("BLOCK_SIZE     = %d MB", block_mb);
 
+    // int lbn_num = (int)((double)LBN_NUM* (1-SSD_PROVISION_RATIO));
+    pr_info("SSD SUPER PROVISION RATIO = %f",SSD_PROVISION_RATIO);
     pr_info("LBN_NUM        = %d", LBN_NUM);
     pr_info("LBN_SIZE       = %d MB", LBN_SIZE / (1024 * 1024));
     pr_info("LPN_NUM        = %d", LPN_NUM);
@@ -342,54 +345,77 @@ int IMS_interface::read_sstable(uint64_t &lbn) {
     return err;
 }
 
-int IMS_interface::erase_sstable(){
+
+int IMS_interface::erase_sstable(uint64_t &lbn) {
+    int err = OPERATION_SUCCESS;
+
+    size_t hostInfo_len = buffer_valid_size_;
+    std::string buf(buffer_, buffer_ + hostInfo_len);
+    hostInfo request = hostInfo::decode(buf);
+    std::string filename = request.filename;
+
+    uint64_t mappedLBN = mappingTable_->getLBN(filename);
+    if (mappedLBN == INVALIDLBN) {
+        pr_error("erase_sstable: file %s not found in mapping table", filename.c_str());
+        lbn = INVALIDLBN;
+        return OPERATION_FAILURE;
+    }
+
+    lbn = mappedLBN;
+#if RUNTYPE == 0
+    err = persistenceManager_->eraseBlock(lbn);
+    if (err != OPERATION_SUCCESS) {
+        pr_error("erase_sstable: persistence eraseBlock failed for LBN %lu", lbn);
+        return err;
+    }
+#endif
+    if (err != OPERATION_SUCCESS) {
+        pr_error("erase_sstable: eraseBlock failed, LBN=%lu, file=%s",
+                 lbn, filename.c_str());
+        return err;
+    }
+    mappingTable_->remove_mapping(filename);
+    auto node = tree_->find_node(filename);
+    if (node) {
+        tree_->remove_node(node);
+    }
+    else {
+        pr_error("erase_sstable: cannot find tree node for file %s", filename.c_str());
+    }
+
+    return err;
+}
+
+
+
+int IMS_interface::read_ssKeyRange(uint64_t& lpn){
     int err = OPERATION_SUCCESS;
     size_t hostInfo_len = buffer_valid_size_;
     std::string buf(buffer_, buffer_ + hostInfo_len);
     hostInfo request = hostInfo::decode(buf);
     std::string filename = request.filename;
-    auto lbn = mappingTable_->getLBN(filename);
-    err = persistenceManager_->eraseBlock(lbn);
-    if(err == OPERATION_SUCCESS){
-        mappingTable_->remove_mapping(filename);
-        auto node  = tree_->find_node(filename);
-        tree_->remove_node(node);
-    }
-    return err;
-}
-
-int IMS_interface::read_ssKeyRange(hostInfo *request, uint8_t* buffer){
-    int err = OPERATION_SUCCESS;
-    std::string filename = request->filename;
-
     auto mappingTable = mappingTable_->get_table();
     if (mappingTable.count(filename) == 0) {
         pr_error("File %s not found in mapping table", filename.c_str());
         return OPERATION_FAILURE;
     }
 
-    if (!buffer) {
-        pr_error("Null buffer provided to read file: %s", filename.c_str());
-        return OPERATION_FAILURE;
-    }
+    
 
     auto it = mappingTable.find(filename);
     if (it == mappingTable.end()) {
         pr_error("File %s not found in mapping table", filename.c_str());
-        request->lbn = INVALID_32;
         return OPERATION_FAILURE;
     }
 
-    request->lbn = it->second;
+    uint64_t lbn = it->second;
 
-    if (ENABLE_DISK) {
-        err = persistenceManager_->readPage(LBN2LPN(request->lbn), buffer, IMS_PAGE_SIZE);
-    }
+    lpn = LBN2LPN(lbn);
 
     if (err == OPERATION_SUCCESS) {
-        pr_debug("Read data from LBN %lu for file: %s successfully", request->lbn, filename.c_str());
+        pr_debug("Read data from LBN %lu for file: %s successfully", lbn, filename.c_str());
     } else {
-        pr_error("Failed to read block from LBN %lu for file: %s", request->lbn, filename.c_str());
+        pr_error("Failed to read block from LBN %lu for file: %s", lbn, filename.c_str());
         return OPERATION_FAILURE;
     }
 
@@ -834,6 +860,12 @@ int IMS_interface::close_DB(uint8_t *host_buffer, size_t size){
     sp_ptr_old_->logOffset = static_cast<uint64_t>(info.page_offset);
     sp_ptr_old_->byteOffset = static_cast<uint64_t>(info.byte_offset);
     sp_ptr_old_->firstBlockOffset = static_cast<uint64_t>(info.first_block_offset);
+#if RUNTYPE == 1
+    int err = close_IMS();
+    if(err == OPERATION_FAILURE){
+        pr_error("close IMS failed");
+    }
+#endif
     return 0;
 }
 

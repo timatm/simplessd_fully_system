@@ -177,6 +177,28 @@ uint64_t ICL::getUsedPageCount(uint64_t lcaBegin, uint64_t lcaEnd) {
   return pFTL->getUsedPageCount(lcaBegin / ratio, lcaEnd / ratio) * ratio;
 }
 
+void ICL::readDirectFTL(Request &req, uint64_t &tick) {
+  uint64_t beginAt    = tick;
+  uint64_t finishedAt = tick;
+  FTL::Parameter *param = pFTL->getInfo();
+  uint32_t lineCountInSuperPage = param->ioUnitInPage;
+
+  FTL::Request ftlReq(lineCountInSuperPage, req);
+  pFTL->read(ftlReq, finishedAt);
+
+  debugprint(LOG_ICL,
+             "READ_DIRECT | LCA %" PRIu64 " + %" PRIu64
+             " | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
+             req.range.slpn, req.range.nlp,
+             beginAt, finishedAt, finishedAt - beginAt);
+
+  // tick = finishedAt;
+  // tick += applyLatency(CPU::ICL, CPU::READ);
+
+  tick = finishedAt;
+}
+
+
 void ICL::getStatList(std::vector<Stats> &list, std::string prefix) {
   pCache->getStatList(list, prefix + "icl.");
   pDRAM->getStatList(list, prefix + "dram.");

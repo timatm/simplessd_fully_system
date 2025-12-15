@@ -101,11 +101,11 @@ void Namespace::submitCommand(SQEntryWrapper &req, RequestFunction &func) {
         case OPCODE_DATASET_MANAGEMEMT:
           datasetManagement(req, func);
           break;
-        case OPCODE_IMS_INIT:
+        case OPCODE_SSKEYRANGE:
           debugprint(LOG_IMS,
-                     "IMS     | Init IMS | SQ %u:%u | CID %u | NSID %-5d",
+                     "IMS     | Read SSKeyRnage | SQ %u:%u | CID %u | NSID %-5d",
                      req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
-          init_IMS(req, func);
+          read_sskeyrange(req, func);
           break;
         // case OPCODE_MONITOR_IMS:
         //   debugprint(LOG_IMS,
@@ -1435,6 +1435,116 @@ void Namespace::read_block(SQEntryWrapper &req, RequestFunction &func) {
   }
 }
 
+
+void Namespace::read_sskeyrange(SQEntryWrapper &req, RequestFunction &func) {
+  bool err = false;
+
+  CQEntryWrapper resp(req);
+  // char buf[25] = {0};
+  // uint32_t dwords[5] = {
+  //   req.entry.dword11,
+  //   req.entry.dword12,
+  //   req.entry.dword13,
+  //   req.entry.dword14,
+  //   req.entry.dword15
+  // };
+  // memcpy(buf, dwords, sizeof(dwords));
+  // std::string filename(buf);
+  // // bool fua = req.entry.dword12 & 0x40000000;
+  // hostInfo request(filename);
+  uint64_t lpn = INVALID_64;
+  err = (bool)ims.read_ssKeyRange(lpn);
+  if (!attached) {
+    err = true;
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_NAMESPACE_NOT_ATTACHED);
+  }
+  if(lpn == INVALID_64){
+    err = true;
+    debugprint(LOG_IMS,
+             "NVM     | READ_SSTABLE | Allocate LBN is invalid");
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_LBN_INVALID);
+  }
+  if(err){
+    debugprint(LOG_IMS,
+             "NVM     | READ_SSTABLE | Command failed");
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_COMMAND_FAILD);
+  }
+
+  if (!err) {
+    DMAFunction doRead = [this](uint64_t tick, void *context) {
+      DMAFunction dmaDone = [this](uint64_t tick, void *context) {
+        IOContext *pContext = (IOContext *)context;
+        pContext->beginAt++;
+
+        if (pContext->beginAt == 2) {
+          debugprint(
+              LOG_HIL_NVME,
+              "NVM     | READ_SSTABLE  | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
+              "%" PRIX64 " + %d | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
+              pContext->resp.cqID, pContext->resp.entry.dword2.sqID,
+              pContext->resp.sqUID, pContext->resp.entry.dword3.commandID, nsid,
+              pContext->slba, pContext->nlb, pContext->tick, tick,
+              tick - pContext->tick);
+
+          pContext->function(pContext->resp);
+
+          if (pContext->buffer) {
+            free(pContext->buffer);
+          }
+
+          delete pContext->dma;
+          delete pContext;
+        }
+      };
+
+      IOContext *pContext = (IOContext *)context;
+
+      pContext->tick = tick;
+      pContext->beginAt = 0;
+
+      pParent->readIMS(this, pContext->lpn, pContext->nlpn, dmaDone, pContext);
+
+      pContext->buffer = (uint8_t *)calloc(IMS_PAGE_SIZE, 1);
+
+      if (pDisk) {
+        pDisk->readPage(pContext->lpn, pContext->buffer);
+      }
+      
+      pContext->dma->write(0, (uint64_t)IMS_PAGE_SIZE, pContext->buffer,
+                           dmaDone, context);
+    };
+
+    IOContext *pContext = new IOContext(func, resp);
+
+    pContext->beginAt = getTick();
+    pContext->lpn = lpn;
+    pContext->nlpn = 1;
+    debugprint(LOG_IMS,
+              "NVM     | READ_SSKeyRnage | IOContext | LPN: %ld | number of LPN: %ld",pContext->lpn ,pContext->nlpn);
+
+
+    CPUContext *pCPU =
+        new CPUContext(doRead, pContext, CPU::NVME__NAMESPACE, CPU::READ);
+
+    if (req.useSGL) {
+      pContext->dma =
+          new SGL(cfgdata, cpuHandler, pCPU, req.entry.data1, req.entry.data2);
+    }
+    else {
+      pContext->dma =
+          new PRPList(cfgdata, cpuHandler, pCPU, req.entry.data1,
+                      req.entry.data2, (uint64_t)IMS_PAGE_SIZE);
+    }
+  }
+  else {
+    func(resp);
+  }
+}
+
+
 void Namespace::init_IMS(SQEntryWrapper &req, RequestFunction &func) {
   bool err = false;
 
@@ -2120,7 +2230,7 @@ void Namespace::search_key(SQEntryWrapper &req, RequestFunction &func) {
           for(auto lbn : lbn_list){
             uint64_t slpn = LBN2LPN(lbn);
             uint64_t nlpn = 1;
-            pParent->readIMS(this, slpn, nlpn, searchDone, pContext);
+            pParent->readIMSDirectFTL(this, slpn, nlpn, searchDone, pContext);
           } 
         }
       };
@@ -2164,26 +2274,83 @@ void Namespace::search_key(SQEntryWrapper &req, RequestFunction &func) {
 void Namespace::erase_sstable(SQEntryWrapper &req, RequestFunction &func) {
   bool err = false;
 
-  CQEntryWrapper resp(req);  
-  // uint64_t slba = ((uint64_t)req.entry.dword11 << 32) | req.entry.dword10;
-  // uint16_t nlb = (req.entry.dword12 & 0xFFFF) + 1;
+  CQEntryWrapper resp(req);
 
   if (!attached) {
     err = true;
     resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
                     STATUS_NAMESPACE_NOT_ATTACHED);
   }
-  debugprint(LOG_HIL_NVME,
-             "NVM     | ERASE SSTABLE | SQ %u:%u | CID %u | NSID %-5d",
-             req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
-  err = ims.erase_sstable();
-  
-  // if (nlb == 0) {
-  //   err = true;
-  //   warn("nvme_namespace: host tried to write 0 blocks");
-  // }
-  func(resp);
+
+  uint64_t lbn = INVALIDLBN;
+  if (!err) {
+    int ret = ims.erase_sstable(lbn);   // 這裡會順便更新 IMS 的 mapping / LBNPool / Tree
+
+    if (ret != OPERATION_SUCCESS || lbn == INVALIDLBN) {
+      err = true;
+      debugprint(LOG_IMS,
+                 "NVM     | ERASE_SSTABLE | IMS erase_sstable failed (ret=%d, lbn=%ld)",
+                 ret, (long)lbn);
+      resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                      STATUS_COMMAND_FAILD);
+    }
+  }
+
+  if (err) {
+    func(resp);
+    return;
+  }
+
+  // ====== 下面這段就是「更新 FTL，這個 block 要 erase」的關鍵 ======
+
+  // IMS LBN -> FTL LPN range
+  uint64_t slpn = LBN2LPN(lbn);
+  uint64_t nlpn = IMS_PAGE_NUM;   // 一個 IMS block 占用多少 page
+
+  debugprint(LOG_IMS,
+             "NVM     | ERASE_SSTABLE | SQ %u:%u | CID %u | NSID %-5d | "
+             "LBN %ld | LPN %ld + %ld",
+             req.sqID, req.sqUID, req.entry.dword0.commandID, nsid,
+             (long)lbn, (long)slpn, (long)nlpn);
+
+  // 當 FTL trim 完成後要做的事：打 CQ + free context
+  DMAFunction doTrimDone = [this](uint64_t tick, void *context) {
+    IOContext *pContext = (IOContext *)context;
+
+    debugprint(
+        LOG_IMS,
+        "NVM     | ERASE_SSTABLE | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
+        "LBN %ld | LPN %ld + %ld | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
+        pContext->resp.cqID,
+        pContext->resp.entry.dword2.sqID,
+        pContext->resp.sqUID,
+        pContext->resp.entry.dword3.commandID,
+        nsid,
+        (long)pContext->lbn,
+        (long)pContext->lpn,
+        (long)pContext->nlpn,
+        pContext->beginAt,
+        tick,
+        tick - pContext->beginAt);
+
+    // 回報給 host
+    pContext->function(pContext->resp);
+
+    delete pContext;
+  };
+
+  // IOContext 用來帶 resp + 完成 callback
+  IOContext *pContext = new IOContext(func, resp);
+  pContext->beginAt = getTick();
+  pContext->lbn     = lbn;
+  pContext->lpn     = slpn;
+  pContext->nlpn    = nlpn;
+
+  // 不需要 DMA，直接用 LPN range 叫 Subsystem 去做 trimIMS
+  pParent->trimIMS(this, slpn, nlpn, doTrimDone, pContext);
 }
+
+
 
 }  // namespace NVMe
 

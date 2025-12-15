@@ -17,16 +17,16 @@
 
 
 
-int MyNVMeDriver::nvme_ims_init() {
-    int err = ims.init_IMS();
-    return err;
-}
+// int MyNVMeDriver::nvme_ims_init() {
+//     int err = ims.init_IMS();
+//     return err;
+// }
 
-int MyNVMeDriver::nvme_ims_close(){
-    int err = 0;
-    err = ims.close_IMS();
-    return err;
-}
+// int MyNVMeDriver::nvme_ims_close(){
+//     int err = 0;
+//     err = ims.close_IMS();
+//     return err;
+// }
 
 int MyNVMeDriver::nvme_write_sstable(sstable_info info,char *buffer){
     if(buffer == nullptr){
@@ -124,7 +124,8 @@ int MyNVMeDriver::nvme_erase_sstable(std::string filename){
     hostInfo req(filename);
     std::string enc_hostinfo = req.encode();
     err = ims.write_meta(reinterpret_cast<uint8_t*>(const_cast<char*>(enc_hostinfo.data())), enc_hostinfo.size());
-    err = ims.erase_sstable();
+    uint64_t lbn = INVALID_64;
+    err = ims.erase_sstable(lbn);
     return err;
 }
 
@@ -144,21 +145,11 @@ int MyNVMeDriver::nvme_allcate_lbn(char *buffer){
     return err;
 }
 
-int MyNVMeDriver::nvme_open_DB(uint8_t *buffer){
-    if (buffer == nullptr) {
-        pr_error("Open DB failed: null buffer");
-        return OPERATION_FAILURE;
-    }
+int MyNVMeDriver::nvme_open_DB(uint32_t& datalen){
     int err;
-    uint32_t datalen;
     err = ims.open_DB(&datalen);
     if(err == OPERATION_FAILURE){
         pr_error("IMS open DB fail");
-        return err;
-    }
-    err = nvme_read_metadata(reinterpret_cast<char*>(buffer), datalen);
-    if(err == OPERATION_FAILURE){
-        pr_error("IMS nvme read metadata fail");
         return err;
     }
     return err;
@@ -177,12 +168,28 @@ int MyNVMeDriver::nvme_close_DB(uint8_t* buffer,size_t size){
 
 int MyNVMeDriver::nvme_read_ssKeyRange(std::string filename, char* buffer){
     if(buffer == nullptr){
-        pr_error("Write sstable failed ,data buffer is nullptr");
+        pr_error("nvme_read_ssKeyRange failed ,data buffer is nullptr");
+        return COMMAND_FAILED;
+    }
+    if(filename.empty()){
+        pr_error("nvme_read_ssKeyRange failed ,filename is nullptr");
         return COMMAND_FAILED;
     }
     int err;
     hostInfo req(filename);
-    err = ims.read_ssKeyRange(&req,reinterpret_cast<uint8_t*>(buffer));
+    std::string enc_hostinfo = req.encode();
+    err = ims.write_meta(reinterpret_cast<uint8_t*>(const_cast<char*>(enc_hostinfo.data())), enc_hostinfo.size());
+    if(err != OPERATION_SUCCESS){
+        pr_error("Write hostInfo metadata failed");
+        return COMMAND_FAILED;
+    }
+    uint64_t lpn = INVALID_64;
+    err = ims.read_ssKeyRange(lpn);
+    if(lpn == INVALID_64){
+        pr_error("read ssKeyRange translate lpn failed");
+        return COMMAND_FAILED;
+    }
+    err = ims.read_log( lpn,reinterpret_cast<uint8_t*>(buffer) );
     return err;
 }
 

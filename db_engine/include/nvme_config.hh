@@ -142,8 +142,9 @@ struct sstable_info{
 #define OPCODE_WRITE_SSTABLE    0x80
 #define OPCODE_READ_SSTABLE     0x81
 #define OPCODE_SEARCH           0x82
-#define OPCODE_IMS_INIT         0x83
-#define OPCODE_IMS_CLOSE        0x84
+#define OPCODE_SSKEYRANGE       0x83
+// #define OPCODE_IMS_INIT         0x83
+// #define OPCODE_IMS_CLOSE        0x84
 #define OPCODE_MONITOR_IMS      0x85
 #define OPCODE_ALLOCATE         0x86
 #define OPCODE_WRITE_LOG        0x87

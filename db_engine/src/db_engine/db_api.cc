@@ -46,24 +46,91 @@ API::API(){
     pr_info("API initailizing done ...");
 }
 
-Status API::open() {
-    pr_info("Opening database...");
+void PrintConfig() {
+    // ---- RUNTYPE 說明 ----
+    const char* runtype_str =
+    #if RUNTYPE == 0
+        "Host environment (RUNTYPE=0)";
+    #elif RUNTYPE == 1
+        "SimpleSSD environment (RUNTYPE=1)";
+    #else
+        "UNKNOWN RUNTYPE (should be 0 or 1)";
+    #endif
+    ;
 
-    void* buffer = aligned_alloc(4096, IMS_PAGE_SIZE);
+    const char* enable_disk_str = ENABLE_DISK ? "enabled" : "disabled";
+
+    const char* search_pattern_str = SEARCH_PATTERN ? "Host generate" : "Device generate";  
+    const char* nvme_driver_str =
+    #if RUNTYPE == 0
+        "Host/test NVMe driver";
+    #elif RUNTYPE == 1
+        "SimpleSSD NVMe backend";
+    #else
+        "UNKNOWN NVME driver mode";
+    #endif
+    ;
+
+    // ---- SELECT_POLICY 說明 ----
+    const char* select_policy_str = nullptr;
+    switch (SELECT_POLICY) {
+        case 0: select_policy_str = "WROSTCASE"; break;
+        case 1: select_policy_str = "RR";        break;
+        case 2: select_policy_str = "LEVEL2CH";  break;
+        case 3: select_policy_str = "MYPOLICY";  break;
+        default: select_policy_str = "UNKNOWN";  break;
+    }
+
+    // ---- PACKING_TYPE 說明 ----
+    const char* packing_type_str = nullptr;
+#ifdef PACKING_TYPE
+    switch (PACKING_TYPE) {
+        case 0: packing_type_str = "kKeyPerPage"; break;
+        case 1: packing_type_str = "kHash";       break;
+        case 2: packing_type_str = "kKeyRange";   break;
+        default: packing_type_str = "UNKNOWN";    break;
+    }
+#endif
+    pr_info("========== MyDB Build Config ==========");
+    pr_info("RUNTYPE            = %d (%s)", RUNTYPE, runtype_str);
+    pr_info("ENABLE_DISK        = %d (%s)", ENABLE_DISK, enable_disk_str);
+    pr_info("NVME_DRIVER        = %d (%s)", NVME_DRIVER, nvme_driver_str);
+    pr_info("SELECT_POLICY      = %d (%s)", SELECT_POLICY, select_policy_str);
+#ifdef PACKING_TYPE
+    pr_info("PACKING_TYPE       = %d (%s)", PACKING_TYPE, packing_type_str);
+#endif
+    pr_info("SEAECH_PATTERN GEN = %d (%s)", SEARCH_PATTERN, search_pattern_str);
+    pr_info("READ_CACHE_SIZE    = %d  ",RANGE_KEY_CACHE_SIZE);
+    pr_info("Level 0 size       = %d  ",LEVEL0_MAX);
+    pr_info("Level 1 size       = %d  ",LEVEL1_MAX);
+    pr_info("Level 2 size       = %d  ",LEVEL2_MAX);
+    pr_info("Level 3 size       = %d  ",LEVEL3_MAX);
+    pr_info("Level 4 size       = %d  ",LEVEL4_MAX);
+    pr_info("Level 5 size       = %d  ",LEVEL5_MAX);
+    pr_info("Level 6 size       = %d  ",LEVEL6_MAX);
+    pr_info("========================================");
+
+}
+
+Status API::open() {
+    PrintConfig();
+    pr_info("Opening database...");
+    uint32_t data_len = 0;
+    int err = nvme_->nvme_open_DB(data_len);
+    if (err != OPERATION_SUCCESS) return Status::IOError("nvme_open_DB failed");
+    if (data_len == 0) return Status::Corruption("open_DB returned data_len=0");
+    void* buffer = aligned_alloc(4096, data_len);
     if (!buffer) {
         return Status::IOError("Failed to allocate buffer for open operation");
     }
-
-    std::memset(buffer, 0, IMS_PAGE_SIZE);
-
-    int err = nvme_->nvme_open_DB(reinterpret_cast<uint8_t*>(buffer));
-    if (err != 0) {
+    std::memset(buffer, 0, data_len);
+    err = nvme_->nvme_read_metadata(reinterpret_cast<char*>(buffer), data_len);
+    if(err == OPERATION_FAILURE){
         free(buffer);
-        pr_error("nvme_open_DB fail");
-        return Status::IOError("nvme_open_DB fail");
+        pr_error("IMS nvme read metadata fail");
+        return Status::Corruption("DB open failed");
     }
-
-    std::string buf(reinterpret_cast<char*>(buffer), IMS_PAGE_SIZE);
+    std::string buf(reinterpret_cast<char*>(buffer), data_len);
     free(buffer);
 
     DB_INIT info;
@@ -92,6 +159,7 @@ Status API::open() {
         return Status::Corruption("LSMTree decode fail");
     }
     info.dump();
+    dump_all();
     pr_info("open DB done");
     return Status::OK();
 }
@@ -138,10 +206,11 @@ Status API::close(){
     }
     sstableManager_->waitAllTasksDone();
 
+    logManager_->flush_buffer();
     uint32_t page_offset = getLogManager()->get_page_offset();
     uint32_t byte_offset = getLogManager()->get_byte_offset();
     uint32_t first_block_offset = getLogManager()->get_first_block_offset();
-    logManager_->flush_buffer();
+    
 
     DB_INIT info;
     info.page_offset = page_offset;
@@ -605,6 +674,7 @@ Status API::search(std::string key ,std::string& value){
                 if(key_range == std::nullopt){
                     key_range = read_key_range(sstable->filename);
                     if(!key_range.has_value()){
+                        pr_error("Key not found in SSTable");
                         return Status::NotFound("Key not found in SSTable: " + sstable->filename);
                     }
                     keyRangeCache_->put(sstable->filename, *key_range);
@@ -802,10 +872,10 @@ Status API::scan(std::string start_key,
     if (start_key.empty()) {
         return Status::InvalidArgument("Start or end key string is empty");
     }
-    std::string end_key = "XXXXXXXXXXXXXXX";
+    const std::string lower = InternalKey(start_key, 0, ValueType::kTypeMin).Encode();
     // 1) 準備 [lower, upper) 的 InternalKey（已編碼）
-    const std::string lower =InternalKey(start_key, 0, ValueType::kTypeMin).Encode();
-    const std::string upper =InternalKey(end_key, UINT64_MAX, ValueType::kTypeMax).Encode();
+    // const std::string lower =InternalKey(start_key, 0, ValueType::kTypeMin).Encode();
+    // const std::string upper =InternalKey(end_key, UINT64_MAX, ValueType::kTypeMax).Encode();
 
     // 2) 準備 MemTable iter（擁有權移交給 QueryIterator）
     std::unique_ptr<MemTableIterator> memIter;
@@ -828,7 +898,9 @@ Status API::scan(std::string start_key,
                      std::move(immuteIter));
 
     // 5) 設定區間 + Init
-    it.SetInternalRange(lower, upper);
+    std::optional<std::string> lower_opt = lower;
+    std::optional<std::string> upper_opt = std::nullopt;
+    it.SetInternalRange(std::move(lower_opt), std::move(upper_opt));
     Status s = it.Init();
     if (!s.ok()) return s;
 
@@ -840,9 +912,8 @@ Status API::scan(std::string start_key,
             std::cout << sv.ToString() << std::endl;
             return sv;
         }
-        InternalKey ik = InternalKey::Decode(std::string(it.key()));
-        count--;
-        std::cout << "KEY: " << ik.UserKey() << "[seq: " << ik.info.seq << "] " << " -> VAL: " << val << "\n";
+        result_set.insert(val);
+        --count;
     }
 
     return Status::OK();

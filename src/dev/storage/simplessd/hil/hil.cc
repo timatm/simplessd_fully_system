@@ -182,8 +182,8 @@ void HIL::format(Request &req, bool erase) {
   DMAFunction doFlush = [this, erase](uint64_t tick, void *context) {
     auto pReq = (Request *)context;
 
-    debugprint(LOG_HIL, "FORMAT| LCA %" PRIu64 " + %" PRIu64, pReq->reqID,
-               pReq->range.slpn, pReq->range.nlp);
+    debugprint(LOG_HIL,
+           "FORMAT| LCA %" PRIu64 " + %" PRIu64 " | REQ %u",pReq->range.slpn,pReq->range.nlp, pReq->reqID);
 
     if (erase) {
       pICL->format(pReq->range, tick);
@@ -202,6 +202,39 @@ void HIL::format(Request &req, bool erase) {
 
   execute(CPU::HIL, CPU::FLUSH, doFlush, new Request(req));
 }
+
+void HIL::readDirectFTL(Request &req) {
+  DMAFunction doRead = [this](uint64_t beginAt, void *context) {
+    auto pReq = (Request *)context;
+    uint64_t tick = beginAt;
+
+    pReq->reqID = ++reqCount;
+
+    debugprint(LOG_HIL,
+               "READ_DIRECT | REQ %7u | LCA %" PRIu64 " + %" PRIu64
+               " | BYTE %" PRIu64 " + %" PRIu64,
+               pReq->reqID, pReq->range.slpn, pReq->range.nlp,
+               pReq->offset, pReq->length);
+
+    // 關鍵：建立 ICL::Request 後，呼叫你剛剛新增的 API
+    ICL::Request reqInternal(*pReq);
+    pICL->readDirectFTL(reqInternal, tick);
+
+    stat.request[0]++;
+    stat.iosize[0] += pReq->length;
+    updateBusyTime(0, beginAt, tick);
+    updateBusyTime(2, beginAt, tick);
+
+    pReq->finishedAt = tick;
+    completionQueue.push(*pReq);
+    updateCompletion();
+
+    delete pReq;
+  };
+
+  execute(CPU::HIL, CPU::READ, doRead, new Request(req));
+}
+
 
 void HIL::getLPNInfo(uint64_t &totalLogicalPages, uint32_t &logicalPageSize) {
   pICL->getLPNInfo(totalLogicalPages, logicalPageSize);

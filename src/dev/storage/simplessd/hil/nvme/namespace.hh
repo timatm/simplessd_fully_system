@@ -142,6 +142,7 @@ class Namespace {
   void write_block(SQEntryWrapper &, RequestFunction &);
   void read_block(SQEntryWrapper &, RequestFunction &);
   
+  void read_sskeyrange(SQEntryWrapper &, RequestFunction &);
 
   void open_DB(SQEntryWrapper &, RequestFunction &);
   void close_DB(SQEntryWrapper &, RequestFunction &);

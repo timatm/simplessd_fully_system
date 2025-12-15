@@ -76,6 +76,7 @@
    void writeInternal(Request &, uint64_t &, bool = true);
    void trimInternal(Request &, uint64_t &);
    void eraseInternal(PAL::Request &, uint64_t &);
+   void eraseByPBN(uint32_t pbn, uint64_t &tick);
  
   public:
   blockMapping(ConfigReader &, Parameter &, PAL::PAL *, DRAM::AbstractDRAM *);

@@ -12,10 +12,10 @@ public:
 
 
 
-    int nvme_ims_init() override;
-    int nvme_ims_close() override;
+    // int nvme_ims_init() override;
+    // int nvme_ims_close() override;
 
-    int nvme_open_DB(uint8_t *buffer) override;
+    int nvme_open_DB(uint32_t& datalen) override;
     int nvme_close_DB(uint8_t* buffer,size_t size) override;
 
 

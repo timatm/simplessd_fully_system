@@ -11,7 +11,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # gem5 base system
 RUN apt -y update && apt -y upgrade
 RUN apt -y install build-essential scons python-dev zlib1g-dev m4 cmake libprotobuf-dev protobuf-compiler libgoogle-perftools-dev git python-pip
-RUN apt -y install bc cmake e2fsprogs libext2fs-dev libzstd-dev libpcre++-dev wget
+RUN apt -y install bc cmake e2fsprogs libext2fs-dev libzstd-dev libpcre++-dev wget gdb
 # additional libs
 RUN apt -y install libzstd-dev xxd
 RUN apt -y install libtbb-dev

@@ -40,8 +40,8 @@ public:
     virtual int nvme_write_sstable(sstable_info, char* buffer) = 0;
     virtual int nvme_read_sstable(std::string, char* buffer) = 0;
     virtual int nvme_erase_sstable(std::string) = 0;
-    virtual int nvme_ims_init() = 0;
-    virtual int nvme_ims_close() = 0;
+    // virtual int nvme_ims_init() = 0;
+    // virtual int nvme_ims_close() = 0;
     // virtual int nvme_monitor_IMS(int monitor_type) = 0;
     // virtual void init_nmc_config(nmc_config_t *config) = 0;
     // TODO
@@ -51,7 +51,7 @@ public:
     // virtual int nvme_set_sstable_info(uint32_t *) = 0;
     // virtual int nvme_set_log_info(uint32_t *) = 0;
 
-    virtual int nvme_open_DB(uint8_t* buffer) = 0;
+    virtual int nvme_open_DB(uint32_t& datalen) = 0;
     virtual int nvme_close_DB(uint8_t* buffer,size_t size) = 0;
     virtual int nvme_write_log(uint64_t lpn, char* buffer) = 0;
     virtual int nvme_read_log(uint64_t lpn, char* buffer) = 0;

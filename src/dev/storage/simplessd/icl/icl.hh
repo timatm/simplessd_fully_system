@@ -46,14 +46,13 @@ class ICL : public StatObject {
 
   void read(Request &, uint64_t &);
   void write(Request &, uint64_t &);
-
   void flush(LPNRange &, uint64_t &);
   void trim(LPNRange &, uint64_t &);
   void format(LPNRange &, uint64_t &);
 
   void getLPNInfo(uint64_t &, uint32_t &);
   uint64_t getUsedPageCount(uint64_t, uint64_t);
-
+  void readDirectFTL(Request &req, uint64_t &tick);
   void getStatList(std::vector<Stats> &, std::string) override;
   void getStatValues(std::vector<double> &) override;
   void resetStatValues() override;

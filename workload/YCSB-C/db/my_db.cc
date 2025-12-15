@@ -15,6 +15,7 @@ void MyDB::Init() {
     db.open();
     // inited_.store(true, std::memory_order_release);
   });
+  return;
 }
 
 void MyDB::Close(){
@@ -72,12 +73,22 @@ int MyDB::Scan(const string & /*table*/, const string &start_key, int record_cou
   // 伪代码：
   // auto it = engine_seek(tls_->handle.get(), start_key);
   // for (int i = 0; i < record_count && it.valid(); ++i, it.next()) { ... }
-  result.clear();
-  for (int i = 0; i < record_count; ++i) {
-    vector<KVPair> row;
-    row.emplace_back("field0", "mock_scan_value");
-    result.emplace_back(std::move(row));
+  std::set<std::string> scan_result;
+  Status s = db.scan(start_key, record_count, scan_result);
+  if (!s.ok()) {
+    return kError;
   }
+
+  result.clear();
+  int cnt = 0;
+  for (const auto &val : scan_result) {
+    if (cnt >= record_count) break;  // 保險，再卡一次上限
+    vector<KVPair> row;
+    row.emplace_back("field0", val);
+    result.emplace_back(std::move(row));
+    ++cnt;
+  }
+
   return kOK;
 }
 
