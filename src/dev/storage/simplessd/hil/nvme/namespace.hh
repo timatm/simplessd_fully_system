@@ -155,7 +155,7 @@ class Namespace {
   void close_IMS(SQEntryWrapper &, RequestFunction &);
   void monitor_IMS(SQEntryWrapper &, RequestFunction &);
   void search_key(SQEntryWrapper &, RequestFunction &);
-
+  void compaction_io(SQEntryWrapper &, RequestFunction &);
  public:
   Namespace(Subsystem *, ConfigData &);
   ~Namespace();

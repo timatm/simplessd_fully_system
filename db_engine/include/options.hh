@@ -37,10 +37,10 @@ static_assert(
 #define RANGE_KEY_CACHE_SIZE 60
 
 
-// Search pattern generate in HOST / DEVICE
-// 0: DEVICE
-// 1: HOST
-#define SEARCH_PATTERN 0
+// // Search pattern generate in HOST / DEVICE
+// // 0: DEVICE
+// // 1: HOST
+// #define SEARCH_PATTERN 1
 
 #define LOG_GC_THRESHOLD 100000
 #define GC_BLOCK_NUM 1

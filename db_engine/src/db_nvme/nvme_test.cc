@@ -278,6 +278,22 @@ int MyNVMeDriver::nvme_search(char *buffer,size_t size){
     }
     return err;
 }
+
+int MyNVMeDriver::nvme_compaction_io(const CompactionIOSimMeta& meta){
+    int err = OPERATION_FAILURE;
+    std::string buffer = meta.encode();
+    err = ims.write_meta(reinterpret_cast<uint8_t*>(buffer.data()), buffer.size());
+    if(err != OPERATION_SUCCESS){
+        pr_error("Write hostInfo metadata failed");
+        return COMMAND_FAILED;
+    }
+    std::vector<uint64_t> lbn_list;
+    err = ims.simulate_compaction_io(lbn_list);
+    if(err == OPERATION_FAILURE){
+        pr_error("nvme_search fail");
+    }
+    return err;
+}
 // int MyNVMeDriver::nvme_set_sstable_info(uint32_t *data_len){
 
 // }

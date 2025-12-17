@@ -131,11 +131,17 @@ void Namespace::submitCommand(SQEntryWrapper &req, RequestFunction &func) {
                      req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
           search_key(req, func);
           break;
-        case OPCODE_IMS_CLOSE:
+        // case OPCODE_IMS_CLOSE:
+        //   debugprint(LOG_IMS,
+        //              "IMS     | Close IMS      | SQ %u:%u | CID %u | NSID %-5d",
+        //              req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
+        //   close_IMS(req, func);
+        //   break;
+        case OPCODE_COMPACTION_IO:
           debugprint(LOG_IMS,
-                     "IMS     | Close IMS      | SQ %u:%u | CID %u | NSID %-5d",
+                     "IMS     | Compaction IO passthru | SQ %u:%u | CID %u | NSID %-5d",
                      req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
-          close_IMS(req, func);
+          compaction_io(req, func);
           break;
         case OPCODE_ALLOCATE:
           debugprint(LOG_IMS,
@@ -1882,7 +1888,10 @@ void Namespace::open_DB(SQEntryWrapper &req, RequestFunction &func) {
   CQEntryWrapper resp(req);
   // bool fua = req.entry.dword12 & 0x40000000;
   uint32_t dataLen = INVALID_32;
-  err = (bool)ims.open_DB(&dataLen);
+  int ret = ims.open_DB(&dataLen);
+  if(ret == OPERATION_FAILURE){
+    err = true;
+  }
   if (!attached) {
     err = true;
     resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
@@ -2350,6 +2359,88 @@ void Namespace::erase_sstable(SQEntryWrapper &req, RequestFunction &func) {
   pParent->trimIMS(this, slpn, nlpn, doTrimDone, pContext);
 }
 
+void Namespace::compaction_io(SQEntryWrapper &req, RequestFunction &func) {
+    CQEntryWrapper resp(req);
+
+    // 1. 檢查 namespace 是否 attached
+    if (!attached) {
+        resp.makeStatus(true, false,
+                        TYPE_COMMAND_SPECIFIC_STATUS,
+                        STATUS_NAMESPACE_NOT_ATTACHED);
+        debugprint(LOG_IMS,
+                   "NVM     | Compaction IO sim | Command failed (namespace not attached)");
+        func(resp);
+        return;
+    }
+
+    // 2. 建立 IOContext ＋ 讓 IMS 算出這次要 fake 的 LBN 列表
+    IOContext *pContext = new IOContext(func, resp);
+    std::vector<uint64_t> lbn_list;
+
+    int ret = ims.simulate_compaction_io(lbn_list);
+
+    if (ret == OPERATION_FAILURE) {
+        debugprint(LOG_IMS,
+                   "NVM     | Compaction IO sim | ims.simulate_compaction_io() failed");
+        pContext->resp.makeStatus(true, false,
+                                  TYPE_COMMAND_SPECIFIC_STATUS,
+                                  STATUS_COMMAND_FAILD);
+        pContext->function(pContext->resp);
+        delete pContext;
+        return;   // 一定要 return
+    }
+
+    if (lbn_list.empty()) {
+        debugprint(LOG_IMS,
+                   "NVM     | Compaction IO sim | lbn_list is empty");
+        pContext->resp.makeStatus(false, false,
+                                  TYPE_GENERIC_COMMAND_STATUS,
+                                  STATUS_SUCCESS);
+        pContext->function(pContext->resp);
+        if (pContext->dma) {
+            delete pContext->dma;
+            pContext->dma = nullptr;
+        }
+        delete pContext;
+        return;   // 一定要 return
+    }
+
+    // 3. 正式丟 fake read 到 FTL，完全不做 DMA 回 host
+    pContext->beginAt = 0;
+    pContext->nlb     = lbn_list.size();
+
+    DMAFunction done = [this](uint64_t tick, void *context) {
+        IOContext *pContext = static_cast<IOContext*>(context);
+        pContext->beginAt++;
+
+        if (pContext->beginAt == pContext->nlb) {
+            pContext->resp.makeStatus(false, false,
+                                      TYPE_GENERIC_COMMAND_STATUS,
+                                      STATUS_SUCCESS);
+            pContext->function(pContext->resp);
+
+            if (pContext->buffer) {
+                free(pContext->buffer);
+                pContext->buffer = nullptr;
+            }
+            if (pContext->dma) {
+                delete pContext->dma;
+                pContext->dma = nullptr;
+            }
+            delete pContext;
+        }
+    };
+
+    debugprint(LOG_IMS,
+               "NVM     | Compaction IO sim | ims.simulate_compaction_io() success, nlb=%zu",
+               lbn_list.size());
+
+    for (auto lbn : lbn_list) {
+        uint64_t slpn = LBN2LPN(lbn);
+        uint64_t nlpn = IMS_PAGE_NUM;
+        pParent->readIMSDirectFTL(this, slpn, nlpn, done, pContext);
+    }
+}
 
 
 }  // namespace NVMe

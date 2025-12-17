@@ -18,7 +18,7 @@ public:
     int nvme_open_DB(uint32_t &data_len) override;
     int nvme_close_DB(uint8_t *buffer,size_t size) override;
 
-
+    int nvme_compaction_io(const CompactionIOSimMeta& meta) override;
     // int nvme_set_sstable_info(uint32_t *data_len) override;
     // int nvme_set_log_info(uint32_t *data_len) override;
 

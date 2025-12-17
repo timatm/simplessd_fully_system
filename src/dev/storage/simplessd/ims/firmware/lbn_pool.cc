@@ -297,35 +297,67 @@ uint64_t LBNPool::level2CH(int level){
 
 //     return INVALIDLBN;
 // }
-uint64_t LBNPool::my_policy(const std::vector<int>& relate_ch_info) {
+#include <cmath>   // for std::fabs
+
+uint64_t LBNPool::my_policy(const RelateChInfo& info) {
     uint64_t lbn = INVALIDLBN;
 
-    // channels = [0, 1, 2, ..., num_channels-1]
-    std::vector<int> channels(relate_ch_info.size());
-    std::iota(channels.begin(), channels.end(), 0);
+    if (info.inter.size() != CHANNEL_NUM ||
+        info.intra.size() != CHANNEL_NUM) {
+        pr_error("my_policy: RelateChInfo size mismatch, inter=%zu intra=%zu CHANNEL_NUM=%d",
+                 info.inter.size(), info.intra.size(), CHANNEL_NUM);
+        return INVALIDLBN;
+    }
 
-    // 排序規則：
-    // 1) relate_ch_info 小的 channel 排前面
-    // 2) 若 relate_ch_info 一樣，used_count_per_ch_ 小的排前面
-    std::sort(channels.begin(), channels.end(),
-              [&](int a, int b) {
-                  if (relate_ch_info[a] == relate_ch_info[b]) {
-                      return used_count_per_ch_[a] < used_count_per_ch_[b];
-                  }
-                  return relate_ch_info[a] < relate_ch_info[b];
-              });
+    std::vector<double> score(CHANNEL_NUM, 0.0);
+    for (int c = 0; c < CHANNEL_NUM; ++c) {
+        score[c] = alpha_inter_ * static_cast<double>(info.inter[c])
+                 + alpha_intra_ * static_cast<double>(info.intra[c]);
+    }
 
-    // 照排序後的 channel 順序找第一個有 free LBN 的
-    for (int ch : channels) {
-        if (!freeLBNList_[ch].empty()) {
-            lbn = getFront_freeLBNList(ch);
-            pr_debug("My policy selected LBN: %lu from channel: %d", lbn, ch);
-            return lbn;
+    int select_ch = -1;
+    double best_score = 0.0;
+    uint64_t best_usage = 0;
+
+    for (int c = 0; c < CHANNEL_NUM; ++c) {
+        if (freeLBNList_[c].empty()) continue;
+
+        if (select_ch == -1) {
+            select_ch  = c;
+            best_score = score[c];
+            best_usage = used_count_per_ch_[c];   // usage[c]
+            continue;
+        }
+        if (score[c] < best_score) {
+            select_ch  = c;
+            best_score = score[c];
+            best_usage = used_count_per_ch_[c];
+        }
+        else if (score[c] == best_score) {
+            if (used_count_per_ch_[c] < best_usage) {
+                select_ch  = c;
+                best_score = score[c];
+                best_usage = used_count_per_ch_[c];
+            }
         }
     }
 
-    return INVALIDLBN;
+    if (select_ch == -1) {
+        pr_error("LBNPool::my_policy: no free LBN in any channel");
+        return INVALIDLBN;
+    }
+
+    lbn = getFront_freeLBNList(select_ch);
+    pr_debug("My policy selected LBN: %lu from channel: %d "
+             "(score=%.3f, inter=%d, intra=%d, usage=%lu)",
+             lbn, select_ch,
+             best_score,
+             info.inter[select_ch],
+             info.intra[select_ch],
+             best_usage);
+    return lbn;
 }
+
 
 
 

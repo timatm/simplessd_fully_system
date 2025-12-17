@@ -28,7 +28,7 @@
 #if RUNTYPE
 #include "util/disk.hh"
 #endif
-static constexpr size_t kDefaultDeviceDramSize = 1ULL << 20;
+static constexpr size_t kDefaultDeviceDramSize = 50ULL << 20;
 static constexpr size_t kAlign = 4096;
 namespace {
     inline void* aligned_alloc_4k(size_t bytes) {
@@ -82,7 +82,7 @@ public:
     int set_sstable_info(uint32_t *size);
     int set_log_info(uint32_t *size);
 
-
+    int simulate_compaction_io(std::vector<uint64_t> &pbn_list);
     int close_DB(uint8_t *host_buffer, size_t size);
     int open_DB(uint32_t *datalen);
     int search(std::vector<uint64_t> &pbn_list);
@@ -136,6 +136,7 @@ private:
     super_page* sp_ptr_new_ = nullptr;
     bool closed_ = false;
     uint32_t searh_parallel_block_num = 0;
+    uint32_t compaction_parallel_block_num = 0;
 };
 
 #endif

@@ -63,6 +63,7 @@ public:
 
     
 private:
+    void SimulateDeviceIOIfNeeded(const std::vector<std::shared_ptr<TreeNode>> &srcNodes,const std::vector<std::shared_ptr<TreeNode>> &dstNodes);
     Status put_impl(std::string key ,std::string value,PutType);
 
     void OnSSTableFlushed(const sstable_info& info);
@@ -86,5 +87,6 @@ private:
 
     double total_space_util  = 0.0;
     double total_SStable_num = 0.0;
+    uint64_t search_pattern_io = 0;
 };
 #endif

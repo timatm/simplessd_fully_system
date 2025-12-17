@@ -50,28 +50,35 @@ std::queue<std::shared_ptr<TreeNode>> LSMTree::search_key(const Key& key) {
     return result;
 }
 
+RelateChInfo LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
+    RelateChInfo info;
+    info.inter.assign(CHANNEL_NUM, 0);  // inter_impact[c]
+    info.intra.assign(CHANNEL_NUM, 0);  // intra_impact[c]
 
-std::vector<int> LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
-    std::vector<int> relate_ch_info(CHANNEL_NUM, 0);
+    if (!node) return info;
+
     std::queue<std::shared_ptr<TreeNode>> Pqueue, Cqueue;
     std::unordered_set<TreeNode*> Pvisited, Cvisited;
 
-    for (auto& parent : node->parent) {
+    // === Inter-level impact: parents / ancestors ===
+    for (auto &parent : node->parent) {
         if (auto sp = parent.lock()) {
             Pqueue.push(sp);
         }
     }
 
     while (!Pqueue.empty()) {
-        auto parent = Pqueue.front(); 
+        auto parent = Pqueue.front();
         Pqueue.pop();
         if (!Pvisited.insert(parent.get()).second) continue;
 
-        if (parent->channelInfo >= 0) {
-            relate_ch_info[parent->channelInfo]++;
+        if (parent->channelInfo >= 0 &&
+            parent->channelInfo < CHANNEL_NUM) {
+            info.inter[parent->channelInfo]++;  // inter_impact[parent_ch]++
         }
 
-        for (auto& gp : parent->parent) {
+        // 繼續往上找祖先，僅保留 key-range 有 overlap 的
+        for (auto &gp : parent->parent) {
             if (auto sp = gp.lock()) {
                 if (compareKey(sp->rangeMin, node->rangeMax) <= 0 &&
                     compareKey(sp->rangeMax, node->rangeMin) >= 0) {
@@ -81,8 +88,9 @@ std::vector<int> LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
         }
     }
 
-    for (auto& [_, child] : node->children) {
-        Cqueue.push(child);
+    // === Inter-level impact: children / descendants ===
+    for (auto &[_, child] : node->children) {
+        if (child) Cqueue.push(child);
     }
 
     while (!Cqueue.empty()) {
@@ -90,11 +98,12 @@ std::vector<int> LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
         Cqueue.pop();
         if (!Cvisited.insert(child.get()).second) continue;
 
-        if (child->channelInfo >= 0) {
-            relate_ch_info[child->channelInfo]++;
+        if (child->channelInfo >= 0 &&
+            child->channelInfo < CHANNEL_NUM) {
+            info.inter[child->channelInfo]++;  // inter_impact[child_ch]++
         }
 
-        for (auto& [filename, grandchild] : child->children) {
+        for (auto &[filename, grandchild] : child->children) {
             if (!grandchild) {
                 pr_debug("Filename: %s can't find pointer", filename.c_str());
                 continue;
@@ -106,33 +115,40 @@ std::vector<int> LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
         }
     }
 
+    // === Intra-level impact: 同 level 前後相鄰的 SSTable ===
     int level = node->levelInfo;
     if (level < 0 || level >= MAX_LEVEL) {
         pr_debug("Invalid node level: %d", level);
-        return relate_ch_info;
+        return info;
     }
 
-    const auto& nodes = tree_->get_level_nodes(level);
+    const auto &nodes = tree_->get_level_nodes(level);
     auto it = nodes.find(node);
     if (it == nodes.end()) {
         pr_debug("Node not found in level_map");
-        return relate_ch_info;
+        return info;
     }
 
+    // 前一個
     if (it != nodes.begin()) {
         auto prev = std::prev(it);
-        if ((*prev)->channelInfo >= 0) {
-            relate_ch_info[(*prev)->channelInfo]++;
+        if ((*prev)->channelInfo >= 0 &&
+            (*prev)->channelInfo < CHANNEL_NUM) {
+            info.intra[(*prev)->channelInfo]++;  // intra_impact[prev_ch]++
         }
     }
 
+    // 後一個
     auto next = std::next(it);
-    if (next != nodes.end() && (*next)->channelInfo >= 0) {
-        relate_ch_info[(*next)->channelInfo]++;
+    if (next != nodes.end() &&
+        (*next)->channelInfo >= 0 &&
+        (*next)->channelInfo < CHANNEL_NUM) {
+        info.intra[(*next)->channelInfo]++;      // intra_impact[next_ch]++
     }
 
-    return relate_ch_info;
+    return info;
 }
+
 void LSMTree::insert_sstable(std::shared_ptr<TreeNode> node) {
     tree_->insert_node(node);
     int level = node->levelInfo;

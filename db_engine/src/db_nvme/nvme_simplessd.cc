@@ -688,3 +688,29 @@ int gem5Driver::nvme_search(char* buffer,size_t size){
     }
     return err;
 }
+
+int gem5Driver::nvme_compaction_io(const CompactionIOSimMeta& meta) {
+    std::string enc = meta.encode();
+
+    // 1) 用 WRITE_BUFFER 把 meta 放進 device 端 IMS buffer
+    int err = nvme_write_metadata(const_cast<char*>(enc.data()), enc.size());
+    if (err != 0) {
+        pr_error("nvme_compaction_io: write_metadata failed (%d)", err);
+        return err;
+    }
+
+    // 2) 下 SIMULATE_COMPACTION_IO 指令
+    nmc_config_t config_obj;
+    nmc_config_t* config = &config_obj;
+    init_nmc_config(config);
+
+    config->OPCODE   = OPCODE_COMPACTION_IO;
+    config->data     = nullptr;
+    config->data_len = 0;
+
+    err = pass_io_command(config);
+    if (err != COMMAND_SUCCESS) {
+        pr_error("nvme_compaction_io: nvme_io_passthru failed (%d)", err);
+    }
+    return err;
+}

@@ -195,9 +195,13 @@ IMS_interface::~IMS_interface() {
 
 int IMS_interface::write_sstable(uint64_t &lbn) {
     int err = OPERATION_SUCCESS;
+    if (buffer_ == nullptr || buffer_valid_size_ == 0) {
+        pr_error("write_sstable: buffer_ is null or buffer_valid_size_ == 0");
+        return OPERATION_FAILURE;
+    }
     size_t hostInfo_len = buffer_valid_size_;
     std::string buf(buffer_, buffer_ + hostInfo_len);
-    hostInfo request = hostInfo::decode(buf);
+    hostInfo request = hostInfo::decodeOrThrow(buf);
     // pr_debug("[FW] Write request for Filename: %s | Level: %d",
     //          request.filename.c_str(), request.levelInfo);
 
@@ -239,7 +243,7 @@ int IMS_interface::write_sstable(uint64_t &lbn) {
     }
 
     // 取得相關 channel 清單
-    std::vector<int> relateList = lsmTree_->get_relate_ch_info(node);
+    RelateChInfo relateList = lsmTree_->get_relate_ch_info(node);
     // 呼叫 my_policy()
     uint64_t selectLBN = INVALIDLBN;
     if(level > 0 && level <= MAX_LEVEL){
@@ -305,9 +309,13 @@ int IMS_interface::write_sstable(uint64_t &lbn) {
 
 int IMS_interface::read_sstable(uint64_t &lbn) {
     int err = OPERATION_SUCCESS;
+    if (buffer_ == nullptr || buffer_valid_size_ == 0) {
+        pr_error("read_sstable: buffer_ is null or buffer_valid_size_ == 0");
+        return OPERATION_FAILURE;
+    }
     size_t hostInfo_len = buffer_valid_size_;
     std::string buf(buffer_, buffer_ + hostInfo_len);
-    hostInfo request = hostInfo::decode(buf);
+    hostInfo request = hostInfo::decodeOrThrow(buf);
     std::string filename = request.filename;
 
     // 檢查 mapping table 是否有紀錄
@@ -348,10 +356,13 @@ int IMS_interface::read_sstable(uint64_t &lbn) {
 
 int IMS_interface::erase_sstable(uint64_t &lbn) {
     int err = OPERATION_SUCCESS;
-
+    if (buffer_ == nullptr || buffer_valid_size_ == 0) {
+        pr_error("erase_sstable: buffer_ is null or buffer_valid_size_ == 0");
+        return OPERATION_FAILURE;
+    }
     size_t hostInfo_len = buffer_valid_size_;
     std::string buf(buffer_, buffer_ + hostInfo_len);
-    hostInfo request = hostInfo::decode(buf);
+    hostInfo request = hostInfo::decodeOrThrow(buf);
     std::string filename = request.filename;
 
     uint64_t mappedLBN = mappingTable_->getLBN(filename);
@@ -390,9 +401,13 @@ int IMS_interface::erase_sstable(uint64_t &lbn) {
 
 int IMS_interface::read_ssKeyRange(uint64_t& lpn){
     int err = OPERATION_SUCCESS;
+    if (buffer_ == nullptr || buffer_valid_size_ == 0) {
+        pr_error("read_ssKeyRange: buffer_ is null or buffer_valid_size_ == 0");
+        return OPERATION_FAILURE;
+    }
     size_t hostInfo_len = buffer_valid_size_;
     std::string buf(buffer_, buffer_ + hostInfo_len);
-    hostInfo request = hostInfo::decode(buf);
+    hostInfo request = hostInfo::decodeOrThrow(buf);
     std::string filename = request.filename;
     auto mappingTable = mappingTable_->get_table();
     if (mappingTable.count(filename) == 0) {
@@ -829,9 +844,9 @@ int IMS_interface::open_DB(uint32_t *datalen) {
 
     // info.dump();
     result = info.encode();
-
+    pr_info("Device DRAM space info, result.size=%zu, buffer_size_=%zu",result.size(), buffer_size_);
     if (result.size() > buffer_size_){
-        pr_error("Device DRAM space is not enough");
+        pr_error("Device DRAM space is not enough,result.size=%zu, buffer_size_=%zu",result.size(), buffer_size_);
         return OPERATION_FAILURE;
     }
     std::lock_guard<std::mutex> lk(buf_mu_);
@@ -906,6 +921,10 @@ int IMS_interface::search(std::vector<uint64_t> &pbn_list){
         pr_error("Channel list size is error");
         return OPERATION_FAILURE;
     }
+    if (buffer_ == nullptr || buffer_valid_size_ == 0) {
+        pr_error("search: buffer_ is null or buffer_valid_size_ == 0");
+        return OPERATION_FAILURE;
+    }
     size_t hostInfo_len = buffer_valid_size_;
     std::string buf(buffer_, buffer_ + hostInfo_len);
 #if (SEARCH_PATTERN == 0)
@@ -924,9 +943,10 @@ int IMS_interface::search(std::vector<uint64_t> &pbn_list){
     for(auto& pattern : search_package.searchPatterns){
         auto& sstable_ID = pattern.sstable_name;
         uint64_t lbn = mappingTable_->getLBN(sstable_ID);
-        if(lbn != INVALID_64){
-            pbn_list.push_back(lbn);
+        if(lbn == INVALIDLBN){
+            continue;
         }
+        pbn_list.push_back(lbn);
         auto ch = LBN2CH(lbn);
         if (ch < 0 || ch >= CHANNEL_NUM) {
             pr_error("IMS search: invalid channel %d for sstable %s", ch, sstable_ID.c_str());
@@ -941,6 +961,56 @@ int IMS_interface::search(std::vector<uint64_t> &pbn_list){
     return OPERATION_SUCCESS;
 }
 
+int IMS_interface::simulate_compaction_io(std::vector<uint64_t> &lbn_list) {
+    std::vector<uint32_t> ch_list(CHANNEL_NUM, 0);
+
+    size_t len = buffer_valid_size_;
+    if (len == 0) {
+        pr_error("simulate_compaction_io: buffer_valid_size_ == 0");
+        return OPERATION_FAILURE;
+    }
+
+    CompactionIOSimMeta meta =
+        CompactionIOSimMeta::decode(reinterpret_cast<char*>(buffer_), len);
+
+    pr_debug("Simulate compaction IO: src=%zu dst=%zu",
+             meta.src_files.size(), meta.dst_files.size());
+
+    auto handle_one_side = [&](const std::vector<std::string>& files,
+                               const char* tag) {
+        for (const auto& sstable_ID : files) {
+            uint64_t lbn = mappingTable_->getLBN(sstable_ID);
+            if (lbn == INVALIDLBN) {
+                pr_error("simulate_compaction_io %s: no mapping for %s",
+                         tag, sstable_ID.c_str());
+                continue;
+            }
+
+            lbn_list.push_back(lbn);
+
+            int ch = LBN2CH(lbn);
+            if (ch < 0 || ch >= CHANNEL_NUM) {
+                pr_error("simulate_compaction_io %s: invalid channel %d for %s",
+                         tag, ch, sstable_ID.c_str());
+                continue;
+            }
+            ch_list[ch]++;
+        }
+    };
+
+    handle_one_side(meta.src_files, "src");
+    handle_one_side(meta.dst_files, "dst");
+
+    auto it = std::max_element(ch_list.begin(), ch_list.end());
+    if (it != ch_list.end()) {
+        compaction_parallel_block_num += *it;
+    }
+
+    return OPERATION_SUCCESS;
+}
+
+
+
 void IMS_interface::print_result(){
     std::vector<uint32_t> ch_info = get_lbnpool()->get_channel_info();
     if(ch_info.empty() || ch_info.size() != CHANNEL_NUM){
@@ -951,6 +1021,9 @@ void IMS_interface::print_result(){
     for(int i = 0;i < CHANNEL_NUM;i++){
         pr_stat("waer leveling CH[%d]=%u",i,ch_info[i]);
     }
+    pr_stat("inter=%f (Impact on search performance)",alpha_inter_);
+    pr_stat("intra=%f (Impact on compaction performance)",alpha_intra_);
     pr_stat("searh_parallel_block_num=%u",searh_parallel_block_num);
+    pr_stat("compaction_parallel_block_num=%u",compaction_parallel_block_num);
     pr_info("================= IMS experient end =================");
 }

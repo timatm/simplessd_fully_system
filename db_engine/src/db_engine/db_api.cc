@@ -165,13 +165,17 @@ Status API::open() {
 }
 
 void API::print_result() {
+    double search_pattern_ioM =
+        static_cast<double>(search_pattern_io) / 1024.0 / 1024.0;
+
     pr_info("================== DB experiment result ==================");
-    double avg_util = total_space_util / total_SStable_num;
-    if (total_SStable_num == 0) {
-        pr_error("The average space utilization: N/A (no SSTables)\n");
+    if (total_SStable_num == 0.0) {
+        pr_error("The average space utilization: N/A (no SSTables)");
     } else {
-        pr_stat("average_pace_utilization=%.4f",avg_util);
+        double avg_util = total_space_util / total_SStable_num;
+        pr_stat("average_space_utilization=%.4f", avg_util);
     }
+    pr_stat("search_pattern_io=%.4fM", search_pattern_ioM);
     pr_info("================== DB experiment result end ==================");
 }
 
@@ -291,6 +295,7 @@ Status API::put_impl(std::string key ,std::string value,PutType t){
     logManager_->writeLog(internal_value);
     memtable_->Put(internal_value);
     if(logManager_->get_log_block_num() >= LOG_GC_THRESHOLD && t == PutType::kPutByUser){
+        pr_error("GC running");
         log_garbage_collection();
     }
     return Status::OK();
@@ -545,58 +550,68 @@ std::set<std::string> API::read_key_range(const std::string& filename){
 }
 
 
-SearchPatternD API::generate_SearchPatternD(const std::string& filename, const Key& searchKey,const std::set<std::string>& keys){
-    if(filename.empty()){
-        throw std::invalid_argument("Filename cannot be empty");
-    }
-    if (filename.size() != 35) {
-        throw std::invalid_argument("sstable_name must be 35 bytes");
-    }
-    if(keys.empty()){
-        throw std::invalid_argument("Keys set cannot be empty");
-    }
-    if(searchKey.key_size == 0){
-        throw std::invalid_argument("Search key cannot be empty");
-    }
-    auto it = keys.upper_bound(searchKey.toString());
-    if(it == keys.begin()){
-        throw std::out_of_range("No predecessor: provided key is smaller than the smallest key");
-    }
-    SearchPatternD pattern;
-    pattern.slot_index = static_cast<uint32_t>(std::distance(keys.begin(), std::prev(it)));
-    pattern.sstable_name = filename;
-    return pattern;
-}
-
-SearchPatternH API::generate_SearchPatternH(const std::string& filename,const Key& searchKey,const std::set<std::string>& keys){
+SearchPatternD API::generate_SearchPatternD(const std::string& filename,
+                                           const Key& searchKey,
+                                           const std::set<std::string>& keys) {
     if (filename.empty()) throw std::invalid_argument("Filename cannot be empty");
-    constexpr std::size_t kSSTNameLen = 35;
-    if (filename.size() != kSSTNameLen) throw std::invalid_argument("sstable_name must be 36 bytes");
+    if (filename.size() != 35) throw std::invalid_argument("sstable_name must be 35 bytes");
     if (keys.empty()) throw std::invalid_argument("Keys set cannot be empty");
     if (searchKey.key_size == 0) throw std::invalid_argument("Search key cannot be empty");
 
     auto it = keys.upper_bound(searchKey.toString());
+
+    size_t slot_index = 0;
     if (it == keys.begin()) {
-        throw std::out_of_range("No predecessor: provided key is smaller than the smallest key");
+        // searchKey < smallest
+        slot_index = 0;
+    } else if (it == keys.end()) {
+        // searchKey >= largest
+        slot_index = keys.size() - 1;
+    } else {
+        slot_index = static_cast<size_t>(std::distance(keys.begin(), std::prev(it)));
     }
-    const size_t slot_index = static_cast<size_t>(std::distance(keys.begin(), std::prev(it)));
 
-    const std::string enc = searchKey.encode();
-    if (enc.empty()) {
-        throw std::invalid_argument("Encoded search key is empty");
+    SearchPatternD pattern;
+    pattern.slot_index = static_cast<uint32_t>(slot_index);
+    pattern.sstable_name = filename;
+    return pattern;
+}
+
+
+SearchPatternH API::generate_SearchPatternH(const std::string& filename,
+                                           const Key& searchKey,
+                                           const std::set<std::string>& keys) {
+    if (filename.empty()) throw std::invalid_argument("Filename cannot be empty");
+    if (filename.size() != 35) throw std::invalid_argument("sstable_name must be 35 bytes");
+    if (keys.empty()) throw std::invalid_argument("Keys set cannot be empty");
+    if (searchKey.key_size == 0) throw std::invalid_argument("Search key cannot be empty");
+
+    auto it = keys.upper_bound(searchKey.toString());
+
+    size_t slot_index = 0;
+    if (it == keys.begin()) {
+        slot_index = 0;
+    } else if (it == keys.end()) {
+        slot_index = keys.size() - 1;
+    } else {
+        slot_index = static_cast<size_t>(std::distance(keys.begin(), std::prev(it)));
     }
 
-   
     const size_t num_slots = IMS_PAGE_SIZE / SLOT_SIZE;
     if (num_slots == 0 || IMS_PAGE_SIZE % SLOT_SIZE != 0) {
         throw std::logic_error("Invalid IMS_PAGE_SIZE / SLOT_SIZE configuration");
     }
+
+    // 這裡要比的是 num_slots（因為你要塞進一個 page pattern）
     if (slot_index >= num_slots) {
+        // ⚠️ 如果這個常發生，代表 keys 不是「一個 page 的 keys」，而是更大範圍的 keys
         throw std::out_of_range("slot_index is out of range for one page");
     }
-    if (enc.size() > SLOT_SIZE) {
-        throw std::length_error("Encoded key doesn't fit into one SLOT");
-    }
+
+    const std::string enc = searchKey.encode();
+    if (enc.empty()) throw std::invalid_argument("Encoded search key is empty");
+    if (enc.size() > SLOT_SIZE) throw std::length_error("Encoded key doesn't fit into one SLOT");
+
     std::string search_pattern(IMS_PAGE_SIZE, static_cast<char>(0xFF));
     std::memcpy(search_pattern.data() + slot_index * SLOT_SIZE, enc.data(), enc.size());
 
@@ -605,6 +620,7 @@ SearchPatternH API::generate_SearchPatternH(const std::string& filename,const Ke
     pattern.search_pattern = std::move(search_pattern);
     return pattern;
 }
+
 
 
 std::set<InternalKey ,SetComparator> API::parse_sstable_page(char* buffer) {
@@ -694,10 +710,10 @@ Status API::search(std::string key ,std::string& value){
     search_package.search_key = userKey.toString();
     search_package.header.pattern_num = static_cast<uint32_t>(search_package.searchPatterns.size());
     const std::string encoded_package = search_package.encode();
-
     if (encoded_package.empty()) {
         return Status::IOError("Encoded search package is empty");
     }
+    search_pattern_io += encoded_package.size();
     // search_package.dump();
     void *buffer;
     int rc = posix_memalign(&buffer, 4096, encoded_package.size());
@@ -718,7 +734,7 @@ Status API::search(std::string key ,std::string& value){
     if(key.empty()){
         return Status::IOError("Key string is empty");
     }
-    std::cout << "Search key: " << key << std::endl;
+    pr_debug("Search key: %s", key.c_str());
     Key userKey(key);
     InternalKey internalKey(key);
     if (memtable_) {
@@ -727,18 +743,14 @@ Status API::search(std::string key ,std::string& value){
             result = immutable_memtable_->Get(key);
         }
         if (result.has_value()) {
-            Record rec = Record::Decode(*result);
-            if(rec.internal_key.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion)){
-                return Status::NotFound("The key has been deleted");
-            }
-            value = rec.value;
+            value = *result;
             return Status::OK();
         }
     }
 
     auto sstables = lsmTree_->search_key(userKey);
     if (sstables.empty()){
-        pr_info("No candidate SSTables found for key: %s", key.c_str());
+        pr_error("No candidate SSTables found for key: %s", key.c_str());
         return Status::OK();
     }
     SearchPackageH search_package;
@@ -746,8 +758,7 @@ Status API::search(std::string key ,std::string& value){
 
     while( !sstables.empty() ){
         auto sstable = sstables.front();
-        std::cout   << "Find SStable: " << sstable->filename << "  Key range [ " << sstable->rangeMin.toString() << " ~ "
-                    << sstable->rangeMax.toString() << " ]" <<std::endl;
+        pr_debug("Find SStable: %s  Key range [ %s ~ %s ]",sstable->filename.c_str(),sstable->rangeMin.toString().c_str(),sstable->rangeMax.toString().c_str());
         sstables.pop();
         SearchPatternH pattern_info;
         switch (packing_){
@@ -793,7 +804,7 @@ Status API::search(std::string key ,std::string& value){
     if (encoded_package.empty()) {
         return Status::IOError("Encoded search package is empty");
     }
-
+    search_pattern_io += encoded_package.size();
     void *buffer;
     int rc = posix_memalign(&buffer, 4096, encoded_package.size());
     if (rc != 0) {
@@ -926,6 +937,25 @@ Status API::removeSSable(std::shared_ptr<TreeNode> rm){
     return Status::OK();
 }
 
+void API::SimulateDeviceIOIfNeeded(const std::vector<std::shared_ptr<TreeNode>> &srcNodes
+                                                    ,const std::vector<std::shared_ptr<TreeNode>> &dstNodes) {
+
+    CompactionIOSimMeta meta;
+    meta.src_files.reserve(srcNodes.size());
+    meta.dst_files.reserve(dstNodes.size());
+
+    for (const auto& n : srcNodes) {
+        // 注意：這裡假設 TreeNode 有 filename 欄位，名稱請照你實際的來
+        meta.src_files.push_back(n->filename);
+    }
+    for (const auto& n : dstNodes) {
+        meta.dst_files.push_back(n->filename);
+    }
+    int rc = nvme_->nvme_compaction_io(meta);
+    if (rc != COMMAND_SUCCESS) {
+        pr_error("SimulateDeviceIOIfNeeded: nvme_compaction_io failed (%d)", rc);
+    }
+}
 
 
 void API::compaction() {
@@ -970,7 +1000,7 @@ void API::compaction() {
 
 
         auto dstNodes = getLSMTree()->search_one_level(1, srcMin, srcMax);
-
+        SimulateDeviceIOIfNeeded(srcNodes,dstNodes);
         pr_debug("Dump source nodes info:");
         // for(auto srcNode : srcNodes){
             
@@ -1037,15 +1067,14 @@ void API::compaction() {
             // 預設起點要用【下界哨兵】
             optKey = LowerSentinel(firstNode->rangeMin.toString());
         }
-
-        auto srcNode = getLSMTree()->getNextNode(level, optKey->UserKey());
-        std::vector<std::shared_ptr<TreeNode>> srcNodes;
-        srcNodes.push_back(srcNode);
+        Key nextKey(optKey->UserKey());
+        auto srcNode = getLSMTree()->getNextNode(level, nextKey);
         if (!srcNode) {
             pr_error("No next node at level %d", level);
             continue;
         }
-
+        std::vector<std::shared_ptr<TreeNode>> srcNodes;
+        srcNodes.push_back(srcNode);
         pr_debug("Dump compaction source info:");
         // srcNode->dump();
 
@@ -1053,7 +1082,7 @@ void API::compaction() {
 
         InternalKey srcMinKey = LowerSentinel(srcNode->rangeMin.toString());
         InternalKey srcMaxKey = UpperSentinel(srcNode->rangeMax.toString());
-
+        SimulateDeviceIOIfNeeded(srcNodes,dstNodes);
         // 聚合目的層的 user key 範圍（允許為空）
         Key dstMinUser = srcNode->rangeMin, dstMaxUser = srcNode->rangeMax;
         bool hasDst = false;

@@ -50,7 +50,7 @@ public:
 
     // virtual int nvme_set_sstable_info(uint32_t *) = 0;
     // virtual int nvme_set_log_info(uint32_t *) = 0;
-
+    virtual int nvme_compaction_io(const CompactionIOSimMeta& meta) = 0;
     virtual int nvme_open_DB(uint32_t& datalen) = 0;
     virtual int nvme_close_DB(uint8_t* buffer,size_t size) = 0;
     virtual int nvme_write_log(uint64_t lpn, char* buffer) = 0;

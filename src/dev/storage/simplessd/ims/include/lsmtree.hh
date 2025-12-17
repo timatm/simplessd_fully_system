@@ -5,6 +5,8 @@
 #include <vector>
 #include "tree.hh"
 
+
+
 class LSMTree {
 public:
     explicit LSMTree(std::shared_ptr<Tree> tree): tree_(std::move(tree)) {
@@ -14,7 +16,7 @@ public:
         tree_ = std::make_shared<Tree>();
     }
     std::queue<std::shared_ptr<TreeNode>> search_key(const Key& key);
-    std::vector<int> get_relate_ch_info(std::shared_ptr<TreeNode> node);
+    RelateChInfo get_relate_ch_info(std::shared_ptr<TreeNode> node);
 
     void insert_sstable(std::shared_ptr<TreeNode> node); 
     void remove_sstable(std::shared_ptr<TreeNode> node);     

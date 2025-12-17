@@ -36,7 +36,7 @@ public:
     uint64_t worst_policy();
     uint64_t RRpolicy();
     uint64_t level2CH(int level);
-    uint64_t my_policy(const std::vector<int>& relate_ch_list);
+    uint64_t my_policy(const RelateChInfo& relate_ch_list);
     void clear();
     uint8_t get_lastUsedChannel(){return lastUsedChannel_;};
     void set_lastUsedChannel(uint8_t ch) {lastUsedChannel_ = ch;}

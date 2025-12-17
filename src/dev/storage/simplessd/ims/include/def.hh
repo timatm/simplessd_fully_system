@@ -70,6 +70,10 @@ static constexpr uint32_t INVALID_32 = 0xFFFFFFFFu;
 
 
 // [DB setting]
+struct RelateChInfo {
+    std::vector<int> inter;  // inter-level impact[c]
+    std::vector<int> intra;  // intra-level impact[c]
+};
 enum class SelectT {
     WROSTCASE = 0,
     RR        = 1,
@@ -111,6 +115,8 @@ struct AlignedBuf {
     explicit operator bool() const { return ptr != nullptr; }
 };
 
+constexpr double alpha_inter_ = 1.0;
+constexpr double alpha_intra_ = 3.0;
 
 // [DB setting end]
 
@@ -139,103 +145,265 @@ struct AlignedBuf {
 // [min_len:4B][min_key_bytes]
 // [max_len:4B][max_key_bytes]
 
+// 給 fake compaction I/O 用的 metadata
+struct CompactionIOSimMeta {
+    std::vector<std::string> src_files;
+    std::vector<std::string> dst_files;
+
+    std::string encode() const {
+        std::string out;
+
+        auto append_u32 = [&](uint32_t v) {
+            for (int i = 0; i < 4; ++i) {
+                out.push_back(static_cast<char>((v >> (i * 8)) & 0xFF));
+            }
+        };
+
+        auto append_str = [&](const std::string& s) {
+            append_u32(static_cast<uint32_t>(s.size()));
+            out.append(s.data(), s.size());
+        };
+
+        append_u32(static_cast<uint32_t>(src_files.size()));
+        append_u32(static_cast<uint32_t>(dst_files.size()));
+        for (const auto& s : src_files) append_str(s);
+        for (const auto& s : dst_files) append_str(s);
+
+        return out;
+    }
+
+    static CompactionIOSimMeta decode(const char* data, size_t len) {
+        CompactionIOSimMeta meta;
+        size_t off = 0;
+
+        auto read_u32 = [&](uint32_t& v) {
+            if (off + 4 > len) throw std::runtime_error("decode u32 overflow");
+            v = 0;
+            for (int i = 0; i < 4; ++i) {
+                v |= (static_cast<uint32_t>(
+                        static_cast<unsigned char>(data[off + i])) << (i * 8));
+            }
+            off += 4;
+        };
+
+        auto read_str = [&](std::string& s) {
+            uint32_t sz = 0;
+            read_u32(sz);
+            if (off + sz > len) throw std::runtime_error("decode str overflow");
+            s.assign(data + off, data + off + sz);
+            off += sz;
+        };
+
+        uint32_t ns, nd;
+        read_u32(ns);
+        read_u32(nd);
+
+        meta.src_files.resize(ns);
+        meta.dst_files.resize(nd);
+
+        for (uint32_t i = 0; i < ns; ++i) read_str(meta.src_files[i]);
+        for (uint32_t i = 0; i < nd; ++i) read_str(meta.dst_files[i]);
+
+        return meta;
+    }
+};
+
+
 struct hostInfo {
-    uint32_t lbn;
-    std::string filename; // file name size <= 36 SStable file name size has limit, read mappingEntry struct for more info
-    int levelInfo;
-    int channelInfo;
-    Key rangeMin;
-    Key rangeMax;
+    uint32_t    lbn;
+    std::string filename;   // file name size <= 36
+    int         levelInfo;
+    int         channelInfo;
+    Key         rangeMin;
+    Key         rangeMax;
 
-    hostInfo() : lbn(INVALID_32), filename(""),levelInfo(INVALID_LEVEL), channelInfo(INVALID_CHANNEL) {}
+    static constexpr uint32_t MAX_FILENAME_LEN = 36;
 
-    hostInfo(std::string name, int level, int ch, Key min, Key max) :
-        lbn(INVALID_32),
-        filename(std::move(name)),
-        levelInfo(level),
-        channelInfo(ch),
-        rangeMin(min),
-        rangeMax(max) {}
+    hostInfo()
+        : lbn(INVALID_32),
+          filename(),
+          levelInfo(INVALID_LEVEL),
+          channelInfo(INVALID_CHANNEL),
+          rangeMin(),
+          rangeMax() {}
 
-    hostInfo(std::string name, int level, Key min, Key max) :
-        hostInfo(std::move(name), level, INVALID_CHANNEL, min, max) {}
+    hostInfo(std::string name, int level, int ch, Key min, Key max)
+        : lbn(INVALID_32),
+          filename(std::move(name)),
+          levelInfo(level),
+          channelInfo(ch),
+          rangeMin(std::move(min)),
+          rangeMax(std::move(max)) {}
 
-    hostInfo(std::string name) :
-        hostInfo(std::move(name), INVALID_LEVEL, INVALID_CHANNEL, Key{}, Key{}) {}
+    hostInfo(std::string name, int level, Key min, Key max)
+        : hostInfo(std::move(name), level, INVALID_CHANNEL,
+                   std::move(min), std::move(max)) {}
+
+    explicit hostInfo(std::string name)
+        : hostInfo(std::move(name), INVALID_LEVEL, INVALID_CHANNEL,
+                   Key{}, Key{}) {}
+
     void dump() const {
         std::cout << "hostInfo: filename=" << filename
-                << ", level=" << levelInfo
-                << ", channel=" << channelInfo << "\n";
+                  << ", level="   << levelInfo
+                  << ", channel=" << channelInfo << "\n";
         std::cout << "  minKey: ";
         rangeMin.dumpString();
         std::cout << "  maxKey: ";
         rangeMax.dumpString();
     }
+
+    // ================= Encode =================
+    //
+    // layout:
+    //   [lbn (4)]
+    //   [fname_len (4)]
+    //   [filename bytes]
+    //   [levelInfo (4)]
+    //   [channelInfo (4)]
+    //   [min_len (4)]
+    //   [rangeMin.encode() bytes (min_len)]
+    //   [max_len (4)]
+    //   [rangeMax.encode() bytes (max_len)]
+    //
     std::string encode() const {
-        std::ostringstream oss;
+        std::string out;
+
+        // 估一個大概的容量，減少 realloc
+        uint32_t fname_len = static_cast<uint32_t>(filename.size());
+        std::string minEnc = rangeMin.encode();
+        std::string maxEnc = rangeMax.encode();
+        uint32_t min_len   = static_cast<uint32_t>(minEnc.size());
+        uint32_t max_len   = static_cast<uint32_t>(maxEnc.size());
+
+        out.reserve(4 + 4 + fname_len +
+                    4 + 4 +
+                    4 + min_len +
+                    4 + max_len);
+
+        auto append_raw = [&](const void* ptr, size_t n) {
+            out.append(reinterpret_cast<const char*>(ptr), n);
+        };
 
         // lbn
-        oss.write(reinterpret_cast<const char*>(&lbn), sizeof(lbn));
+        append_raw(&lbn, sizeof(lbn));
 
-        // filename (長度 + 資料)
-        uint32_t fname_len = static_cast<uint32_t>(filename.size());
-        oss.write(reinterpret_cast<const char*>(&fname_len), sizeof(fname_len));
-        oss.write(filename.data(), fname_len);
+        // filename (len + data)
+        append_raw(&fname_len, sizeof(fname_len));
+        if (fname_len > 0) {
+            append_raw(filename.data(), fname_len);
+        }
 
         // levelInfo + channelInfo
-        oss.write(reinterpret_cast<const char*>(&levelInfo), sizeof(levelInfo));
-        oss.write(reinterpret_cast<const char*>(&channelInfo), sizeof(channelInfo));
+        append_raw(&levelInfo,   sizeof(levelInfo));
+        append_raw(&channelInfo, sizeof(channelInfo));
 
         // rangeMin
-        std::string minEnc = rangeMin.encode();
-        uint32_t min_len = static_cast<uint32_t>(minEnc.size());
-        oss.write(reinterpret_cast<const char*>(&min_len), sizeof(min_len));
-        oss.write(minEnc.data(), min_len);
+        append_raw(&min_len, sizeof(min_len));
+        if (min_len > 0) {
+            append_raw(minEnc.data(), min_len);
+        }
 
         // rangeMax
-        std::string maxEnc = rangeMax.encode();
-        uint32_t max_len = static_cast<uint32_t>(maxEnc.size());
-        oss.write(reinterpret_cast<const char*>(&max_len), sizeof(max_len));
-        oss.write(maxEnc.data(), max_len);
+        append_raw(&max_len, sizeof(max_len));
+        if (max_len > 0) {
+            append_raw(maxEnc.data(), max_len);
+        }
 
-        return oss.str();
+        return out;
     }
 
-    // --- Decode 從 string ---
-    static hostInfo decode(const std::string& buf) {
-        std::istringstream iss(buf);
-        hostInfo info;
+    // ================= Safe decode (推薦用這個) =================
+    //
+    // 回傳 true 表示成功；false 表示 buffer 壞掉或格式不對。
+    //
+    static bool decode(const std::string& buf, hostInfo& info) {
+        const char* data = buf.data();
+        const size_t len = buf.size();
+        size_t off = 0;
+
+        auto need = [&](size_t n) -> bool {
+            return off + n <= len;
+        };
+        auto read_raw = [&](void* dst, size_t n) -> bool {
+            if (!need(n)) return false;
+            std::memcpy(dst, data + off, n);
+            off += n;
+            return true;
+        };
+
+        info = hostInfo{};  // reset
 
         // lbn
-        iss.read(reinterpret_cast<char*>(&info.lbn), sizeof(info.lbn));
+        if (!read_raw(&info.lbn, sizeof(info.lbn))) {
+            return false;
+        }
 
-        // filename
-        uint32_t fname_len;
-        iss.read(reinterpret_cast<char*>(&fname_len), sizeof(fname_len));
-        info.filename.resize(fname_len);
-        iss.read(&info.filename[0], fname_len);
+        // filename length
+        uint32_t fname_len = 0;
+        if (!read_raw(&fname_len, sizeof(fname_len))) {
+            return false;
+        }
+        if (!need(fname_len)) {
+            return false;
+        }
+        if (fname_len > 0) {
+            info.filename.assign(data + off, fname_len);
+            off += fname_len;
+        } else {
+            info.filename.clear();
+        }
 
         // level + channel
-        iss.read(reinterpret_cast<char*>(&info.levelInfo), sizeof(info.levelInfo));
-        iss.read(reinterpret_cast<char*>(&info.channelInfo), sizeof(info.channelInfo));
+        if (!read_raw(&info.levelInfo,   sizeof(info.levelInfo)))   return false;
+        if (!read_raw(&info.channelInfo, sizeof(info.channelInfo))) return false;
 
         // rangeMin
-        uint32_t min_len;
-        iss.read(reinterpret_cast<char*>(&min_len), sizeof(min_len));
-        std::string minEnc(min_len, '\0');
-        iss.read(&minEnc[0], min_len);
-        info.rangeMin = Key::decode(minEnc.data());
+        uint32_t min_len = 0;
+        if (!read_raw(&min_len, sizeof(min_len))) return false;
+        if (!need(min_len)) return false;
+        if (min_len > 0) {
+            if (min_len < Key::ENCODED_SIZE) {
+                // 格式不對，長度太短
+                return false;
+            }
+            if (!Key::decode(data + off, min_len, info.rangeMin)) {
+                return false;
+            }
+            off += min_len;
+        } else {
+            info.rangeMin = Key{};
+        }
 
         // rangeMax
-        uint32_t max_len;
-        iss.read(reinterpret_cast<char*>(&max_len), sizeof(max_len));
-        std::string maxEnc(max_len, '\0');
-        iss.read(&maxEnc[0], max_len);
-        info.rangeMax = Key::decode(maxEnc.data());
+        uint32_t max_len = 0;
+        if (!read_raw(&max_len, sizeof(max_len))) return false;
+        if (!need(max_len)) return false;
+        if (max_len > 0) {
+            if (max_len < Key::ENCODED_SIZE) {
+                return false;
+            }
+            if (!Key::decode(data + off, max_len, info.rangeMax)) {
+                return false;
+            }
+            off += max_len;
+        } else {
+            info.rangeMax = Key{};
+        }
 
+        return true;
+    }
+
+    static hostInfo decodeOrThrow(const std::string& buf) {
+        hostInfo info;
+        if (!decode(buf, info)) {
+            throw std::runtime_error("hostInfo::decodeOrThrow: invalid buffer");
+        }
         return info;
     }
 };
+
+
 
 
 struct valueLogInfo{

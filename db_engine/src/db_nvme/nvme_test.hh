@@ -11,7 +11,7 @@ public:
     int nvme_erase_sstable(std::string) override ;
 
 
-
+    int nvme_compaction_io(const CompactionIOSimMeta& meta) override;
     // int nvme_ims_init() override;
     // int nvme_ims_close() override;
 

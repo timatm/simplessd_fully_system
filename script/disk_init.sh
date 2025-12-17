@@ -79,8 +79,12 @@ fi
 
 mount "$PART" "$MOUNT_POINT"
 
-echo "Copying $FILE_PATH to $MOUNT_POINT"
-cp -r "$FILE_PATH" "$MOUNT_POINT"
+echo "Copying $FILE_PATH to $MOUNT_POINT (skip log/)"
+rsync -av \
+    --exclude 'logs_ycsb/' \
+    --exclude 'logs/' \
+    --exclude 'test.img' \
+    "$FILE_PATH" "$MOUNT_POINT"
 
 echo "Done: $FILE_PATH copied to virtual disk at $MOUNT_POINT"
 
