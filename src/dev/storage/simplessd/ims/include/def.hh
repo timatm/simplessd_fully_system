@@ -116,7 +116,7 @@ struct AlignedBuf {
 };
 
 constexpr double alpha_inter_ = 1.0;
-constexpr double alpha_intra_ = 3.0;
+constexpr double alpha_intra_ = 10.0;
 
 // [DB setting end]
 

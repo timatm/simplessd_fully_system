@@ -127,6 +127,10 @@ private:
     AlignedBuf keyHashPacking(std::queue<std::string> sortedLsit) const;
     AlignedBuf keyRangePacking(std::queue<std::string> sortedLsit) const;
 
+    // sstable_mgr.hh private 區塊加上：
+    AlignedBuf idxBloomDataPacking(const SkipList<Record, RecordComparator>& skiplist) const;
+    AlignedBuf idxBloomDataPacking(std::queue<std::string> sortedList) const;
+
     void  notify_done(const sstable_info& info) noexcept;
     void  notify_fail(const sstable_info& info, int err) noexcept;
     PackingType packing_type_ = kPackingType; 

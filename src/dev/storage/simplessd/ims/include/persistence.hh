@@ -6,6 +6,9 @@
 #include "def.hh"
 #include "disk.hh"
 #if RUNTYPE
+#include "util/disk.hh"
+#endif
+#if RUNTYPE
 namespace SimpleSSD {
     class Disk;      // forward 宣告，告訴編譯器有這個名字
 }
@@ -22,11 +25,11 @@ public:
     Disk* pDisk_ = nullptr;
 #endif
 #if RUNTYPE
-    Persistence(SimpleSSD::Disk* disk, super_page* sp_old, super_page* sp_new, Tree& tree)
-        : pDisk_(disk), sp_ptr_old_(sp_old), sp_ptr_new_(sp_new), tree_(tree) {}
+    Persistence(SimpleSSD::Disk* disk, super_page* sp_, Tree& tree)
+        : pDisk_(disk), sp_ptr_(sp_), tree_(tree) {}
 #else
-    Persistence(Disk* disk, super_page* sp_old, super_page* sp_new, Tree& tree)
-        : pDisk_(disk), sp_ptr_old_(sp_old), sp_ptr_new_(sp_new), tree_(tree) {}
+    Persistence(Disk* disk, super_page* sp_ , Tree& tree)
+        : pDisk_(disk), sp_ptr_(sp_), tree_(tree) {}
 #endif
     int flushMappingTable(const std::unordered_map<std::string, uint64_t>& mappingTable);
     int readMappingTable(uint64_t lpn, uint8_t* buffer, size_t size);
@@ -39,8 +42,7 @@ public:
 
 private:
 
-    super_page* sp_ptr_old_ = nullptr;
-    super_page* sp_ptr_new_ = nullptr;
+    super_page* sp_ptr_ = nullptr;
     Tree& tree_;
 };
 

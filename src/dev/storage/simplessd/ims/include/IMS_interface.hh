@@ -97,7 +97,7 @@ public:
     Persistence* get_persistenceManager() {return persistenceManager_.get() ;}
     Log* get_logManager() {return logManager_.get() ;}
     LSMTree* get_lsmTree() {return lsmTree_.get() ;}
-    super_page* get_oldSuperPage() {return sp_ptr_old_;}
+    super_page* get_superPage() {return sp_ptr_;}
     LBNPool* get_lbnpool() {return lbnPool_.get();}
 
     void dump_mapping(){mappingTable_->dump_mapping(); }
@@ -106,7 +106,7 @@ public:
     void dump_lsm_tree(){tree_->dump();}
     void dump_all(){
         dump_mapping();
-        dump_lbn_pool();
+        // dump_lbn_pool();
         dump_log_mannger();
         dump_lsm_tree();
     }
@@ -132,8 +132,7 @@ private:
     std::unique_ptr<Persistence> persistenceManager_;
     std::unique_ptr<LBNPool> lbnPool_;
     std::unique_ptr<LSMTree> lsmTree_;
-    super_page* sp_ptr_old_ = nullptr;
-    super_page* sp_ptr_new_ = nullptr;
+    super_page* sp_ptr_ = nullptr;
     bool closed_ = false;
     uint32_t searh_parallel_block_num = 0;
     uint32_t compaction_parallel_block_num = 0;

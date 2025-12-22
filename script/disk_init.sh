@@ -79,6 +79,8 @@ fi
 
 mount "$PART" "$MOUNT_POINT"
 
+echo "Cleaning mount point $MOUNT_POINT"
+rm -rf "$MOUNT_POINT"/*
 echo "Copying $FILE_PATH to $MOUNT_POINT (skip log/)"
 rsync -av \
     --exclude 'logs_ycsb/' \

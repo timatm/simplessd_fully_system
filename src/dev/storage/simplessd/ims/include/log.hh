@@ -25,11 +25,11 @@
 
 class Log {
 public:
-    Log(Persistence& persistence, LBNPool& pool, super_page* sp_old, super_page* sp_new)
-        : persistence_(persistence), lbnPool_(pool), sp_old_(sp_old), sp_new_(sp_new) {
-            currentLogLBN = sp_old_->currentLogLBN;
-            nextLogLBN = sp_old_->nextLogLBN;
-            logOffset = sp_old_->logOffset;
+    Log(Persistence& persistence, LBNPool& pool, super_page* sp_)
+        : persistence_(persistence), lbnPool_(pool), sp_ptr_(sp_) {
+            currentLogLBN = sp_->currentLogLBN;
+            nextLogLBN = sp_->nextLogLBN;
+            logOffset = sp_->logOffset;
         }
 
     int init_logRecordList(uint64_t logStoreLBN, uint64_t page_num);
@@ -48,8 +48,7 @@ public:
 private:
     Persistence& persistence_;
     LBNPool& lbnPool_;
-    super_page* sp_old_;
-    super_page* sp_new_;
+    super_page* sp_ptr_;
 };
 
 #endif // __LOG_HH__

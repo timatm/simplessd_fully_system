@@ -19,9 +19,9 @@ void IMS_interface::attachDisk(SimpleSSD::Disk* d) {
         persistenceManager_->pDisk_ = d;
     } else {
         // 若你打算在 RUNTYPE=1 不在建構子裡建 Persistence，也可以在這邊建
-        persistenceManager_ = std::make_unique<Persistence>(disk_, sp_ptr_old_, sp_ptr_new_, *tree_);
+        persistenceManager_ = std::make_unique<Persistence>(disk_, sp_ptr_, *tree_);
         mappingTable_ = std::make_unique<Mapping>(*persistenceManager_, *lbnPool_, *tree_);
-        logManager_   = std::make_unique<Log>(*persistenceManager_, *lbnPool_, sp_ptr_old_, sp_ptr_new_);
+        logManager_   = std::make_unique<Log>(*persistenceManager_, *lbnPool_, sp_ptr_);
     }
 }
 #endif
@@ -143,8 +143,7 @@ int IMS_interface::reset_IMS_buffer() {
 IMS_interface::IMS_interface() {
     PrintBuildConfig();
     pr_debug("Constructing IMS_interface...");
-    sp_ptr_old_ = new super_page(0, 1, 2);  
-    sp_ptr_new_ = new super_page(0, 1, 2);
+    sp_ptr_ = new super_page(0, 1, 2);  
     lbnPool_ = std::make_unique<LBNPool>();
     tree_ = std::make_shared<Tree>();
     #if RUNTYPE
@@ -154,14 +153,14 @@ IMS_interface::IMS_interface() {
 
     // persistenceManager_ = std::make_unique<Persistence>(&disk_, sp_ptr_old_, sp_ptr_new_, *tree_);
     #if RUNTYPE
-        persistenceManager_ = std::make_unique<Persistence>(disk_, sp_ptr_old_, sp_ptr_new_, *tree_);
+        persistenceManager_ = std::make_unique<Persistence>(disk_, sp_ptr_, *tree_);
     #else
-        persistenceManager_ = std::make_unique<Persistence>(&disk_, sp_ptr_old_, sp_ptr_new_, *tree_);
+        persistenceManager_ = std::make_unique<Persistence>(&disk_, sp_ptr_ , *tree_);
     #endif
 
     mappingTable_ = std::make_unique<Mapping>(*persistenceManager_, *lbnPool_, *tree_);
 
-    logManager_ = std::make_unique<Log>(*persistenceManager_, *lbnPool_, sp_ptr_old_, sp_ptr_new_);
+    logManager_ = std::make_unique<Log>(*persistenceManager_, *lbnPool_, sp_ptr_);
 
     lsmTree_ = std::make_unique<LSMTree>(tree_);
     buffer_size_ = 0;
@@ -175,6 +174,7 @@ IMS_interface::IMS_interface() {
 }
 
 IMS_interface::~IMS_interface() {
+    pr_info("IMS close in destructor");
     try {
         int err = close_IMS();
         if (err != OPERATION_SUCCESS) {
@@ -187,8 +187,7 @@ IMS_interface::~IMS_interface() {
     }
     dump_lsm_tree();
     print_result();
-    delete sp_ptr_old_;
-    delete sp_ptr_new_;
+    delete sp_ptr_;
 }
 
 
@@ -490,18 +489,18 @@ int IMS_interface::allocate_block(uint64_t *l) {
 int IMS_interface::rebuild_super_page() {
     pr_debug("Try to initialize IMS interface with new super page");
 
-    sp_ptr_old_->magic = MAGIC;
-    sp_ptr_old_->mapping_page_num = 0;
-    sp_ptr_old_->log_page_num = 0;
-    sp_ptr_old_->currentLogLBN = lbnPool_->RRpolicy();
-    sp_ptr_old_->nextLogLBN = lbnPool_->RRpolicy();
-    get_logManager()->insert_logRecord(sp_ptr_old_->currentLogLBN);
-    get_logManager()->insert_logRecord(sp_ptr_old_->nextLogLBN);
-    sp_ptr_old_->logOffset = 0;
-    sp_ptr_old_->usedLBN_num = 0;
-    sp_ptr_old_->global_sequence = 0;
-    sp_ptr_old_->sstable_sequence = 0;
-    sp_ptr_old_->lastUsedChannel = 0;
+    sp_ptr_->magic = MAGIC;
+    sp_ptr_->mapping_page_num = 0;
+    sp_ptr_->log_page_num = 0;
+    sp_ptr_->currentLogLBN = lbnPool_->RRpolicy();
+    sp_ptr_->nextLogLBN = lbnPool_->RRpolicy();
+    get_logManager()->insert_logRecord(sp_ptr_->currentLogLBN);
+    get_logManager()->insert_logRecord(sp_ptr_->nextLogLBN);
+    sp_ptr_->logOffset = 0;
+    sp_ptr_->usedLBN_num = 0;
+    sp_ptr_->global_sequence = 0;
+    sp_ptr_->sstable_sequence = 0;
+    sp_ptr_->lastUsedChannel = 0;
     uint8_t lastUsedChannel;
     lbnPool_->set_lastUsedChannel(0);
     return OPERATION_SUCCESS;
@@ -567,27 +566,27 @@ int IMS_interface::init_IMS() {
     if (sp->magic != MAGIC) {
         pr_info("Magic number mismatch, this disk maybe is new or not IMS disk");
         usedLBN = lbnPool_->init_lbn_pool(used_lbns);
-        lbnPool_->remove_freeLBNList(sp_ptr_old_->mapping_store);
-        lbnPool_->remove_freeLBNList(sp_ptr_old_->log_store);
+        lbnPool_->remove_freeLBNList(sp_ptr_->mapping_store);
+        lbnPool_->remove_freeLBNList(sp_ptr_->log_store);
         lbnPool_->remove_freeLBNList(SUPER_BLOCK);
         rebuild_super_page();
     } 
     else {
         pr_info("Super page magic number is correct, initializing IMS interface");
 
-        *sp_ptr_old_ = *sp;
-        *sp_ptr_old_ = *sp;
-        lbnPool_->set_lastUsedChannel(sp_ptr_old_->lastUsedChannel);
-        sp_ptr_old_->dump();
-        err = mappingTable_->init_mapping_table(sp_ptr_old_->mapping_store, sp_ptr_old_->mapping_page_num);
+        *sp_ptr_ = *sp;
+        *sp_ptr_ = *sp;
+        lbnPool_->set_lastUsedChannel(sp_ptr_->lastUsedChannel);
+        sp_ptr_->dump();
+        err = mappingTable_->init_mapping_table(sp_ptr_->mapping_store, sp_ptr_->mapping_page_num);
         if (err != OPERATION_SUCCESS) {
             pr_error("Initialize mapping table failed");
             free(buffer);
             return OPERATION_FAILURE;
         }
 
-        pr_info("InitLogRecordList: logStoreLBN = %lu", sp_ptr_old_->log_store);
-        err = logManager_->init_logRecordList(sp_ptr_old_->log_store, sp_ptr_old_->log_page_num);
+        pr_info("InitLogRecordList: logStoreLBN = %lu", sp_ptr_->log_store);
+        err = logManager_->init_logRecordList(sp_ptr_->log_store, sp_ptr_->log_page_num);
         if (err != OPERATION_SUCCESS) {
             pr_error("Initialize log record list failed");
             free(buffer);
@@ -603,19 +602,19 @@ int IMS_interface::init_IMS() {
             used_lbns.push_back(lbn);
         }
         usedLBN = lbnPool_->init_lbn_pool(used_lbns);
-        lbnPool_->remove_freeLBNList(sp_ptr_old_->mapping_store);
-        lbnPool_->remove_freeLBNList(sp_ptr_old_->log_store);
+        lbnPool_->remove_freeLBNList(sp_ptr_->mapping_store);
+        lbnPool_->remove_freeLBNList(sp_ptr_->log_store);
         lbnPool_->remove_freeLBNList(SUPER_BLOCK);
     }
     
-    if ( (usedLBN) != sp_ptr_old_->usedLBN_num) {
+    if ( (usedLBN) != sp_ptr_->usedLBN_num) {
         pr_error("Initialize LBN pool failed");
         free(buffer);
         return OPERATION_FAILURE;
     }
-    logManager_->currentLogLBN = sp_ptr_old_->currentLogLBN;
-    logManager_->nextLogLBN = sp_ptr_old_->nextLogLBN;
-    logManager_->logOffset = sp_ptr_old_->logOffset;
+    logManager_->currentLogLBN = sp_ptr_->currentLogLBN;
+    logManager_->nextLogLBN = sp_ptr_->nextLogLBN;
+    logManager_->logOffset = sp_ptr_->logOffset;
 
     free(buffer);
     pr_info("Initialize LBN pool success");
@@ -625,10 +624,10 @@ int IMS_interface::init_IMS() {
 }
 
 int IMS_interface::close_IMS() {
-    if (closed_) {
-        pr_info("IMS_interface already closed, skip close_IMS");
-        return OPERATION_SUCCESS;
-    }
+    // if (closed_) {
+    //     pr_info("IMS_interface already closed, skip close_IMS");
+    //     return OPERATION_SUCCESS;
+    // }
     int err = OPERATION_FAILURE;
     pr_info("Close IMS interface");
     auto mappingTable = mappingTable_->get_table();
@@ -655,20 +654,20 @@ int IMS_interface::close_IMS() {
 
     sp->magic = MAGIC;
     
-    sp->mapping_page_num = sp_ptr_new_->mapping_page_num;
-    sp->log_page_num     = sp_ptr_new_->log_page_num;
+    sp->mapping_page_num = sp_ptr_->mapping_page_num;
+    sp->log_page_num     = sp_ptr_->log_page_num;
     sp->currentLogLBN    = logManager_->currentLogLBN;
     sp->nextLogLBN       = logManager_->nextLogLBN;
     // sp->logOffset        = logManager_->logOffset;
 
-    sp->log_store           = sp_ptr_old_->log_store;
-    sp->mapping_store       = sp_ptr_old_->mapping_store;
+    sp->log_store           = sp_ptr_->log_store;
+    sp->mapping_store       = sp_ptr_->mapping_store;
 
-    sp->global_sequence     = sp_ptr_old_->global_sequence;
-    sp->sstable_sequence    = sp_ptr_old_->sstable_sequence;
-    sp->logOffset           = sp_ptr_old_->logOffset;
-    sp->byteOffset          = sp_ptr_old_->byteOffset;
-    sp->firstBlockOffset    = sp_ptr_old_->firstBlockOffset;
+    sp->global_sequence     = sp_ptr_->global_sequence;
+    sp->sstable_sequence    = sp_ptr_->sstable_sequence;
+    sp->logOffset           = sp_ptr_->logOffset;
+    sp->byteOffset          = sp_ptr_->byteOffset;
+    sp->firstBlockOffset    = sp_ptr_->firstBlockOffset;
 
 
     size_t total_used_lbn = 0;
@@ -700,15 +699,14 @@ int IMS_interface::close_IMS() {
     }
 
     // free IMS buffer
-    free_device_buffer();
+    // free_device_buffer();
     free(buffer);
     // lsmTree_->clear();             
-    lbnPool_->clear();             
-    mappingTable_->clear();      
-    logManager_->clear();        
-    reset_superPage(sp_ptr_old_);
-    reset_superPage(sp_ptr_new_);
-    closed_ = true;
+    // lbnPool_->clear();             
+    // mappingTable_->clear();      
+    // logManager_->clear();        
+    // reset_superPage(sp_ptr_);
+    // closed_ = true;
     return OPERATION_SUCCESS;
 }
 int IMS_interface::init_DB(uint8_t *buffer){
@@ -833,11 +831,11 @@ int IMS_interface::open_DB(uint32_t *datalen) {
     // init_IMS();
     info.current_lbn  = get_logManager()->currentLogLBN;
     info.next_lbn     = get_logManager()->nextLogLBN;
-    info.page_offset  = get_oldSuperPage()->logOffset;
-    info.byte_offset  = get_oldSuperPage()->byteOffset;
-    info.first_block_offset = get_oldSuperPage()->firstBlockOffset;
-    info.global_seq   = get_oldSuperPage()->global_sequence;
-    info.sstable_seq  = get_oldSuperPage()->sstable_sequence;
+    info.page_offset  = get_superPage()->logOffset;
+    info.byte_offset  = get_superPage()->byteOffset;
+    info.first_block_offset = get_superPage()->firstBlockOffset;
+    info.global_seq   = get_superPage()->global_sequence;
+    info.sstable_seq  = get_superPage()->sstable_sequence;
     info.log_list     = get_logManager()->encode();
     info.node_list    = get_lsmTree()->encode();
 
@@ -860,7 +858,7 @@ int IMS_interface::close_DB(uint8_t *host_buffer, size_t size){
     pr_info("Database is closing ,dump dabase information");
     dump_all();
     if (!host_buffer || size == 0) return -2;
-    if (!sp_ptr_old_) {
+    if (!sp_ptr_) {
         pr_error("close_DB: super_page(old) not initialized");
         return -5;
     }
@@ -870,11 +868,11 @@ int IMS_interface::close_DB(uint8_t *host_buffer, size_t size){
         return -6;
     }
 
-    sp_ptr_old_->global_sequence = info.global_seq;
-    sp_ptr_old_->sstable_sequence = info.sstable_seq;
-    sp_ptr_old_->logOffset = static_cast<uint64_t>(info.page_offset);
-    sp_ptr_old_->byteOffset = static_cast<uint64_t>(info.byte_offset);
-    sp_ptr_old_->firstBlockOffset = static_cast<uint64_t>(info.first_block_offset);
+    sp_ptr_->global_sequence = info.global_seq;
+    sp_ptr_->sstable_sequence = info.sstable_seq;
+    sp_ptr_->logOffset = static_cast<uint64_t>(info.page_offset);
+    sp_ptr_->byteOffset = static_cast<uint64_t>(info.byte_offset);
+    sp_ptr_->firstBlockOffset = static_cast<uint64_t>(info.first_block_offset);
 #if RUNTYPE == 1
     int err = close_IMS();
     if(err == OPERATION_FAILURE){

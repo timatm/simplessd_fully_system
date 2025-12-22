@@ -43,9 +43,6 @@ std::optional<Record> MemTable::get_record(const std::string& user_key) const {
     iter.Seek(lookup_rec);
     if (iter.Valid() && iter.record().internal_key.UserKey() == user_key) {
         const auto& record = iter.record();
-        if (static_cast<ValueType>(record.internal_key.info.type) == ValueType::kTypeDeletion) {
-            return std::nullopt;
-        }
         return record;
     }
     return std::nullopt;
@@ -84,6 +81,13 @@ bool MemTable::memTableIsFull() {
                                [](uint32_t count) { return count >= IMS_PAGE_NUM; });
         case static_cast<int>(PackingType::kKeyRange):
             return node_count_ >= SLOT_NUM_PER_BLOCK;
+        case static_cast<int>(PackingType::kIdxBloomData): {
+            const uint32_t meta_pages = static_cast<uint32_t>(IDX_BLOOM_META_PAGES);
+            const uint32_t slots_per_page = IMS_PAGE_SIZE / sizeof(InternalKey);
+            const uint32_t data_pages_cap = IMS_PAGE_NUM - meta_pages;
+            const uint32_t max_entries = data_pages_cap * slots_per_page;
+            return node_count_ >= max_entries;
+        }
         default:
             return false;
     }

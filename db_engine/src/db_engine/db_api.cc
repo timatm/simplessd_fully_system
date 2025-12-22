@@ -12,6 +12,129 @@
 #include "compaction.hh"
 #include "range_query.hh"
 #include <algorithm>
+
+
+
+namespace {
+using namespace sst_v2;
+
+static inline uint64_t FNV1aHash64(const void* ptr, size_t len) {
+    const auto* p = static_cast<const unsigned char*>(ptr);
+    uint64_t hash = 14695981039346656037ull;
+    const uint64_t prime = 1099511628211ull;
+    for (size_t i = 0; i < len; ++i) {
+        hash ^= static_cast<uint64_t>(p[i]);
+        hash *= prime;
+    }
+    return hash;
+}
+
+static inline uint64_t Mix64(uint64_t x) {
+    x += 0x9e3779b97f4a7c15ull;
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ull;
+    x = (x ^ (x >> 27)) * 0x94d049bb133111ebull;
+    return x ^ (x >> 31);
+}
+
+static inline bool BloomMayContain(const uint8_t* bloom,
+                                  uint32_t bloom_bytes,
+                                  const std::string& user_key,
+                                  uint8_t k) {
+    // bloom 不可用：保守回 true（當作“可能有”）
+    if (bloom_bytes == 0 || k == 0) return true;
+
+    const uint64_t m = static_cast<uint64_t>(bloom_bytes) * 8ull;
+    const uint64_t h1 = FNV1aHash64(user_key.data(), user_key.size());
+    uint64_t h2 = Mix64(h1);
+    if (h2 == 0) h2 = 0x9e3779b97f4a7c15ull;
+
+    for (uint8_t i = 0; i < k; ++i) {
+        const uint64_t bit = (h1 + static_cast<uint64_t>(i) * h2) % m;
+        const uint32_t byte_i = static_cast<uint32_t>(bit >> 3);
+        const uint32_t bit_i  = static_cast<uint32_t>(bit & 7);
+        if ((bloom[byte_i] & static_cast<uint8_t>(1u << bit_i)) == 0) return false;
+    }
+    return true;
+}
+
+// 用 index 找到可能的 page，再用 bloom slice 檢查，最後掃那一頁找 key
+static bool IdxBloomLookup(const char* buf,
+                           const std::string& user_key,
+                           InternalKey& found) {
+    SSTableSuperBlockV1 sb{};
+    std::memcpy(&sb, buf, sizeof(sb));
+
+    if (!CheckSuperBlock(sb)) return false;
+    if (sb.format != kFormatIdxBloomData) return false;
+
+    const uint32_t idx_cnt = sb.index_entry_count;
+    if (idx_cnt == 0) return false;  // 空表
+
+    const auto* index = reinterpret_cast<const SSTableIndexEntryV1*>(buf + sb.index_off);
+
+    // binary search：找第一個 max_key >= user_key 的 page
+    uint32_t lo = 0, hi = idx_cnt;
+    while (lo < hi) {
+        uint32_t mid = (lo + hi) / 2;
+
+        std::string maxk(reinterpret_cast<const char*>(index[mid].key),
+                        static_cast<size_t>(index[mid].key_size));
+
+        if (maxk.compare(user_key) < 0) lo = mid + 1;
+        else hi = mid;
+    }
+
+    if (lo >= idx_cnt) return false;
+
+    const SSTableIndexEntryV1& ie = index[lo];
+    const uint16_t page_id = ie.page_id;
+    const uint16_t valid_slots = ie.valid_slots;
+    if (valid_slots == 0) return false;
+
+    // bloom slice check（negative → 直接排除整個 sstable）
+    if (sb.filter_bytes_per_page > 0 && sb.bloom_bytes > 0) {
+        const uint32_t slice_off =
+            sb.bloom_off + static_cast<uint32_t>(page_id) * sb.filter_bytes_per_page;
+        const uint32_t slice_end = slice_off + sb.filter_bytes_per_page;
+
+        // 壞資料保守：不要 false negative，寧可當作 “可能有”
+        if (slice_end <= sb.bloom_off + sb.bloom_bytes) {
+            const uint8_t* slice = reinterpret_cast<const uint8_t*>(buf + slice_off);
+            if (!BloomMayContain(slice, sb.filter_bytes_per_page, user_key, sb.bloom_k)) {
+                return false; // ✅ bloom negative：一定不在
+            }
+        }
+    }
+
+    // 掃那一頁的 slots（最多 256 個）
+    const uint32_t slot_size = sizeof(InternalKey);
+    const uint32_t slots_per_page = sb.page_size / slot_size;
+    if (valid_slots > slots_per_page) return false;
+
+    const uint32_t page_off = sb.data_off + static_cast<uint32_t>(page_id) * sb.page_size;
+    if (page_off + static_cast<uint32_t>(valid_slots) * slot_size > sb.block_size) return false;
+
+    bool hit = false;
+    InternalKey best{};
+
+    for (uint16_t s = 0; s < valid_slots; ++s) {
+        const char* p = buf + page_off + static_cast<uint32_t>(s) * slot_size;
+        InternalKey ik = InternalKey::Decode(std::string(p, static_cast<size_t>(slot_size)));
+        if (ik.UserKey() == user_key) {
+            if (!hit || ik.info.seq > best.info.seq) {
+                best = ik;
+                hit = true;
+            }
+        }
+    }
+
+    if (!hit) return false;
+    found = best;
+    return true;
+}
+} // namespace
+
+
 API::API(){
     pr_info("API initailizing ...");
     tree_ = std::make_shared<Tree>();
@@ -119,12 +242,15 @@ Status API::open() {
     int err = nvme_->nvme_open_DB(data_len);
     if (err != OPERATION_SUCCESS) return Status::IOError("nvme_open_DB failed");
     if (data_len == 0) return Status::Corruption("open_DB returned data_len=0");
-    void* buffer = aligned_alloc(4096, data_len);
-    if (!buffer) {
+    size_t alloc_sz = (data_len + 4095) & ~size_t(4095);
+    void* buffer = nullptr;
+    if (posix_memalign(&buffer, 4096, alloc_sz) != 0 || !buffer) {
         return Status::IOError("Failed to allocate buffer for open operation");
     }
-    std::memset(buffer, 0, data_len);
+    memset(buffer, 0, alloc_sz);
+
     err = nvme_->nvme_read_metadata(reinterpret_cast<char*>(buffer), data_len);
+
     if(err == OPERATION_FAILURE){
         free(buffer);
         pr_error("IMS nvme read metadata fail");
@@ -340,6 +466,8 @@ Status API::delete_key(std::string key ,std::string value){
     return Status::OK();
 }
 
+// PACKING_TYPE != kIdxBloomData(3)
+#if PACKING_TYPE != 3 
 Status API::get(std::string key,std::string& value){
     if(key.empty()){
         return Status::IOError("Key string is empty");
@@ -399,7 +527,87 @@ Status API::get(std::string key,std::string& value){
     return Status::OK();
 }
 
+#else
+Status API::get(std::string key, std::string& value) {
+    if (key.empty()) return Status::IOError("Key string is empty");
 
+    // 1) memtable（要能辨識 tombstone）
+    if (memtable_) {
+        auto r = memtable_->get_record(key);
+        if (r.has_value()) {
+            if (r->internal_key.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion))
+                return Status::NotFound("The key has been deleted");
+            value = r->value;
+            return Status::OK();
+        }
+    }
+    if (immutable_memtable_) {
+        auto r = immutable_memtable_->get_record(key);
+        if (r.has_value()) {
+            if (r->internal_key.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion))
+                return Status::NotFound("The key has been deleted");
+            value = r->value;
+            return Status::OK();
+        }
+    }
+
+    // 2) SSTable 逐個往下找（維持你原本方式）
+    auto sstables = lsmTree_->search_key(Key(key));
+    char* buffer = (char*)allocateAligned(BLOCK_SIZE);
+
+    while (!sstables.empty()) {
+        auto sstable = sstables.front();
+        sstables.pop();
+
+        sstableManager_->readSSTable(sstable->filename, buffer);
+        getSSTable()->waitAllTasksDone();
+
+        if (packing_ == PackingType::kIdxBloomData) {
+            InternalKey ik{};
+            if (!IdxBloomLookup(buffer, key, ik)) {
+                continue;  // ✅ bloom negative / page 無此 key：直接換下一個 sstable
+            }
+
+            if (ik.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion)) {
+                free(buffer);
+                return Status::NotFound("The key has been deleted");
+            }
+
+            auto rec = logManager_->readLog(ik.value_ptr.lpn, ik.value_ptr.offset);
+            if (!rec.has_value()) {
+                free(buffer);
+                return Status::IOError("Failed to read log for key");
+            }
+            value = rec->value;
+            free(buffer);
+            return Status::OK();
+        }
+
+        // 其他 packing：走你原本 parse_sstable() 流程
+        InternalKey search_key(key);
+        auto keys = parse_sstable(buffer);
+        auto it = keys.find(search_key);
+        if (it != keys.end()) {
+            if (it->info.type == static_cast<uint8_t>(ValueType::kTypeDeletion)) {
+                free(buffer);
+                return Status::NotFound("The key has been deleted");
+            }
+            auto rec = logManager_->readLog(it->value_ptr.lpn, it->value_ptr.offset);
+            if (!rec.has_value()) {
+                free(buffer);
+                return Status::IOError("Failed to read log for key");
+            }
+            value = rec->value;
+            free(buffer);
+            return Status::OK();
+        }
+    }
+
+    free(buffer);
+    return Status::NotFound("The key isn't in the DB");
+}
+
+#endif
 
 Status API::get(std::string key,Record& rec){
     if(key.empty()){
@@ -517,36 +725,74 @@ void API::dump_log_manager(){
 void API::dump_all(){
     dump_memtable();
     dump_lsmtree();
-    dump_log_manager();
+    // dump_log_manager();
     std::cout << "All components dumped successfully." << std::endl;
 };
 
 
 
 
-std::set<std::string> API::read_key_range(const std::string& filename){
-    if(filename.empty()){
-        throw std::invalid_argument("Filename cannot be empty");
+static bool is_all_ff(const unsigned char* p, size_t n) {
+    for (size_t i = 0; i < n; ++i) {
+        if (p[i] != 0xFF) return false;
     }
-    if(getLSMTree()->find_node(filename) == nullptr){
-        throw std::runtime_error("SSTable not found in LSMTree: " + filename);
+    return true;
+}
+
+std::optional<std::set<std::string>> API::read_key_range(const std::string& filename) {
+    if (filename.empty()) {
+        pr_error("read_key_range: filename is empty");
+        return std::nullopt;
     }
-    char* buffer = static_cast<char*>(std::aligned_alloc(4096,IMS_PAGE_SIZE));
-    if (!buffer) {
-        throw std::runtime_error("Failed to allocate buffer for reading key range");
+
+    void* p = nullptr;
+    int rc = posix_memalign(&p, 4096, IMS_PAGE_SIZE);
+    if (rc != 0 || p == nullptr) {
+        pr_error("read_key_range: posix_memalign failed rc=%d", rc);
+        return std::nullopt;
     }
+
+    char* buffer = reinterpret_cast<char*>(p);
+    std::memset(buffer, 0xFF, IMS_PAGE_SIZE);
+
+    // ⚠️ 關鍵：用 err != 0 判斷（適用於 passthru 回傳 errno / status code 的情況）
     int err = nvme_->nvme_read_ssKeyRange(filename, buffer);
-    if(err == COMMAND_FAILED){
+    if (err != 0) {
+        pr_error("read_key_range: nvme_read_ssKeyRange failed for %s, err=%d",
+                 filename.c_str(), err);
         free(buffer);
-        throw std::runtime_error("Failed to read SSTable: " + filename);
+        return std::nullopt;
     }
+
+    if (is_all_ff(reinterpret_cast<unsigned char*>(buffer), IMS_PAGE_SIZE)) {
+        pr_error("read_key_range: page is ALL-FF (100%%) for SSTable: %s", filename.c_str());
+        free(buffer);
+        return std::nullopt;
+    }
+    
     auto keys = parse_sstable_page(buffer);
-    std::set<std::string> key_set;
-    for(const auto& key : keys){
-        key_set.insert(key.UserKey());
-    }
     free(buffer);
-    return key_set;
+
+    if (keys.empty()) {
+        pr_error("read_key_range: parsed keys empty for SSTable: %s (data not InternalKey?)",
+                 filename.c_str());
+        return std::nullopt;
+    }
+
+    std::set<std::string> user_key_range;
+    for (const auto& ik : keys) {
+        // 更保守：空 key/不合法 key 直接跳過
+        if (ik.key.key_size == 0) continue;
+        if (!ik.IsValid()) continue;
+        user_key_range.insert(ik.UserKey());
+    }
+
+    if (user_key_range.empty()) {
+        pr_error("read_key_range: user_key_range empty after filtering for %s", filename.c_str());
+        return std::nullopt;
+    }
+
+    return user_key_range;
 }
 
 
@@ -622,25 +868,22 @@ SearchPatternH API::generate_SearchPatternH(const std::string& filename,
 }
 
 
-
 std::set<InternalKey ,SetComparator> API::parse_sstable_page(char* buffer) {
     size_t offset = 0;
     std::set<InternalKey ,SetComparator> keys;
 
     while (offset + sizeof(InternalKey) <= IMS_PAGE_SIZE) {
-        InternalKey key;
-        // std::string buf(buffer ,BLOCK_SIZE);
-        key = InternalKey::Decode( (buffer + offset));
+        InternalKey key = InternalKey::Decode(buffer + offset);
         offset += sizeof(InternalKey);
-        if(key.info.type == INVALID_KEY_TYPE){
-            continue;
-        }
+
+        if (key.key.key_size == 0) continue;                 // 空槽
+        if (!key.IsValid()) continue;                        // 防止 key_size=0xFF 這種
+        if (key.info.type == INVALID_KEY_TYPE) continue;     // 你的原本判斷
+
         keys.insert(key);
     }
-
     return keys;
 }
-
 
 #if (SEARCH_PATTERN == 0)
 Status API::search(std::string key ,std::string& value){
@@ -685,17 +928,27 @@ Status API::search(std::string key ,std::string& value){
                 pattern_info.slot_index = HashModN(internalKey, SLOT_NUM_PER_PAGE); 
                 break;
             }
-            case PackingType::kKeyRange:{
-                auto key_range = keyRangeCache_->get(sstable->filename);
-                if(key_range == std::nullopt){
-                    key_range = read_key_range(sstable->filename);
-                    if(!key_range.has_value()){
-                        pr_error("Key not found in SSTable");
-                        return Status::NotFound("Key not found in SSTable: " + sstable->filename);
+            case PackingType::kKeyRange: {
+                try {
+                    auto key_range = keyRangeCache_->get(sstable->filename);
+
+                    if (!key_range.has_value() || key_range->empty()) {
+                        auto fresh = read_key_range(sstable->filename);
+                        if (!fresh.has_value() || fresh->empty()) {
+                            pr_error("KeyRange is empty after read: %s", sstable->filename.c_str());
+                            return Status::Corruption("KeyRange empty: " + sstable->filename);
+                        }
+
+                        keyRangeCache_->put(sstable->filename, *fresh);
+                        key_range = std::move(fresh);
                     }
-                    keyRangeCache_->put(sstable->filename, *key_range);
+
+                    pattern_info = generate_SearchPatternD(sstable->filename, userKey, *key_range);
+                } catch (const std::exception& e) {
+                    pr_error("Build KeyRange pattern failed for %s: %s",
+                            sstable->filename.c_str(), e.what());
+                    return Status::IOError(std::string("Build KeyRange pattern failed: ") + e.what());
                 }
-                pattern_info = generate_SearchPatternD(sstable->filename, userKey, *key_range);
                 break;
             }
             default:
@@ -776,16 +1029,27 @@ Status API::search(std::string key ,std::string& value){
                 break;
             }
                 
-            case PackingType::kKeyRange:{
-                auto key_range = keyRangeCache_->get(sstable->filename);
-                if(key_range == std::nullopt){
-                    key_range = read_key_range(sstable->filename);
-                    if(!key_range.has_value()){
-                        return Status::NotFound("Key not found in SSTable: " + sstable->filename);
+            case PackingType::kKeyRange: {
+                try {
+                    auto key_range = keyRangeCache_->get(sstable->filename);
+
+                    if (!key_range.has_value() || key_range->empty()) {
+                        std::set<std::string> fresh = read_key_range(sstable->filename);
+                        if (fresh.empty()) {
+                            pr_error("KeyRange is empty after read: %s", sstable->filename.c_str());
+                            return Status::Corruption("KeyRange empty: " + sstable->filename);
+                        }
+
+                        keyRangeCache_->put(sstable->filename, fresh);
+                        key_range = std::move(fresh);
                     }
-                    keyRangeCache_->put(sstable->filename, *key_range);
+
+                    pattern_info = generate_SearchPatternD(sstable->filename, userKey, *key_range);
+                } catch (const std::exception& e) {
+                    pr_error("Build KeyRange pattern failed for %s: %s",
+                            sstable->filename.c_str(), e.what());
+                    return Status::IOError(std::string("Build KeyRange pattern failed: ") + e.what());
                 }
-                pattern_info = generate_SearchPatternH(sstable->filename, userKey, *key_range);
                 break;
             }
             default:

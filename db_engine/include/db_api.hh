@@ -12,6 +12,8 @@
 #include "options.hh"
 #include "nvme_interface.hh"
 #include "read_cache.hh"
+#include "sstable_format_idxbf.hh"
+
 // Forward declaration of MemTable
 class MemTable;
 
@@ -51,7 +53,7 @@ public:
     std::set<InternalKey,SetComparator> parse_sstable(char *);
     
 
-    std::set<std::string> read_key_range(const std::string& filename);
+    std::optional<std::set<std::string>> read_key_range(const std::string& filename);
     SearchPatternD generate_SearchPatternD(const std::string& filename, const Key& key,const std::set<std::string>& keys);
     SearchPatternH generate_SearchPatternH(const std::string& filename, const Key& key,const std::set<std::string>& keys);
     // void generate_search_package(const std::string& filename, const std::string& pattern);

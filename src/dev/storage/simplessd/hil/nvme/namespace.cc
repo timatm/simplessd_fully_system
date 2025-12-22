@@ -1910,7 +1910,6 @@ void Namespace::open_DB(SQEntryWrapper &req, RequestFunction &func) {
     debugprint(LOG_IMS,
              "NVM     | OPEN DB | open DB is success ,need read datalen: %lu",dataLen);
   }
-  
 
   if (!err) {
     DMAFunction doRead = [this](uint64_t tick, void *context) {
@@ -1952,7 +1951,7 @@ void Namespace::open_DB(SQEntryWrapper &req, RequestFunction &func) {
     IOContext *pContext = new IOContext(func, resp);
 
     pContext->beginAt = getTick();
-    pContext->nlb     = static_cast<uint64_t>(dataLen);
+    pContext->nlb     = static_cast<uint32_t>(dataLen);
     CPUContext *pCPU = 
         new CPUContext(doRead, pContext, CPU::NVME__NAMESPACE, CPU::READ);
 
@@ -1963,7 +1962,7 @@ void Namespace::open_DB(SQEntryWrapper &req, RequestFunction &func) {
     else {
       pContext->dma =
           new PRPList(cfgdata, cpuHandler, pCPU, req.entry.data1,
-                      req.entry.data2, (uint64_t)sizeof(uint64_t));
+                      req.entry.data2, (uint64_t)sizeof(uint32_t));
     }
   }
   else {
@@ -1989,14 +1988,14 @@ void Namespace::close_DB(SQEntryWrapper &req, RequestFunction &func) {
                     STATUS_COMMAND_FAILD);
   }
   
-
+  debugprint(LOG_IMS,
+             "NVM     | CLOSE DB | Command pass");
   if (!err) {
     DMAFunction doRead = [this](uint64_t tick, void *context) {
       DMAFunction dmaDone = [this](uint64_t tick, void *context) {
         IOContext *pContext = (IOContext *)context;
         pContext->beginAt++;
         if (pContext->beginAt == 1) {
-          pContext->function(pContext->resp);
           if (pContext->buffer) {
             int err = ims.close_DB(pContext->buffer,pContext->nlb);
             free(pContext->buffer);
@@ -2004,6 +2003,7 @@ void Namespace::close_DB(SQEntryWrapper &req, RequestFunction &func) {
           debugprint(
               LOG_HIL_NVME,
               "Close DB is done");
+          pContext->function(pContext->resp);
           delete pContext->dma;
           delete pContext;
         }

@@ -159,7 +159,7 @@ int MyNVMeDriver::nvme_close_DB(uint8_t* buffer,size_t size){
         pr_error("Open DB failed: null buffer");
         return OPERATION_FAILURE;
     }
-    std::cout << "Close DB with buffer size: " <<  std::endl;
+    // std::cout << "Close DB with buffer size: " <<  std::endl;
     int err;
     uint32_t datalen;
     err = ims.close_DB(buffer,size);

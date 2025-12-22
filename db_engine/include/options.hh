@@ -4,6 +4,7 @@ enum class PackingType {
     kKeyPerPage     = 0x0,
     kHash           = 0x1,
     kKeyRange       = 0x2,
+    kIdxBloomData   = 0x3,
 };
 
 enum PutType{
@@ -19,9 +20,10 @@ enum PutType{
 constexpr PackingType kPackingType = static_cast<PackingType>(PACKING_TYPE);
 
 static_assert(
-    PACKING_TYPE == 0 || PACKING_TYPE == 1 || PACKING_TYPE == 2,
-    "PACKING_TYPE must be 0(kKeyPerPage), 1(kHash), or 2(kKeyRange)"
+    PACKING_TYPE == 0 || PACKING_TYPE == 1 || PACKING_TYPE == 2 || PACKING_TYPE == 3,
+    "PACKING_TYPE must be 0(kKeyPerPage), 1(kHash), 2(kKeyRange), or 3(kIdxBloomData)"
 );
+
 
 #define LEVEL0_MAX 4
 #define LEVEL1_MAX 10
@@ -32,7 +34,13 @@ static_assert(
 #define LEVEL6_MAX LEVEL5_MAX * 10
 
 
+#ifndef IDX_BLOOM_META_PAGES
+#define IDX_BLOOM_META_PAGES 2
+#endif
 
+#ifndef IDX_BLOOM_HASH_K
+#define IDX_BLOOM_HASH_K 5
+#endif
 
 #define RANGE_KEY_CACHE_SIZE 60
 

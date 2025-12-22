@@ -340,7 +340,7 @@ int gem5Driver::nvme_read_sstable(std::string filename,char *buffer){
     int err;
     hostInfo req(filename);
     std::string enc_hostinfo = req.encode();
-    err = nvme_read_metadata(const_cast<char*>(enc_hostinfo.data()), enc_hostinfo.size());
+    err = nvme_write_metadata(const_cast<char*>(enc_hostinfo.data()), enc_hostinfo.size());
     nmc_config_t config_obj;
     nmc_config_t *config = &config_obj;
     init_nmc_config(config); 
@@ -626,7 +626,11 @@ int gem5Driver::nvme_read_ssKeyRange(std::string filename, char* buffer){
     int err;
     hostInfo req(filename);
     std::string enc_hostinfo = req.encode();
-    err = nvme_read_metadata(const_cast<char*>(enc_hostinfo.data()), enc_hostinfo.size());
+    err = nvme_write_metadata(enc_hostinfo.data(), enc_hostinfo.size());
+    if (err != COMMAND_SUCCESS) {
+         pr_error("Write hostInfo metadata failed");
+       return COMMAND_FAILED;
+    }
     nmc_config_t config_obj;
     nmc_config_t *config = &config_obj;
     init_nmc_config(config); 
@@ -644,15 +648,12 @@ int gem5Driver::nvme_read_ssKeyRange(std::string filename, char* buffer){
     // config->cdw14 = filename_dwords[3];
     // config->cdw15 = filename_dwords[4];
     err = pass_io_command(config);
-
-    if(err == 0){
+    if (err == 0) {
         pr_debug("nvme read success");
+        return COMMAND_SUCCESS;
     }
-    else{
-        pr_error("nvme read failed");
-        pr_error("error code: 0x%x", err);
-    }
-    return err;
+    pr_error("nvme read failed, err=0x%x", err);
+    return COMMAND_FAILED;
 }
 
 

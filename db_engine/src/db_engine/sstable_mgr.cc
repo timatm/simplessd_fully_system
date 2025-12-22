@@ -14,6 +14,49 @@
 
 static std::atomic<int> g_inflight_write(0);
 
+
+#include "sstable_format_idxbf.hh"
+
+
+static inline uint64_t FNV1aHash64(const void* ptr, size_t len) {
+    const auto* p = static_cast<const unsigned char*>(ptr);
+    uint64_t hash = 14695981039346656037ull;
+    const uint64_t prime = 1099511628211ull;
+    for (size_t i = 0; i < len; ++i) {
+        hash ^= static_cast<uint64_t>(p[i]);
+        hash *= prime;
+    }
+    return hash;
+}
+
+static inline uint64_t Mix64(uint64_t x) {
+    x += 0x9e3779b97f4a7c15ull;
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ull;
+    x = (x ^ (x >> 27)) * 0x94d049bb133111ebull;
+    return x ^ (x >> 31);
+}
+
+static inline void BloomSet(uint8_t* bloom, uint32_t bloom_bytes, uint32_t bitpos) {
+    const uint32_t byte_i = bitpos >> 3;
+    const uint32_t bit_i  = bitpos & 7;
+    bloom[byte_i] |= static_cast<uint8_t>(1u << bit_i);
+}
+
+static inline void BloomAdd(uint8_t* bloom, uint32_t bloom_bytes, const std::string& user_key, uint8_t k) {
+    if (bloom_bytes == 0 || k == 0) return;
+
+    const uint64_t m = static_cast<uint64_t>(bloom_bytes) * 8ull; // bits
+    const uint64_t h1 = FNV1aHash64(user_key.data(), user_key.size());
+    uint64_t h2 = Mix64(h1);
+    if (h2 == 0) h2 = 0x9e3779b97f4a7c15ull; // 避免退化
+
+    for (uint8_t i = 0; i < k; ++i) {
+        const uint64_t bit = (h1 + static_cast<uint64_t>(i) * h2) % m;
+        BloomSet(bloom, bloom_bytes, static_cast<uint32_t>(bit));
+    }
+}
+
+
 AlignedBuf SstableManager::packingTable(const SkipList<Record, RecordComparator>& skiplist) const {
     switch (packing_type_) {
         case PackingType::kKeyPerPage:
@@ -22,6 +65,8 @@ AlignedBuf SstableManager::packingTable(const SkipList<Record, RecordComparator>
             return keyHashPacking(skiplist);
         case PackingType::kKeyRange:
             return keyRangePacking(skiplist);
+        case PackingType::kIdxBloomData:
+            return idxBloomDataPacking(skiplist);
         default:
             pr_error("PackingTable type is error");
             return {};
@@ -158,15 +203,17 @@ AlignedBuf SstableManager::keyRangePacking(const SkipList<Record, RecordComparat
 
 
 
-AlignedBuf SstableManager::packingTable(std::queue<std::string> sortedLsit){
+AlignedBuf SstableManager::packingTable(std::queue<std::string> sortedList){
     
     switch (packing_type_) {
         case PackingType::kKeyPerPage:
-            return keyPerPagePacking(sortedLsit);
+            return keyPerPagePacking(sortedList);
         case PackingType::kHash:
-            return keyHashPacking(sortedLsit);
+            return keyHashPacking(sortedList);
         case PackingType::kKeyRange:
-            return keyRangePacking(sortedLsit);
+            return keyRangePacking(sortedList);
+        case PackingType::kIdxBloomData:
+            return idxBloomDataPacking(std::move(sortedList));
         default:
             pr_error("PackingTable type is error");
             return {};
@@ -189,7 +236,7 @@ AlignedBuf SstableManager::keyPerPagePacking(std::queue<std::string> sortedList)
         throw std::runtime_error("IMS_PAGE_SIZE is smaller than InternalKey size (64B)");
     }
 
-    AlignedBuf out = MakeAlignedBlockSize(); // 大小 = IMS_PAGE_NUM * IMS_PAGE_SIZE
+    AlignedBuf out = MakeAlignedBlockSize(); 
 
     size_t page = 0;
     while (!sortedList.empty()) {
@@ -204,7 +251,6 @@ AlignedBuf SstableManager::keyPerPagePacking(std::queue<std::string> sortedList)
 
         const size_t page_off = page * IMS_PAGE_SIZE;
         write_bytes_at(out, page_off, enc.data(), enc.size()); // 寫到頁首
-        // 其餘區域已是 0xFF，不需再補
 
         ++page;
         sortedList.pop();
@@ -260,6 +306,125 @@ AlignedBuf SstableManager::keyHashPacking(std::queue<std::string> sortedList) co
     return out;
 }
 
+AlignedBuf SstableManager::idxBloomDataPacking(std::queue<std::string> sortedList) const {
+    using namespace sst_v2;
+
+    static_assert(sizeof(InternalKey) == 64, "InternalKey must be 64 bytes");
+
+    constexpr uint8_t  kBloomK    = static_cast<uint8_t>(IDX_BLOOM_HASH_K);
+    constexpr uint32_t meta_pages = static_cast<uint32_t>(IDX_BLOOM_META_PAGES);
+
+    const uint32_t page_size       = IMS_PAGE_SIZE;
+    const uint32_t block_size      = BLOCK_SIZE;
+    const uint32_t slot_size       = static_cast<uint32_t>(sizeof(InternalKey));
+    const uint32_t slots_per_page  = page_size / slot_size;
+
+    const uint32_t data_pages_cap  = IMS_PAGE_NUM - meta_pages;
+    const uint32_t max_entries     = data_pages_cap * slots_per_page;
+
+    const uint32_t entry_count = static_cast<uint32_t>(sortedList.size());
+    if (entry_count > max_entries) {
+        throw std::runtime_error("idxBloomDataPacking(queue): too many entries");
+    }
+
+    const uint32_t data_pages_used = (entry_count + slots_per_page - 1) / slots_per_page;
+    const uint32_t index_entry_count = data_pages_used;
+
+    const uint32_t meta_bytes  = meta_pages * page_size;
+    const uint32_t index_off   = static_cast<uint32_t>(sizeof(SSTableSuperBlockV1));
+    const uint32_t index_bytes = index_entry_count * static_cast<uint32_t>(sizeof(SSTableIndexEntryV1));
+    const uint32_t bloom_off   = AlignUp(index_off + index_bytes, 8);
+    if (bloom_off > meta_bytes) {
+        throw std::runtime_error("idxBloomDataPacking(queue): meta too small");
+    }
+    const uint32_t bloom_bytes = meta_bytes - bloom_off;
+    const uint32_t data_off    = meta_bytes;
+
+    const uint32_t filter_region_bytes = bloom_bytes;        // 沿用 bloom_bytes 當 filter region 大小
+    const uint16_t filter_bytes_per_page = static_cast<uint16_t>(filter_region_bytes / index_entry_count);  // floor
+    AlignedBuf out = MakeAlignedBlockSize();
+    std::memset(out.data() + bloom_off, 0, bloom_bytes);
+
+    uint32_t i = 0;
+    uint16_t page_id = 0;
+    uint16_t slot_in_page = 0;
+    std::string page_max_user_key;
+
+    while (!sortedList.empty()) {
+        const std::string& enc = sortedList.front();
+        if (enc.size() != sizeof(InternalKey)) {
+            throw std::runtime_error("idxBloomDataPacking(queue): element not 64 bytes");
+        }
+
+        // data slot: 64B raw bytes 直接拷貝（維持原本 slot layout）
+        const uint32_t off = data_off + i * slot_size;
+        if (off + slot_size > block_size) {
+            throw std::runtime_error("idxBloomDataPacking(queue): data write OOB");
+        }
+        std::memcpy(out.data() + off, enc.data(), sizeof(InternalKey));
+
+        // 需要 user_key 來更新 bloom/index，所以 decode 一次
+        InternalKey ik = InternalKey::Decode(enc);
+        uint16_t page_id = static_cast<uint16_t>(i / slots_per_page);
+        uint32_t slice_off = bloom_off + static_cast<uint32_t>(page_id) * filter_bytes_per_page;
+
+        BloomAdd(reinterpret_cast<uint8_t*>(out.data() + slice_off),
+                filter_bytes_per_page,
+                ik.UserKey(),
+                kBloomK);
+
+        page_max_user_key = ik.UserKey();
+
+        ++i;
+        ++slot_in_page;
+
+        sortedList.pop();
+
+        const bool end_of_page  = (slot_in_page == slots_per_page);
+        const bool end_of_table = (sortedList.empty());
+
+        if (end_of_page || end_of_table) {
+            SSTableIndexEntryV1 ie{};
+            ie.key_size = static_cast<uint8_t>(page_max_user_key.size());
+            if (page_max_user_key.size() > sizeof(ie.key)) {
+                throw std::runtime_error("idxBloomDataPacking(queue): user key > 40");
+            }
+
+            std::memset(ie.key, 0, sizeof(ie.key));
+            std::memcpy(ie.key, page_max_user_key.data(), ie.key_size);
+            ie.page_id     = page_id;
+            ie.valid_slots = slot_in_page;
+
+            const uint32_t ie_off = index_off + static_cast<uint32_t>(page_id) * sizeof(SSTableIndexEntryV1);
+            std::memcpy(out.data() + ie_off, &ie, sizeof(ie));
+
+            ++page_id;
+            slot_in_page = 0;
+        }
+    }
+
+    SSTableSuperBlockV1 sb{};
+    std::memcpy(sb.magic, "SSTB", 4);
+    sb.version     = 1;
+    sb.format      = kFormatIdxBloomData;
+    sb.meta_pages  = static_cast<uint8_t>(meta_pages);
+    sb.page_size   = page_size;
+    sb.block_size  = block_size;
+    sb.index_off   = index_off;
+    sb.index_bytes = index_bytes;
+    sb.bloom_off   = bloom_off;
+    sb.bloom_bytes = bloom_bytes;
+    sb.data_off    = data_off;
+    sb.entry_count = entry_count;
+    sb.index_entry_count = index_entry_count;
+    sb.bloom_k     = kBloomK;
+    sb.crc32       = 0;
+    sb.filter_bytes_per_page = filter_bytes_per_page;
+
+    std::memcpy(out.data(), &sb, sizeof(sb));
+    return out;
+}
+
 
 AlignedBuf SstableManager::keyRangePacking(std::queue<std::string> sortedList) const {
     const size_t slots_per_page = IMS_PAGE_SIZE / sizeof(InternalKey);
@@ -299,6 +464,174 @@ AlignedBuf SstableManager::keyRangePacking(std::queue<std::string> sortedList) c
     return out;
 }
 
+AlignedBuf SstableManager::idxBloomDataPacking(const SkipList<Record, RecordComparator>& skiplist) const {
+    using namespace sst_v2;
+
+    static_assert(sizeof(InternalKey) == 64, "InternalKey must be 64 bytes");
+
+    constexpr uint8_t  kBloomK    = static_cast<uint8_t>(IDX_BLOOM_HASH_K);
+    constexpr uint32_t meta_pages = static_cast<uint32_t>(IDX_BLOOM_META_PAGES);
+
+    const uint32_t page_size       = IMS_PAGE_SIZE;
+    const uint32_t block_size      = BLOCK_SIZE;
+    const uint32_t slot_size       = static_cast<uint32_t>(sizeof(InternalKey));
+    const uint32_t slots_per_page  = page_size / slot_size;
+
+    if (meta_pages < 1 || meta_pages >= IMS_PAGE_NUM) {
+        throw std::runtime_error("IDX_BLOOM_META_PAGES invalid");
+    }
+    if (slots_per_page == 0) {
+        throw std::runtime_error("IMS_PAGE_SIZE too small for InternalKey slots");
+    }
+
+    // ---- Pass 1: count ----
+    uint32_t entry_count = 0;
+    {
+        auto it = skiplist.GetIterator();
+        it.SeekToFirst();
+        while (it.Valid()) { ++entry_count; it.Next(); }
+    }
+
+    // ---- layout basics ----
+    const uint32_t meta_bytes     = meta_pages * page_size;
+    const uint32_t data_off       = meta_bytes;
+
+    const uint32_t data_pages_cap = IMS_PAGE_NUM - meta_pages;
+    const uint32_t max_entries    = data_pages_cap * slots_per_page;
+    if (entry_count > max_entries) {
+        throw std::runtime_error("idxBloomDataPacking: too many entries for fixed 2MB SSTable");
+    }
+
+    // 空表也要能寫：index_entry_count=0, filter_bytes_per_page=0
+    const uint32_t data_pages_used     = (entry_count == 0) ? 0 : (entry_count + slots_per_page - 1) / slots_per_page;
+    const uint32_t index_entry_count   = data_pages_used;
+
+    const uint32_t index_off   = static_cast<uint32_t>(sizeof(SSTableSuperBlockV1)); // 64
+    const uint32_t index_bytes = index_entry_count * static_cast<uint32_t>(sizeof(SSTableIndexEntryV1)); // 48 * pages
+
+    const uint32_t bloom_off = AlignUp(index_off + index_bytes, 8);
+    if (bloom_off > meta_bytes) {
+        throw std::runtime_error("idxBloomDataPacking: meta region too small (index overflow)");
+    }
+    const uint32_t bloom_bytes = meta_bytes - bloom_off;
+
+    uint16_t filter_bytes_per_page = 0;
+    if (index_entry_count > 0) {
+        filter_bytes_per_page = static_cast<uint16_t>(bloom_bytes / index_entry_count); // floor
+        if (filter_bytes_per_page == 0) {
+            throw std::runtime_error("idxBloomDataPacking: bloom region too small => filter_bytes_per_page=0");
+        }
+    }
+
+    // ---- allocate 2MB ----
+    AlignedBuf out = MakeAlignedBlockSize();
+
+    // bloom region 必須清 0（MakeAlignedBlockSize() 會填 0xFF）
+    if (bloom_bytes > 0) {
+        std::memset(out.data() + bloom_off, 0, bloom_bytes);
+    }
+
+    // ---- Pass 2: write data + build per-page bloom + build index ----
+    auto it = skiplist.GetIterator();
+    it.SeekToFirst();
+
+    uint32_t i = 0;
+    uint16_t slot_in_page = 0;
+    std::string page_max_user_key;
+
+    while (it.Valid()) {
+        const InternalKey& ik = it.record().internal_key;
+
+        // ✅ 一律寫 Encode() 的 bytes，避免 struct layout 風險
+        const std::string enc = ik.Encode();
+        if (enc.size() != sizeof(InternalKey)) {
+            throw std::runtime_error("idxBloomDataPacking: InternalKey::Encode() not 64 bytes");
+        }
+
+        const uint16_t page_id = static_cast<uint16_t>(i / slots_per_page);
+
+        // data slot
+        const uint32_t off = data_off + i * slot_size;
+        if (off + slot_size > block_size) {
+            throw std::runtime_error("idxBloomDataPacking: data write OOB");
+        }
+        std::memcpy(out.data() + off, enc.data(), slot_size);
+
+        // per-page bloom slice
+        if (index_entry_count > 0) {
+            const uint32_t slice_off = bloom_off + static_cast<uint32_t>(page_id) * filter_bytes_per_page;
+            const uint32_t slice_end = slice_off + filter_bytes_per_page;
+            if (slice_end > bloom_off + bloom_bytes) {
+                throw std::runtime_error("idxBloomDataPacking: bloom slice OOB");
+            }
+            BloomAdd(reinterpret_cast<uint8_t*>(out.data() + slice_off),
+                     filter_bytes_per_page,
+                     ik.UserKey(),
+                     kBloomK);
+        }
+
+        page_max_user_key = ik.UserKey();
+
+        ++i;
+        ++slot_in_page;
+
+        it.Next();
+        const bool end_of_page  = (slot_in_page == slots_per_page);
+        const bool end_of_table = (!it.Valid());
+
+        if (end_of_page || end_of_table) {
+            // 寫 index entry（對應剛剛那個 page_id）
+            SSTableIndexEntryV1 ie{};
+            if (page_max_user_key.size() > sizeof(ie.key)) {
+                throw std::runtime_error("idxBloomDataPacking: user key > 40, cannot store in index");
+            }
+            ie.key_size = static_cast<uint8_t>(page_max_user_key.size());
+            std::memset(ie.key, 0, sizeof(ie.key));
+            std::memcpy(ie.key, page_max_user_key.data(), ie.key_size);
+
+            ie.page_id     = static_cast<uint16_t>((i - 1) / slots_per_page);
+            ie.valid_slots = slot_in_page;
+
+            const uint32_t ie_off = index_off + static_cast<uint32_t>(ie.page_id) * sizeof(SSTableIndexEntryV1);
+            if (ie_off + sizeof(SSTableIndexEntryV1) > bloom_off) {
+                throw std::runtime_error("idxBloomDataPacking: index overlaps bloom region");
+            }
+            std::memcpy(out.data() + ie_off, &ie, sizeof(ie));
+
+            slot_in_page = 0;
+        }
+    }
+
+    // ---- superblock ----
+    SSTableSuperBlockV1 sb{};
+    std::memcpy(sb.magic, "SSTB", 4);
+    sb.version     = 1;
+    sb.format      = kFormatIdxBloomData;
+    sb.meta_pages  = static_cast<uint8_t>(meta_pages);
+
+    sb.page_size   = page_size;
+    sb.block_size  = block_size;
+
+    sb.index_off   = index_off;
+    sb.index_bytes = index_bytes;
+
+    sb.bloom_off   = bloom_off;
+    sb.bloom_bytes = bloom_bytes;
+
+    sb.data_off    = data_off;
+    sb.entry_count = entry_count;
+
+    sb.index_entry_count      = static_cast<uint16_t>(index_entry_count);
+    sb.bloom_k                = kBloomK;
+    sb.filter_bytes_per_page  = filter_bytes_per_page;
+    sb.crc32                  = 0; // 先不做
+
+    std::memcpy(out.data(), &sb, sizeof(sb));
+    return out;
+}
+
+
+
 
 
 std::string SstableManager::generateFilename(uint32_t seq) {
@@ -333,7 +666,7 @@ void SstableManager::readSSTable(const std::string& filename,char *buffer) {
     int err = nvme_.nvme_read_sstable(filename, buffer);
     if (err == COMMAND_FAILED) {
         pr_error("[Thread] Failed to read SSTable: %s",filename.c_str());
-        std::free(buffer);
+        // std::free(buffer);
         return;
     }
     pr_debug("[Thread] Read success: %s",filename.c_str());
@@ -546,6 +879,30 @@ std::vector<SstableIterator::EntryRef> SstableIterator::gen_sorted_view() {
             });
             break;
         }
+        case static_cast<int>(PackingType::kIdxBloomData): {
+            // 只用 superblock 的 entry_count + data_off 產生 view（先不利用 index/bloom）
+            sst_v2::SSTableSuperBlockV1 sb{};
+            std::memcpy(&sb, buf_.data(), sizeof(sb));
+            if (!sst_v2::CheckSuperBlock(sb)) {
+                pr_error("SSTB superblock invalid or not SSTB format");
+                break;
+            }
+
+            const uint32_t cnt = sb.entry_count;
+            const uint32_t data_off = sb.data_off;
+
+            if (data_off + cnt * kIKeySize > BLOCK_SIZE) {
+                pr_error("SSTB data region OOB");
+                break;
+            }
+
+            v.reserve(cnt);
+            for (uint32_t i = 0; i < cnt; ++i) {
+                v.push_back(EntryRef{ static_cast<uint32_t>(data_off + i * kIKeySize) });
+            }
+            break;
+        }
+
         default:
             pr_error("Unknown packing type=%d", static_cast<int>(type_));
             break;

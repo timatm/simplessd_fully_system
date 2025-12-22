@@ -66,14 +66,14 @@ int Log::flush_logRecordList() {
         return OPERATION_SUCCESS;
     }
 
-    uint32_t lpn = LBN2LPN(sp_old_->log_store);
+    uint32_t lpn = LBN2LPN(sp_ptr_->log_store);
     uint8_t* buffer = (uint8_t*)malloc(IMS_PAGE_SIZE);
     if (!buffer) return OPERATION_FAILURE;
 
     memset(buffer, 0, IMS_PAGE_SIZE);
     auto* logRecordPtr = reinterpret_cast<logLBNListRecord*>(buffer);
     int index = 0;
-
+    sp_ptr_->log_page_num = 0;
     while (!logRecordList.empty()) {
         uint32_t lbn = logRecordList.front();
         logRecordList.pop_front();
@@ -91,7 +91,7 @@ int Log::flush_logRecordList() {
                 free(buffer);
                 return OPERATION_FAILURE;
             }
-            sp_new_->log_page_num++;
+            sp_ptr_->log_page_num++;
             pr_info("Flushed full log page at LPN: %lu", lpn - 1);
             index = 0;
             memset(buffer, 0, IMS_PAGE_SIZE);
@@ -104,8 +104,8 @@ int Log::flush_logRecordList() {
             free(buffer);
             return OPERATION_FAILURE;
         }
-        sp_new_->log_page_num++;
-        pr_info("Flushed final log page at LBN: %lu (num of page: %lu)", sp_old_->log_store,sp_new_->log_page_num);
+        sp_ptr_->log_page_num++;
+        pr_info("Flushed final log page at LBN: %lu (num of page: %lu)", sp_ptr_->log_store,sp_ptr_->log_page_num);
     }
 
     free(buffer);

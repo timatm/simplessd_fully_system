@@ -140,6 +140,13 @@ bool CompactionRunner::memTableIsFull() {
                                [](uint32_t count) { return count >= IMS_PAGE_NUM; });
         case PackingType::kKeyRange:
             return nums_ >= SLOT_NUM_PER_PAGE * IMS_PAGE_NUM;
+        case PackingType::kIdxBloomData: {
+            const uint32_t meta_pages = static_cast<uint32_t>(IDX_BLOOM_META_PAGES);
+            const uint32_t slots_per_page = IMS_PAGE_SIZE / sizeof(InternalKey);
+            const uint32_t data_pages_cap = IMS_PAGE_NUM - meta_pages;
+            const uint32_t max_entries = data_pages_cap * slots_per_page;
+            return nums_ >= max_entries;
+        }
         default:
             return false;
     }
