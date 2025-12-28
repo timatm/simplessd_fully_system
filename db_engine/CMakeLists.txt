@@ -194,10 +194,10 @@ if(NOT SELECT_POLICY MATCHES "^[0-3]$")
 endif()
 
 # SStable packing type：
-# 0=kKeyPerPage, 1=kHash, 2=kKeyRange
-set(PACKING_TYPE 0 CACHE STRING "PackingType: 0=kKeyPerPage,1=kHash,2=kKeyRange")
-if(NOT PACKING_TYPE MATCHES "^[0-2]$")
-    message(FATAL_ERROR "PACKING_TYPE must be 0,1,2 (0=kKeyPerPage,1=kHash,2=kKeyRange)")
+# 0=kKeyPerPage, 1=kHash, 2=kKeyRange ,3=indexFilter
+set(PACKING_TYPE 0 CACHE STRING "PackingType: 0=kKeyPerPage,1=kHash,2=kKeyRang,3=indexFilter")
+if(NOT PACKING_TYPE MATCHES "^[0-3]$")
+    message(FATAL_ERROR "PACKING_TYPE must be 0,1,2 (0=kKeyPerPage,1=kHash,2=kKeyRange,3=indexFilter)")
 endif()
 
 # 先決定要用哪個實作檔

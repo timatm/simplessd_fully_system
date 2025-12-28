@@ -107,12 +107,12 @@ void Namespace::submitCommand(SQEntryWrapper &req, RequestFunction &func) {
                      req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
           read_sskeyrange(req, func);
           break;
-        // case OPCODE_MONITOR_IMS:
-        //   debugprint(LOG_IMS,
-        //              "IMS     | Monitor IMS | SQ %u:%u | CID %u | NSID %-5d",
-        //              req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
-        //   monitor_IMS(req, func);
-        //   break;
+        case OPCODE_READ_SSPAGE:
+          debugprint(LOG_IMS,
+                     "IMS     | Read SStable meta | SQ %u:%u | CID %u | NSID %-5d",
+                     req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
+          read_ssPage(req, func);
+          break;
         case OPCODE_WRITE_SSTABLE:
           debugprint(LOG_IMS,
                      "IMS     | Write SSTable | SQ %u:%u | CID %u | NSID %-5d",
@@ -1165,7 +1165,7 @@ void Namespace::read_sstable(SQEntryWrapper &req, RequestFunction &func) {
         IOContext *pContext = (IOContext *)context;
         pContext->beginAt++;
 
-        if (pContext->beginAt == 2) {
+        if (pContext->beginAt == 1) {
           debugprint(
               LOG_HIL_NVME,
               "NVM     | READ_SSTABLE  | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
@@ -1191,7 +1191,7 @@ void Namespace::read_sstable(SQEntryWrapper &req, RequestFunction &func) {
       pContext->tick = tick;
       pContext->beginAt = 0;
 
-      pParent->readIMS(this, pContext->lpn, pContext->nlpn, dmaDone, pContext);
+      // pParent->readIMS(this, pContext->lpn, pContext->nlpn, dmaDone, pContext);
 
       pContext->buffer = (uint8_t *)calloc(BLOCK_SIZE, 1);
 
@@ -1468,13 +1468,13 @@ void Namespace::read_sskeyrange(SQEntryWrapper &req, RequestFunction &func) {
   if(lpn == INVALID_64){
     err = true;
     debugprint(LOG_IMS,
-             "NVM     | READ_SSTABLE | Allocate LBN is invalid");
+             "NVM     | READ_SSKeyRnage | Allocate LBN is invalid");
     resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
                     STATUS_LBN_INVALID);
   }
   if(err){
     debugprint(LOG_IMS,
-             "NVM     | READ_SSTABLE | Command failed");
+             "NVM     | READ_SSKeyRnage | Command failed");
     resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
                     STATUS_COMMAND_FAILD);
   }
@@ -1488,7 +1488,7 @@ void Namespace::read_sskeyrange(SQEntryWrapper &req, RequestFunction &func) {
         if (pContext->beginAt == 2) {
           debugprint(
               LOG_HIL_NVME,
-              "NVM     | READ_SSTABLE  | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
+              "NVM     | READ_SSKeyRnage  | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
               "%" PRIX64 " + %d | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
               pContext->resp.cqID, pContext->resp.entry.dword2.sqID,
               pContext->resp.sqUID, pContext->resp.entry.dword3.commandID, nsid,
@@ -1543,6 +1543,120 @@ void Namespace::read_sskeyrange(SQEntryWrapper &req, RequestFunction &func) {
       pContext->dma =
           new PRPList(cfgdata, cpuHandler, pCPU, req.entry.data1,
                       req.entry.data2, (uint64_t)IMS_PAGE_SIZE);
+    }
+  }
+  else {
+    func(resp);
+  }
+}
+
+
+void Namespace::read_ssPage(SQEntryWrapper &req, RequestFunction &func) {
+  bool err = false;
+
+  CQEntryWrapper resp(req);
+  uint32_t page_offset = req.entry.dword12;
+  uint32_t page_num = req.entry.dword13;
+  // char buf[25] = {0};
+  // uint32_t dwords[5] = {
+  //   req.entry.dword11,
+  //   req.entry.dword12,
+  //   req.entry.dword13,
+  //   req.entry.dword14,
+  //   req.entry.dword15
+  // };
+  // memcpy(buf, dwords, sizeof(dwords));
+  // std::string filename(buf);
+  // // bool fua = req.entry.dword12 & 0x40000000;
+  // hostInfo request(filename);
+  uint64_t lpn = INVALID_64;
+  err = (bool)ims.read_ssPage(lpn);
+  if (!attached) {
+    err = true;
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_NAMESPACE_NOT_ATTACHED);
+  }
+  if(lpn == INVALID_64){
+    err = true;
+    debugprint(LOG_IMS,
+             "NVM     | READ_SSTABLE_PAGE | Allocate LBN is invalid");
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_LBN_INVALID);
+  }
+  if(err){
+    debugprint(LOG_IMS,
+             "NVM     | READ_SSTABLE_PAGE | Command failed");
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_COMMAND_FAILD);
+  }
+
+  if (!err) {
+    DMAFunction doRead = [this](uint64_t tick, void *context) {
+      DMAFunction dmaDone = [this](uint64_t tick, void *context) {
+        IOContext *pContext = (IOContext *)context;
+        pContext->beginAt++;
+
+        if (pContext->beginAt == 2) {
+          debugprint(
+              LOG_HIL_NVME,
+              "NVM     | READ_SSTABLE_PAGE  | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
+              "%" PRIX64 " + %d | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
+              pContext->resp.cqID, pContext->resp.entry.dword2.sqID,
+              pContext->resp.sqUID, pContext->resp.entry.dword3.commandID, nsid,
+              pContext->slba, pContext->nlb, pContext->tick, tick,
+              tick - pContext->tick);
+
+          pContext->function(pContext->resp);
+
+          if (pContext->buffer) {
+            free(pContext->buffer);
+          }
+
+          delete pContext->dma;
+          delete pContext;
+        }
+      };
+
+      IOContext *pContext = (IOContext *)context;
+
+      pContext->tick = tick;
+      pContext->beginAt = 0;
+
+      pParent->readIMS(this, pContext->lpn, pContext->nlpn, dmaDone, pContext);
+
+      pContext->buffer = (uint8_t *)calloc(IMS_PAGE_SIZE*pContext->nlpn, 1);
+
+      if (pDisk) {
+        uint64_t readLPN = pContext->lpn + pContext->lbn;
+        for(uint64_t i = 0;i < pContext->nlpn;i++){
+          pDisk->readPage(readLPN + i,pContext->buffer + (uint64_t)i * IMS_PAGE_SIZE);
+        }
+      }
+      
+      pContext->dma->write(0, (uint64_t)(IMS_PAGE_SIZE*pContext->nlpn), pContext->buffer,
+                           dmaDone, context);
+    };
+
+    IOContext *pContext = new IOContext(func, resp);
+
+    pContext->beginAt = getTick();
+    pContext->lpn = lpn+page_offset;
+    pContext->nlpn = page_num;
+    debugprint(LOG_IMS,
+              "NVM     | READ_SSTABLE_PAGE | IOContext | LPN: %ld | number of LPN: %ld",pContext->lpn ,pContext->nlpn);
+
+
+    CPUContext *pCPU =
+        new CPUContext(doRead, pContext, CPU::NVME__NAMESPACE, CPU::READ);
+
+    if (req.useSGL) {
+      pContext->dma =
+          new SGL(cfgdata, cpuHandler, pCPU, req.entry.data1, req.entry.data2);
+    }
+    else {
+      pContext->dma =
+          new PRPList(cfgdata, cpuHandler, pCPU, req.entry.data1,
+                      req.entry.data2, (uint64_t)(IMS_PAGE_SIZE*page_num));
     }
   }
   else {
@@ -1762,8 +1876,11 @@ void Namespace::write_buffer(SQEntryWrapper &req, RequestFunction &func) {
         pContext->beginAt++;
         if (pContext->beginAt == 1) {
           debugprint(
-              LOG_HIL_NVME,
-              "WRITE_BUFFER is done");
+              LOG_IMS,
+              "NVM     | WRITE_BUFFER | CQ %u | SQ %u:%u | CID %u | NSID %-5d | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
+              pContext->resp.cqID, pContext->resp.entry.dword2.sqID,
+              pContext->resp.sqUID, pContext->resp.entry.dword3.commandID, nsid,
+              pContext->tick, tick,tick - pContext->tick);
 
           pContext->function(pContext->resp);
 
@@ -1834,7 +1951,12 @@ void Namespace::read_buffer(SQEntryWrapper &req, RequestFunction &func) {
         IOContext *pContext = (IOContext *)context;
         pContext->beginAt++;
         if (pContext->beginAt == 1) {
-          debugprint(LOG_HIL_NVME,"READ_BUFFER is done");
+          debugprint(
+              LOG_IMS,
+              "NVM     | READ_BUFFER | CQ %u | SQ %u:%u | CID %u | NSID %-5d | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
+              pContext->resp.cqID, pContext->resp.entry.dword2.sqID,
+              pContext->resp.sqUID, pContext->resp.entry.dword3.commandID, nsid,
+              pContext->tick, tick,tick - pContext->tick);
 
           pContext->function(pContext->resp);
 
@@ -2176,7 +2298,12 @@ void Namespace::search_key(SQEntryWrapper &req, RequestFunction &func) {
               free(pContext->buffer);
               pContext->buffer = nullptr;
             }
-
+            debugprint(
+              LOG_IMS,
+              "NVM     | Search_key  | CQ %u | SQ %u:%u | CID %u | NSID %-5d | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
+              pContext->resp.cqID, pContext->resp.entry.dword2.sqID,
+              pContext->resp.sqUID, pContext->resp.entry.dword3.commandID, nsid, pContext->tick, tick,
+              tick - pContext->tick);
             if (pContext->dma) {
               delete pContext->dma;
               pContext->dma = nullptr;
@@ -2359,87 +2486,225 @@ void Namespace::erase_sstable(SQEntryWrapper &req, RequestFunction &func) {
   pParent->trimIMS(this, slpn, nlpn, doTrimDone, pContext);
 }
 
+// void Namespace::compaction_io(SQEntryWrapper &req, RequestFunction &func) {
+//   CQEntryWrapper resp(req);
+
+//   // 1. 檢查 namespace 是否 attached
+//   if (!attached) {
+//       resp.makeStatus(true, false,
+//                       TYPE_COMMAND_SPECIFIC_STATUS,
+//                       STATUS_NAMESPACE_NOT_ATTACHED);
+//       debugprint(LOG_IMS,
+//                   "NVM     | Compaction IO sim | Command failed (namespace not attached)");
+//       func(resp);
+//       return;
+//   }
+
+//   DMAFunction doRead = [this](uint64_t tick, void *context) {
+//     DMAFunction done = [this](uint64_t tick, void *context) {
+//       IOContext *pContext = static_cast<IOContext*>(context);
+//       pContext->beginAt++;
+
+//       if (pContext->beginAt == pContext->nlb) {
+//           pContext->resp.makeStatus(false, false,
+//                                     TYPE_GENERIC_COMMAND_STATUS,
+//                                     STATUS_SUCCESS);
+//           pContext->function(pContext->resp);
+
+//           if (pContext->buffer) {
+//               free(pContext->buffer);
+//               pContext->buffer = nullptr;
+//           }
+//           if (pContext->dma) {
+//               delete pContext->dma;
+//               pContext->dma = nullptr;
+//           }
+//           debugprint(
+//             LOG_IMS,
+//             "NVM     | Compaction IO sim  | CQ %u | SQ %u:%u | CID %u | NSID %-5d | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
+//             pContext->resp.cqID, pContext->resp.entry.dword2.sqID,
+//             pContext->resp.sqUID, pContext->resp.entry.dword3.commandID, nsid, pContext->tick, tick,
+//             tick - pContext->tick);
+//           delete pContext;
+//       }
+//     };
+    
+//     IOContext *pContext = (IOContext *)context;
+//     pContext->tick = tick;
+//     pContext->beginAt = 0;
+//     std::vector<uint64_t> lbn_list;
+//     int ret = ims.simulate_compaction_io(lbn_list);
+
+//     if (ret == OPERATION_FAILURE) {
+//         debugprint(LOG_IMS,
+//                   "NVM     | Compaction IO sim | ims.simulate_compaction_io() failed");
+//         pContext->resp.makeStatus(true, false,
+//                                   TYPE_COMMAND_SPECIFIC_STATUS,
+//                                   STATUS_COMMAND_FAILD);
+//         pContext->function(pContext->resp);
+//         delete pContext;
+//         return;   // 一定要 return
+//     }
+
+//     if (lbn_list.empty()) {
+//         debugprint(LOG_IMS,
+//                   "NVM     | Compaction IO sim | lbn_list is empty");
+//         pContext->resp.makeStatus(false, false,
+//                                   TYPE_GENERIC_COMMAND_STATUS,
+//                                   STATUS_SUCCESS);
+//         pContext->function(pContext->resp);
+//         if (pContext->dma) {
+//             delete pContext->dma;
+//             pContext->dma = nullptr;
+//         }
+//         delete pContext;
+//         return;   // 一定要 return
+//     }
+//     debugprint(LOG_IMS,
+//               "NVM     | Compaction IO sim | ims.simulate_compaction_io() success, nlb=%zu",
+//               lbn_list.size());
+//     int count = 1;
+//     for (auto lbn : lbn_list) {
+//       debugprint(LOG_IMS,
+//               "NVM     | Compaction IO sim | Read SStable in LBN:%llu in CH[%d] | Count / Total : %d/%zu ",
+//               lbn,LBN2CH(lbn),count,lbn_list.size());
+//       uint64_t slpn = LBN2LPN(lbn);
+//       uint64_t nlpn = IMS_PAGE_NUM;
+//       pParent->readIMS(this, slpn, nlpn, done, pContext);
+//       count++;
+//       // pParent->readIMSDirectFTL(this, slpn, nlpn, done, pContext);
+//     }
+//   };
+  
+//   IOContext *pContext = new IOContext(func, resp);
+
+//   pContext->beginAt = getTick();
+//   CPUContext *pCPU =
+//       new CPUContext(doRead, pContext, CPU::NVME__NAMESPACE, CPU::READ);
+
+// }
+
+
 void Namespace::compaction_io(SQEntryWrapper &req, RequestFunction &func) {
-    CQEntryWrapper resp(req);
+  CQEntryWrapper resp(req);
 
-    // 1. 檢查 namespace 是否 attached
-    if (!attached) {
-        resp.makeStatus(true, false,
-                        TYPE_COMMAND_SPECIFIC_STATUS,
-                        STATUS_NAMESPACE_NOT_ATTACHED);
-        debugprint(LOG_IMS,
-                   "NVM     | Compaction IO sim | Command failed (namespace not attached)");
-        func(resp);
-        return;
-    }
+  // 1) attached 檢查
+  if (!attached) {
+    resp.makeStatus(true, false,
+                    TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_NAMESPACE_NOT_ATTACHED);
+    debugprint(LOG_IMS,
+               "NVM     | Compaction IO sim | Command failed (namespace not attached)");
+    func(resp);
+    return;
+  }
 
-    // 2. 建立 IOContext ＋ 讓 IMS 算出這次要 fake 的 LBN 列表
-    IOContext *pContext = new IOContext(func, resp);
+  // 2) 讓 compaction_io 進入事件模型（很重要！）
+  DMAFunction doCompaction = [this](uint64_t tick, void *context) {
+    IOContext *pContext = static_cast<IOContext*>(context);
+
+    // 用 tick 當整個 compaction_io 的起點（跟你 search_key 一樣）
+    pContext->tick    = tick;
+    pContext->beginAt = 0;   // 這裡 beginAt 當 completed counter 用
+
     std::vector<uint64_t> lbn_list;
-
     int ret = ims.simulate_compaction_io(lbn_list);
 
     if (ret == OPERATION_FAILURE) {
-        debugprint(LOG_IMS,
-                   "NVM     | Compaction IO sim | ims.simulate_compaction_io() failed");
-        pContext->resp.makeStatus(true, false,
-                                  TYPE_COMMAND_SPECIFIC_STATUS,
-                                  STATUS_COMMAND_FAILD);
-        pContext->function(pContext->resp);
-        delete pContext;
-        return;   // 一定要 return
+      debugprint(LOG_IMS,
+                 "NVM     | Compaction IO sim | ims.simulate_compaction_io() failed");
+      pContext->resp.makeStatus(true, false,
+                                TYPE_COMMAND_SPECIFIC_STATUS,
+                                STATUS_COMMAND_FAILD);
+      pContext->function(pContext->resp);
+
+      if (pContext->buffer) { free(pContext->buffer); pContext->buffer = nullptr; }
+      if (pContext->dma)    { delete pContext->dma;   pContext->dma = nullptr; }
+
+      delete pContext;
+      return;
     }
 
     if (lbn_list.empty()) {
-        debugprint(LOG_IMS,
-                   "NVM     | Compaction IO sim | lbn_list is empty");
+      debugprint(LOG_IMS,
+                 "NVM     | Compaction IO sim | lbn_list is empty");
+      pContext->resp.makeStatus(false, false,
+                                TYPE_GENERIC_COMMAND_STATUS,
+                                STATUS_SUCCESS);
+      pContext->function(pContext->resp);
+
+      if (pContext->buffer) { free(pContext->buffer); pContext->buffer = nullptr; }
+      if (pContext->dma)    { delete pContext->dma;   pContext->dma = nullptr; }
+
+      delete pContext;
+      return;
+    }
+
+    pContext->nlb = lbn_list.size();
+
+    debugprint(LOG_IMS,
+               "NVM     | Compaction IO sim | simulate_compaction_io() success, nlb=%zu",
+               lbn_list.size());
+
+    DMAFunction doneOne = [this](uint64_t doneTick, void *ctx) {
+      IOContext *pContext = static_cast<IOContext*>(ctx);
+
+      pContext->beginAt++;
+
+      if (pContext->beginAt == pContext->nlb) {
         pContext->resp.makeStatus(false, false,
                                   TYPE_GENERIC_COMMAND_STATUS,
                                   STATUS_SUCCESS);
         pContext->function(pContext->resp);
-        if (pContext->dma) {
-            delete pContext->dma;
-            pContext->dma = nullptr;
-        }
+
+        debugprint(
+          LOG_IMS,
+          "NVM     | Compaction IO sim | CQ %u | SQ %u:%u | CID %u | NSID %-5d | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
+          pContext->resp.cqID, pContext->resp.entry.dword2.sqID,
+          pContext->resp.sqUID, pContext->resp.entry.dword3.commandID,
+          nsid, pContext->tick, doneTick, doneTick - pContext->tick);
+
+        if (pContext->buffer) { free(pContext->buffer); pContext->buffer = nullptr; }
+        if (pContext->dma)    { delete pContext->dma;   pContext->dma = nullptr; }
+
         delete pContext;
-        return;   // 一定要 return
-    }
-
-    // 3. 正式丟 fake read 到 FTL，完全不做 DMA 回 host
-    pContext->beginAt = 0;
-    pContext->nlb     = lbn_list.size();
-
-    DMAFunction done = [this](uint64_t tick, void *context) {
-        IOContext *pContext = static_cast<IOContext*>(context);
-        pContext->beginAt++;
-
-        if (pContext->beginAt == pContext->nlb) {
-            pContext->resp.makeStatus(false, false,
-                                      TYPE_GENERIC_COMMAND_STATUS,
-                                      STATUS_SUCCESS);
-            pContext->function(pContext->resp);
-
-            if (pContext->buffer) {
-                free(pContext->buffer);
-                pContext->buffer = nullptr;
-            }
-            if (pContext->dma) {
-                delete pContext->dma;
-                pContext->dma = nullptr;
-            }
-            delete pContext;
-        }
+      }
     };
-
-    debugprint(LOG_IMS,
-               "NVM     | Compaction IO sim | ims.simulate_compaction_io() success, nlb=%zu",
-               lbn_list.size());
+    std::vector<std::vector<uint64_t>> per_ch(CHANNEL_NUM);
+    per_ch.reserve(CHANNEL_NUM);
 
     for (auto lbn : lbn_list) {
-        uint64_t slpn = LBN2LPN(lbn);
-        uint64_t nlpn = IMS_PAGE_NUM;
-        pParent->readIMSDirectFTL(this, slpn, nlpn, done, pContext);
+      per_ch[LBN2CH(lbn)].push_back(lbn);
     }
+
+    size_t issued = 0;
+    size_t round  = 0;
+    while (issued < lbn_list.size()) {
+      bool progressed = false;
+
+      for (int ch = 0; ch < CHANNEL_NUM; ++ch) {
+        if (round < per_ch[ch].size()) {
+          uint64_t lbn  = per_ch[ch][round];
+          uint64_t slpn = LBN2LPN(lbn);
+          uint64_t nlpn = IMS_PAGE_NUM;
+
+          debugprint(LOG_IMS,
+            "NVM     | Compaction IO sim | Read SStable in LBN:%llu in CH[%d] | Issued %zu/%zu",
+            (unsigned long long)lbn, ch, issued + 1, lbn_list.size());
+          pParent->readIMS(this, slpn, nlpn, doneOne, pContext);
+
+          issued++;
+          progressed = true;
+        }
+      }
+
+      if (!progressed) break;
+      round++;
+    }
+  };
+
+  IOContext *pContext = new IOContext(func, resp);
+  execute(CPU::NVME__NAMESPACE, CPU::READ, doCompaction, pContext);
 }
 
 

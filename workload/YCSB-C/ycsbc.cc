@@ -33,6 +33,7 @@ int DelegateClient(ycsbc::DB *db, ycsbc::CoreWorkload *wl, const int num_ops,
   ycsbc::Client client(*db, *wl);
   int oks = 0;
   for (int i = 0; i < num_ops; ++i) {
+    pr_info("Operation count:%d",i);
     if (is_loading) {
       oks += client.DoInsert();
     } else {
@@ -63,7 +64,10 @@ int main(const int argc, const char *argv[]) {
   }
   db->Init();
   ycsbc::CoreWorkload wl;
+  pr_info("before wl.Init");
   wl.Init(props);
+  pr_info("after wl.Init");
+
 
   const int num_threads = stoi(props.GetProperty("threadcount", "1"));
   bool run_only  = (props.GetProperty("runonly",  "false") == "true");

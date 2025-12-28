@@ -42,7 +42,10 @@ static_assert(
 #define IDX_BLOOM_HASH_K 5
 #endif
 
-#define RANGE_KEY_CACHE_SIZE 60
+
+// cache    200MB = 12800
+//          500MB = 32000
+#define RANGE_KEY_CACHE_SIZE 32000
 
 
 // // Search pattern generate in HOST / DEVICE

@@ -117,7 +117,17 @@ variants-sim: $(OBJECTS) $(TOP_OBJS)
 	      -o $$exe; \
 	  done; \
 	done
-
+	@for sp in 1; do \
+	  for pt in 3; do \
+	    exe="ycsbc_pack$${pt}_place$${sp}_$(NVME_BACKEND)"; \
+	    echo "=== Linking $$exe (SELECT_POLICY=$${sp}, PACKING_TYPE=$${pt}, NVME_BACKEND=$(NVME_BACKEND)) ==="; \
+	    $(CXX) $(LDFLAGS) $^ \
+	      $(MYDB_PREFIX)/lib_variants/db_engine_$(NVME_BACKEND)_pack$${pt}_place$${sp}.a \
+	      $(MYDB_PREFIX)/lib_variants/db_nvme_$(NVME_BACKEND)_pack$${pt}_place$${sp}.a \
+	      $(MYDB_PREFIX)/lib_variants/firmware_$(NVME_BACKEND)_pack$${pt}_place$${sp}.a \
+	      -o $$exe; \
+	  done; \
+	done
 variants-real: $(OBJECTS) $(TOP_OBJS)
 	@for sp in $(SP_VALUES); do \
 	  for pt in $(PT_VALUES); do \

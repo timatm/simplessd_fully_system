@@ -111,6 +111,15 @@ double MemTable::space_util(){
         case static_cast<int>(PackingType::kKeyRange):
             utilization = static_cast<double>(node_count_) / static_cast<double>(SLOT_NUM_PER_BLOCK);
             break;
+        case static_cast<int>(PackingType::kIdxBloomData): {
+            const uint32_t meta_pages = static_cast<uint32_t>(IDX_BLOOM_META_PAGES);
+            const uint32_t slots_per_page = IMS_PAGE_SIZE / sizeof(InternalKey);
+            const uint32_t data_pages_cap = (IMS_PAGE_NUM > meta_pages) ? (IMS_PAGE_NUM - meta_pages) : 0;
+            const uint32_t max_entries = data_pages_cap * slots_per_page;
+            utilization = (max_entries == 0) ? 0.0
+                : static_cast<double>(node_count_) / static_cast<double>(max_entries);
+            break;
+        }
 
         default:
             pr_error("Calculate space utilization error,input packing_type is error");

@@ -87,8 +87,10 @@ private:
     InternalKeyComparator icmp_;
     std::mutex mu_;
 
-    double total_space_util  = 0.0;
-    double total_SStable_num = 0.0;
+    double total_space_util             = 0.0;
+    double total_SStable_num            = 0.0;
+    double total_cache_read_count       = 0.0;
+    double total_cache_read_miss_count  = 0.0;
     uint64_t search_pattern_io = 0;
 };
 #endif

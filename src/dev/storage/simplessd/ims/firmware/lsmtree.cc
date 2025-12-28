@@ -193,9 +193,14 @@ std::shared_ptr<TreeNode> LSMTree::getLevelFirstNode(int level) const {
 }
 
 std::shared_ptr<TreeNode> LSMTree::getNextNode(int level, Key input) const{
+    if (level < 0 || level >= MAX_LEVEL){
+        pr_error("Level is out of rnage,level: %d",level);
+        return nullptr;
+    }
     const auto& nodes = tree_->get_level_nodes(level);
     if (nodes.empty()) {
-        throw std::runtime_error("Level is empty");
+        pr_error("Level is empty,level: %d",level);
+        return nullptr;
     }
 
     auto dummy = std::make_shared<TreeNode>("dummy", level, input, input);

@@ -14,6 +14,7 @@ public:
     }
     LSMTree(){
         tree_ = std::make_shared<Tree>();
+        level_num_.resize(MAX_LEVEL, 0);
     }
     std::queue<std::shared_ptr<TreeNode>> search_key(const Key& key);
     RelateChInfo get_relate_ch_info(std::shared_ptr<TreeNode> node);
@@ -31,8 +32,17 @@ public:
     std::string encode() const{return tree_->encode();};
     bool decode(const std::string& buf){
         tree_->clear();
-        return tree_->decode(buf);
-    };
+        std::fill(level_num_.begin(), level_num_.end(), 0);
+
+        if (!tree_->decode(buf)) return false;
+
+        // 依照 tree_->level_map_ 重算 level_num_
+        for (int l = 0; l < MAX_LEVEL; ++l) {
+            level_num_[l] = static_cast<uint32_t>(tree_->get_level_nodes(l).size());
+        }
+        return true;
+    }
+
     uint32_t get_level_num(int level) const {
         if (level < 0 || level >= MAX_LEVEL) return 0;
         return level_num_[level];

@@ -24,7 +24,7 @@ GENERATOR         ?=
 RUN_ARGS          ?=
 NVME_BACKEND	  ?= sim
 SELECT_POLICY     ?= 3
-PACKING_TYPE      ?= 0
+PACKING_TYPE      ?= 2
 
 # Predefined build dirs for different profiles
 DYNAMIC_BUILD_DIR := $(BUILD_DIR_BASE)
@@ -53,6 +53,11 @@ CMAKE_FLAGS := \
   -DNVME_BACKEND=$(NVME_BACKEND) \
   -DSELECT_POLICY=$(SELECT_POLICY) \
   -DPACKING_TYPE=$(PACKING_TYPE)
+
+TOOLCHAIN_ARG :=
+ifeq ($(BUILD_STATIC),ON)
+  TOOLCHAIN_ARG := -DCMAKE_TOOLCHAIN_FILE="$(TOOLCHAIN_FILE)"
+endif
 
 # === Targets ===
 .PHONY: all configure build install run clean rebuild \
@@ -115,6 +120,20 @@ configure-static:
 
 	  -DCMAKE_TOOLCHAIN_FILE="$(TOOLCHAIN_FILE)"
 
+
+# .PHONY: configure
+# configure:
+# 	@echo "🔧 Configuring to $(BUILD_DIR) ..."
+# 	@mkdir -p "$(BUILD_DIR)"
+# 	@cd "$(BUILD_DIR)" && cmake .. $(GENERATOR) $(CMAKE_FLAGS) $(TOOLCHAIN_ARG)
+
+
+# configure-static:
+# 	@echo "🔧 Configuring (musl, static) to $(STATIC_BUILD_DIR) ..."
+# 	@mkdir -p "$(STATIC_BUILD_DIR)"
+# 	@cd "$(STATIC_BUILD_DIR)" && cmake .. $(GENERATOR) $(CMAKE_FLAGS) $(TOOLCHAIN_ARG)
+
+
 # === Build / Install / Run ===
 config-sim:
 	@$(MAKE) NVME_BACKEND=sim configure
@@ -150,11 +169,27 @@ build-variants-sim:
 	    cp "$(FIRMWARE_BUILD_DIR)/libfirmware_lib.a" "$$out_fw"; \
 	  done; \
 	done
+	@for sp in 1; do \
+	  for pt in 3; do \
+	    echo "=== Building NVME_BACKEND=$(NVME_BACKEND) SELECT_POLICY=$$sp PACKING_TYPE=$$pt ==="; \
+	    $(MAKE) SELECT_POLICY=$$sp PACKING_TYPE=$$pt configure; \
+	    $(MAKE) build; \
+	    out_engine="$(LIB_VARIANT_DIR)/db_engine_$(NVME_BACKEND)_pack$${pt}_place$${sp}.a"; \
+	    out_nvme="$(LIB_VARIANT_DIR)/db_nvme_$(NVME_BACKEND)_pack$${pt}_place$${sp}.a"; \
+	    out_fw="$(LIB_VARIANT_DIR)/firmware_$(NVME_BACKEND)_pack$${pt}_place$${sp}.a"; \
+	    echo "cp libmydb_engine -> $$out_engine"; \
+	    echo "cp libmydb_nvme   -> $$out_nvme"; \
+	    echo "cp firmware_lib   -> $$out_fw"; \
+	    cp "$(BUILD_DIR)/libmydb_engine.a"  "$$out_engine"; \
+	    cp "$(BUILD_DIR)/libmydb_nvme.a"    "$$out_nvme"; \
+	    cp "$(FIRMWARE_BUILD_DIR)/libfirmware_lib.a" "$$out_fw"; \
+	  done; \
+	done
 
 build-variants-real:
 	@mkdir -p "$(LIB_VARIANT_DIR)"
 	@for sp in 1 2 3; do \
-	  for pt in 0 1 2; do \
+	  for pt in 0 1 2 3; do \
 	    echo "=== Building NVME_BACKEND=$(NVME_BACKEND) SELECT_POLICY=$$sp PACKING_TYPE=$$pt ==="; \
 	    $(MAKE) SELECT_POLICY=$$sp PACKING_TYPE=$$pt configure; \
 	    $(MAKE) build; \

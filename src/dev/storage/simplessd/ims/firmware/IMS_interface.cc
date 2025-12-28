@@ -66,10 +66,11 @@ void PrintBuildConfig() {
         case 0: packing_type_str = "kKeyPerPage"; break;
         case 1: packing_type_str = "kHash";       break;
         case 2: packing_type_str = "kKeyRange";   break;
+        case 3: packing_type_str = "kIndexFilter";   break;
         default: packing_type_str = "UNKNOWN";    break;
     }
 #endif
-    pr_info("========== MyDB Build Config ==========");
+    pr_info("========== SSD Config ==========");
     pr_info("RUNTYPE        = %d (%s)", RUNTYPE, runtype_str);
     pr_info("ENABLE_DISK    = %d (%s)", ENABLE_DISK, enable_disk_str);
     pr_info("NVME_DRIVER    = %d (%s)", NVME_DRIVER, nvme_driver_str);
@@ -416,6 +417,42 @@ int IMS_interface::read_ssKeyRange(uint64_t& lpn){
 
     
 
+    auto it = mappingTable.find(filename);
+    if (it == mappingTable.end()) {
+        pr_error("File %s not found in mapping table", filename.c_str());
+        return OPERATION_FAILURE;
+    }
+
+    uint64_t lbn = it->second;
+
+    lpn = LBN2LPN(lbn);
+
+    if (err == OPERATION_SUCCESS) {
+        pr_debug("Read data from LBN %lu for file: %s successfully", lbn, filename.c_str());
+    } else {
+        pr_error("Failed to read block from LBN %lu for file: %s", lbn, filename.c_str());
+        return OPERATION_FAILURE;
+    }
+
+    return err;
+}
+
+
+int IMS_interface::read_ssPage(uint64_t& lpn){
+    int err = OPERATION_SUCCESS;
+    if (buffer_ == nullptr || buffer_valid_size_ == 0) {
+        pr_error("read_ssKeyRange: buffer_ is null or buffer_valid_size_ == 0");
+        return OPERATION_FAILURE;
+    }
+    size_t hostInfo_len = buffer_valid_size_;
+    std::string buf(buffer_, buffer_ + hostInfo_len);
+    hostInfo request = hostInfo::decodeOrThrow(buf);
+    std::string filename = request.filename;
+    auto mappingTable = mappingTable_->get_table();
+    if (mappingTable.count(filename) == 0) {
+        pr_error("File %s not found in mapping table", filename.c_str());
+        return OPERATION_FAILURE;
+    }
     auto it = mappingTable.find(filename);
     if (it == mappingTable.end()) {
         pr_error("File %s not found in mapping table", filename.c_str());

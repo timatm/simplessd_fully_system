@@ -649,7 +649,40 @@ void blockMapping::readInternal(Request &req, uint64_t &tick) {
   uint64_t finishedAt = tick;
 
   auto mappingList = table.find(req.lpn);
+  if (mappingList == table.end()) {
+    const uint64_t ppn = req.lpn;
+    const uint32_t pbn  = LPN2LBN(req.lpn);
+    const uint32_t page = (uint32_t)(ppn % param.pagesInBlock);
 
+    if (pbn >= param.totalPhysicalBlocks || page >= param.pagesInBlock) {
+      panic("readInternal(identity): PPN %" PRIu64 " out of range "
+            "(pbn=%u page=%u totalPhysicalBlocks=%u pagesInBlock=%u)",
+            ppn, pbn, page, param.totalPhysicalBlocks, param.pagesInBlock);
+    }
+
+    palRequest.blockIndex = pbn;
+    palRequest.pageIndex  = page;
+
+    if (!bRandomTweak) {
+      palRequest.ioFlag.set();
+      beginAt = tick;
+      pPAL->read(palRequest, beginAt);
+      tick = beginAt;
+    } else {
+      for (uint32_t idx = 0; idx < bitsetSize; idx++) {
+        if (req.ioFlag.test(idx)) {
+          palRequest.ioFlag.reset();
+          palRequest.ioFlag.set(idx);
+          beginAt = tick;
+          pPAL->read(palRequest, beginAt);
+          finishedAt = MAX(finishedAt, beginAt);
+        }
+      }
+      tick = finishedAt;
+    }
+    tick += applyLatency(CPU::FTL__PAGE_MAPPING, CPU::READ_INTERNAL);
+    return;
+  }
   if (mappingList != table.end()) {
     if (bRandomTweak) {
       pDRAM->read(&(*mappingList), 8 * req.ioFlag.count(), tick);

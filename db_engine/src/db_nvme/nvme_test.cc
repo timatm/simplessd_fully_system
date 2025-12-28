@@ -300,3 +300,45 @@ int MyNVMeDriver::nvme_compaction_io(const CompactionIOSimMeta& meta){
 // int MyNVMeDriver::nvme_set_log_info(uint32_t *data_len){
 
 // }
+
+int MyNVMeDriver::nvme_read_sstable_page(std::string filename, uint32_t page_off,uint32_t page_num ,char* buffer){
+    if(buffer == nullptr){
+        pr_error("nvme_read_sstable_page failed ,data buffer is nullptr");
+        return COMMAND_FAILED;
+    }
+    if(filename.empty()){
+        pr_error("nvme_read_sstable_page failed ,filename is nullptr");
+        return COMMAND_FAILED;
+    }
+    if (page_num == 0){
+        pr_error("nvme_read_sstable_page failed ,page_nun is zero");
+        return COMMAND_FAILED;
+    }
+    if(page_off > IMS_PAGE_NUM || (page_off + page_num) > IMS_PAGE_NUM ){
+        pr_error("nvme_read_sstable_page failed ,out of SStable area");
+        return COMMAND_FAILED;
+    }
+    int err;
+    hostInfo req(filename);
+    std::string enc_hostinfo = req.encode();
+    err = ims.write_meta(reinterpret_cast<uint8_t*>(const_cast<char*>(enc_hostinfo.data())), enc_hostinfo.size());
+    if(err != OPERATION_SUCCESS){
+        pr_error("Write hostInfo metadata failed");
+        return COMMAND_FAILED;
+    }
+    uint64_t lpn = INVALID_64;
+    err = ims.read_ssPage(lpn);
+    if(lpn == INVALID_64){
+        pr_error("nvme_read_sstable_pagetranslate lpn failed");
+        return COMMAND_FAILED;
+    }
+    uint64_t read_page = lpn + static_cast<uint64_t>(page_off);
+    for(uint64_t i = 0;i < page_num;i++){
+        err = ims.read_log( read_page+i,reinterpret_cast<uint8_t*>(buffer + i*IMS_PAGE_SIZE));
+        if(err != OPERATION_SUCCESS){
+            pr_error("nvme_read_sstable_page in SStable(%s) failed",filename.c_str());
+            return COMMAND_FAILED;
+        }
+    }
+    return OPERATION_SUCCESS;
+}

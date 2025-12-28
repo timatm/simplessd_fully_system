@@ -143,6 +143,7 @@ class Namespace {
   void read_block(SQEntryWrapper &, RequestFunction &);
   
   void read_sskeyrange(SQEntryWrapper &, RequestFunction &);
+  void read_ssPage(SQEntryWrapper &, RequestFunction &);
 
   void open_DB(SQEntryWrapper &, RequestFunction &);
   void close_DB(SQEntryWrapper &, RequestFunction &);

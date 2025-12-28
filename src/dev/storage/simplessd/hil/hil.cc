@@ -210,13 +210,12 @@ void HIL::readDirectFTL(Request &req) {
 
     pReq->reqID = ++reqCount;
 
-    debugprint(LOG_HIL,
-               "READ_DIRECT | REQ %7u | LCA %" PRIu64 " + %" PRIu64
-               " | BYTE %" PRIu64 " + %" PRIu64,
-               pReq->reqID, pReq->range.slpn, pReq->range.nlp,
-               pReq->offset, pReq->length);
+    // debugprint(LOG_HIL,
+    //            "READ_DIRECT | REQ %7u | LCA %" PRIu64 " + %" PRIu64
+    //            " | BYTE %" PRIu64 " + %" PRIu64,
+    //            pReq->reqID, pReq->range.slpn, pReq->range.nlp,
+    //            pReq->offset, pReq->length);
 
-    // 關鍵：建立 ICL::Request 後，呼叫你剛剛新增的 API
     ICL::Request reqInternal(*pReq);
     pICL->readDirectFTL(reqInternal, tick);
 

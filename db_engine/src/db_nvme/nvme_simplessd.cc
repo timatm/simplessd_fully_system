@@ -5,10 +5,11 @@ extern "C" {
 #include <fcntl.h>
 #include "debug.hh"
 #include "nvme_simplessd.hh"
+#include "options.hh"
+
 #include <stdio.h>
 #include <unistd.h>
 #include <limits.h>
-
 #include <cstring> 
 #include <string>
 #include <array>
@@ -123,36 +124,36 @@ void gem5Driver::fill_uint64_to_dwords(uint64_t input, uint32_t* dwords_out) {
 //     return err;
 // }
 
-int gem5Driver::nvme_monitor_IMS(int monitor_type){
-    int err;
-    nmc_config_t config_obj;
-    nmc_config_t *config = &config_obj;
-    init_nmc_config(config); 
-    config->OPCODE    = OPCODE_MONITOR_IMS;
-    config->PSDT      = 0;
-    switch(monitor_type){
-        case DUMP_MAPPING_INFO:
-            config->cdw13 = DUMP_MAPPING_INFO;
-            break;
-        case DUMP_LBNPOOL_INFO:
-            config->cdw13 = DUMP_LBNPOOL_INFO;
-            break;
-        default:
-            pr_error("Monitor does't have this subcommand :%d",monitor_type);
-            return COMMAND_FAILED;
-            break;
-    }
-    err = pass_io_command(config);
-    if(err == STATUS_OPERATION_SUCCESS){
-        err = COMMAND_SUCCESS;
-    }
-    else{
-        pr_error("Monitor IMS failed");
-        pr_error("error code: 0x%x", err);
-        err = COMMAND_FAILED;
-    }
-    return err;
-}
+// int gem5Driver::nvme_monitor_IMS(int monitor_type){
+//     int err;
+//     nmc_config_t config_obj;
+//     nmc_config_t *config = &config_obj;
+//     init_nmc_config(config); 
+//     config->OPCODE    = OPCODE_MONITOR_IMS;
+//     config->PSDT      = 0;
+//     switch(monitor_type){
+//         case DUMP_MAPPING_INFO:
+//             config->cdw13 = DUMP_MAPPING_INFO;
+//             break;
+//         case DUMP_LBNPOOL_INFO:
+//             config->cdw13 = DUMP_LBNPOOL_INFO;
+//             break;
+//         default:
+//             pr_error("Monitor does't have this subcommand :%d",monitor_type);
+//             return COMMAND_FAILED;
+//             break;
+//     }
+//     err = pass_io_command(config);
+//     if(err == STATUS_OPERATION_SUCCESS){
+//         err = COMMAND_SUCCESS;
+//     }
+//     else{
+//         pr_error("Monitor IMS failed");
+//         pr_error("error code: 0x%x", err);
+//         err = COMMAND_FAILED;
+//     }
+//     return err;
+// }
 
 int gem5Driver::nvme_write_sstable(sstable_info info,char *buffer){
     
@@ -620,7 +621,7 @@ int gem5Driver::nvme_dump_ims(){
 }
 int gem5Driver::nvme_read_ssKeyRange(std::string filename, char* buffer){
     if(buffer == nullptr){
-        pr_error("Read sstable failed ,data buffer is nullptr");
+        pr_error("Read sstable key range failed ,data buffer is nullptr");
         return COMMAND_FAILED;
     }
     int err;
@@ -649,10 +650,10 @@ int gem5Driver::nvme_read_ssKeyRange(std::string filename, char* buffer){
     // config->cdw15 = filename_dwords[4];
     err = pass_io_command(config);
     if (err == 0) {
-        pr_debug("nvme read success");
+        pr_debug("nvme read sstable key range success");
         return COMMAND_SUCCESS;
     }
-    pr_error("nvme read failed, err=0x%x", err);
+    pr_error("nvme read sstable key range failed, err=0x%x", err);
     return COMMAND_FAILED;
 }
 
@@ -714,4 +715,57 @@ int gem5Driver::nvme_compaction_io(const CompactionIOSimMeta& meta) {
         pr_error("nvme_compaction_io: nvme_io_passthru failed (%d)", err);
     }
     return err;
+}
+
+
+int gem5Driver::nvme_read_sstable_page(std::string filename, uint32_t page_off,uint32_t page_num ,char* buffer){
+    if(buffer == nullptr){
+        pr_error("Read sstable meta failed ,data buffer is nullptr");
+        return COMMAND_FAILED;
+    }
+    if(filename.empty()){
+        pr_error("nvme_read_sstable_page failed ,filename is nullptr");
+        return COMMAND_FAILED;
+    }
+    if (page_num == 0){
+        pr_error("nvme_read_sstable_page failed ,page_nun is zero");
+        return COMMAND_FAILED;
+    }
+    if(page_off > IMS_PAGE_NUM || (page_off + page_num) > IMS_PAGE_NUM ){
+        pr_error("nvme_read_sstable_page failed ,out of SStable area");
+        return COMMAND_FAILED;
+    }
+    int err;
+    hostInfo req(filename);
+    std::string enc_hostinfo = req.encode();
+    err = nvme_write_metadata(enc_hostinfo.data(), enc_hostinfo.size());
+    if (err != COMMAND_SUCCESS) {
+        pr_error("Write hostInfo metadata failed");
+       return COMMAND_FAILED;
+    }
+    nmc_config_t config_obj;
+    nmc_config_t *config = &config_obj;
+    init_nmc_config(config); 
+    config->data_len = page_num * DB_PAGE_SIZE;
+    config->data     = buffer;
+    config->OPCODE    = OPCODE_READ_SSPAGE;
+    config->PSDT      = 0; /* use PRP */
+    config->meta_addr = (uintptr_t)NULL;
+    config->PRP1      = (uintptr_t)config->data;
+    config->cdw12 = page_off;
+    config->cdw13 = page_num;
+    // uint32_t filename_dwords[5] = {0};
+    // fill_filename_to_dwords(filename,filename_dwords);
+    // config->cdw11 = filename_dwords[0];
+    // config->cdw12 = filename_dwords[1];
+    // config->cdw13 = filename_dwords[2];
+    // config->cdw14 = filename_dwords[3];
+    // config->cdw15 = filename_dwords[4];
+    err = pass_io_command(config);
+    if (err == COMMAND_SUCCESS) {
+        pr_debug("nvme_read_sstable_page success");
+        return COMMAND_SUCCESS;
+    }
+    pr_error("nvme_read_sstable_page failed, err=0x%x", err);
+    return COMMAND_FAILED;
 }

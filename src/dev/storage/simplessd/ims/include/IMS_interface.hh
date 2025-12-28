@@ -67,6 +67,7 @@ public:
     int read_sstable(uint64_t &lbn);
     int erase_sstable(uint64_t &lbn);
     int read_ssKeyRange(uint64_t &lpn);
+    int read_ssPage(uint64_t &lpn);
     // TODO need to finish
     int search_key(Key key);
 

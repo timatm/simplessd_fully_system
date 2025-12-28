@@ -132,6 +132,133 @@ static bool IdxBloomLookup(const char* buf,
     found = best;
     return true;
 }
+
+static bool IdxBloomLocateInMeta(const char* meta_buf,                      
+                                uint32_t meta_bytes,                        
+                                const std::string& user_key,              
+                                uint32_t& out_page_off,                   
+                                uint16_t& out_valid_slots,                 
+                                uint32_t& out_page_size) {                                                                          
+    if (meta_buf == nullptr) return false;                                   
+    if (meta_bytes < sizeof(SSTableSuperBlockV1)) return false;              
+                                                    
+    SSTableSuperBlockV1 sb{};                                                
+    std::memcpy(&sb, meta_buf, sizeof(sb));                                 
+                                          
+    if (!CheckSuperBlock(sb)) return false;                                 
+    if (sb.format != kFormatIdxBloomData) return false;                    
+          
+    if (sb.page_size == 0) return false;                                    
+    const uint32_t expect_meta_bytes =                                       
+        static_cast<uint32_t>(sb.meta_pages) * static_cast<uint32_t>(sb.page_size); 
+    if (meta_bytes < expect_meta_bytes) return false;                        
+                                          
+    if (sb.index_entry_count == 0) return false;                             
+    if (sb.index_off + sb.index_bytes > meta_bytes) return false;            
+    const uint32_t need_index_bytes =                                       
+        static_cast<uint32_t>(sb.index_entry_count) * static_cast<uint32_t>(sizeof(SSTableIndexEntryV1));
+    if (sb.index_bytes < need_index_bytes) return false;                    
+                                                  
+    const auto* index = reinterpret_cast<const SSTableIndexEntryV1*>(         
+        meta_buf + sb.index_off                                               
+    );                                                                                        
+    uint32_t lo = 0;                                                         
+    uint32_t hi = static_cast<uint32_t>(sb.index_entry_count);              
+    while (lo < hi) {                                                       
+        const uint32_t mid = (lo + hi) / 2;                                  
+
+        const SSTableIndexEntryV1& e = index[mid];                            
+        const uint8_t ksz = e.key_size;                                      
+        if (ksz > sizeof(e.key)) return false;                                
+
+        const std::string maxk(reinterpret_cast<const char*>(e.key),          
+                               static_cast<size_t>(ksz));                    
+
+        if (maxk.compare(user_key) < 0) lo = mid + 1;                        
+        else hi = mid;                                                      
+    }                                                                       
+            
+    if (lo >= static_cast<uint32_t>(sb.index_entry_count)) return false;      
+                                                
+    const SSTableIndexEntryV1& ie = index[lo];                               
+    const uint16_t page_id     = ie.page_id;                                 
+    const uint16_t valid_slots = ie.valid_slots;                             
+    if (valid_slots == 0) return false;                                      
+
+    // 9) valid_slots 不可超過 page 能放的 slot 數                               
+    const uint32_t slot_size = static_cast<uint32_t>(sizeof(InternalKey));   
+    const uint32_t slots_per_page = static_cast<uint32_t>(sb.page_size) / slot_size; 
+    if (slots_per_page == 0) return false;                                
+    if (valid_slots > slots_per_page) return false;                          
+
+    // 10) bloom slice check（negative => 直接跳過整張 SSTable）                  
+    if (sb.filter_bytes_per_page > 0 && sb.bloom_bytes > 0) {                 
+        const uint64_t slice_off =                                           
+            static_cast<uint64_t>(sb.bloom_off) +                            
+            static_cast<uint64_t>(page_id) * static_cast<uint64_t>(sb.filter_bytes_per_page); 
+        const uint64_t slice_end = slice_off + static_cast<uint64_t>(sb.filter_bytes_per_page); 
+        const uint64_t bloom_end =                                            
+            static_cast<uint64_t>(sb.bloom_off) + static_cast<uint64_t>(sb.bloom_bytes); 
+
+        // 超界就保守：不做 negative（避免 false negative）                        
+        if (slice_end <= bloom_end && slice_end <= meta_bytes) {              
+            const uint8_t* slice = reinterpret_cast<const uint8_t*>(meta_buf + slice_off); 
+            if (!BloomMayContain(slice, sb.filter_bytes_per_page, user_key, sb.bloom_k)) { 
+                return false;  // ✅ bloom negative：一定不在                     
+            }                                                                  
+        }                                                                      
+    }                                                                          
+
+    // 11) 算出要讀的 data page 在 2MB block 內的 page offset                      
+    //     data_off 通常 = meta_pages * page_size，所以 data_base_page=meta_pages   
+    if (sb.data_off % sb.page_size != 0) return false;                        
+    const uint32_t data_base_page = sb.data_off / sb.page_size;               
+
+    out_page_off    = data_base_page + static_cast<uint32_t>(page_id);        
+    out_valid_slots = valid_slots;                                            
+    out_page_size   = sb.page_size;                                           
+    return true;                                                              
+}
+
+static bool IdxBloomScanDataPage(const char* page_buf,                        
+                                uint32_t page_size,                          
+                                uint16_t valid_slots,                        
+                                const std::string& user_key,                 
+                                InternalKey& found) {                        
+    // 0) 防呆                                                                  
+    if (page_buf == nullptr) return false;                                    
+    const uint32_t slot_size = static_cast<uint32_t>(sizeof(InternalKey));    
+    if (page_size < slot_size) return false;                                  
+
+    const uint32_t slots_per_page = page_size / slot_size;                    
+    if (slots_per_page == 0) return false;                                    
+    if (valid_slots > slots_per_page) return false;                           
+
+    bool hit = false;                                                        
+    InternalKey best{};                                                       
+
+    // 1) 只掃有效 slots：0..valid_slots-1                                       
+    for (uint16_t s = 0; s < valid_slots; ++s) {                              
+        const char* p = page_buf + static_cast<uint32_t>(s) * slot_size;      
+
+        // 你目前專案 decode 的用法：InternalKey::Decode(std::string(64bytes))    
+        InternalKey ik = InternalKey::Decode(std::string(p, slot_size));      
+
+        if (ik.UserKey() == user_key) {                                       
+            // 同 user_key 多版本：挑 seq 最大                                     
+            if (!hit || ik.info.seq > best.info.seq) {                        
+                best = ik;                                                    
+                hit = true;                                                   
+            }                                                                 
+        }                                                                     
+    }                                                                         
+
+    if (!hit) return false;                                                   
+    found = best;                                                             
+    return true;                                                              
+}
+
+
 } // namespace
 
 
@@ -211,6 +338,7 @@ void PrintConfig() {
         case 0: packing_type_str = "kKeyPerPage"; break;
         case 1: packing_type_str = "kHash";       break;
         case 2: packing_type_str = "kKeyRange";   break;
+        case 3: packing_type_str = "kIndexFilter";   break;
         default: packing_type_str = "UNKNOWN";    break;
     }
 #endif
@@ -300,6 +428,12 @@ void API::print_result() {
     } else {
         double avg_util = total_space_util / total_SStable_num;
         pr_stat("average_space_utilization=%.4f", avg_util);
+    }
+    if (total_cache_read_count == 0.0) {
+        pr_error("The cache miss rate: N/A (no cache read)");
+    } else {
+        double avg_util = total_cache_read_miss_count / total_cache_read_count;
+        pr_stat("cache_miss_rate=%.4f", avg_util);
     }
     pr_stat("search_pattern_io=%.4fM", search_pattern_ioM);
     pr_info("================== DB experiment result end ==================");
@@ -554,6 +688,11 @@ Status API::get(std::string key, std::string& value) {
     // 2) SSTable 逐個往下找（維持你原本方式）
     auto sstables = lsmTree_->search_key(Key(key));
     char* buffer = (char*)allocateAligned(BLOCK_SIZE);
+    const uint32_t meta_pages = static_cast<uint32_t>(IDX_BLOOM_META_PAGES);
+    const uint32_t meta_bytes = meta_pages * IMS_PAGE_SIZE;
+
+    char* meta_buf = (char*)allocateAligned(meta_bytes);
+    char* page_buf = (char*)allocateAligned(IMS_PAGE_SIZE);
 
     while (!sstables.empty()) {
         auto sstable = sstables.front();
@@ -562,53 +701,55 @@ Status API::get(std::string key, std::string& value) {
         sstableManager_->readSSTable(sstable->filename, buffer);
         getSSTable()->waitAllTasksDone();
 
-        if (packing_ == PackingType::kIdxBloomData) {
-            InternalKey ik{};
-            if (!IdxBloomLookup(buffer, key, ik)) {
-                continue;  // ✅ bloom negative / page 無此 key：直接換下一個 sstable
-            }
-
-            if (ik.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion)) {
-                free(buffer);
-                return Status::NotFound("The key has been deleted");
-            }
-
-            auto rec = logManager_->readLog(ik.value_ptr.lpn, ik.value_ptr.offset);
-            if (!rec.has_value()) {
-                free(buffer);
-                return Status::IOError("Failed to read log for key");
-            }
-            value = rec->value;
-            free(buffer);
-            return Status::OK();
+        if (nvme_->nvme_read_sstable_page(sstable->filename,0,meta_pages ,meta_buf) != COMMAND_SUCCESS) {
+            free(meta_buf);
+            free(page_buf);
+            return Status::IOError("Failed to read SSTable meta");
         }
 
-        // 其他 packing：走你原本 parse_sstable() 流程
-        InternalKey search_key(key);
-        auto keys = parse_sstable(buffer);
-        auto it = keys.find(search_key);
-        if (it != keys.end()) {
-            if (it->info.type == static_cast<uint8_t>(ValueType::kTypeDeletion)) {
-                free(buffer);
-                return Status::NotFound("The key has been deleted");
-            }
-            auto rec = logManager_->readLog(it->value_ptr.lpn, it->value_ptr.offset);
-            if (!rec.has_value()) {
-                free(buffer);
-                return Status::IOError("Failed to read log for key");
-            }
-            value = rec->value;
-            free(buffer);
-            return Status::OK();
+        uint32_t page_off = 0;
+        uint16_t valid_slots = 0;
+        uint32_t page_size = 0;
+        if (!IdxBloomLocateInMeta(meta_buf, meta_bytes, key, page_off, valid_slots, page_size)) {
+            continue;
         }
-    }
+
+        if (nvme_->nvme_read_sstable_page(sstable->filename, page_off,1, page_buf) != COMMAND_SUCCESS) {
+            free(meta_buf);
+            free(page_buf);
+            return Status::IOError("Failed to read SSTable data page");
+        }
+
+        InternalKey ik{};
+        if (!IdxBloomScanDataPage(page_buf, page_size, valid_slots, key, ik)) {
+            continue;
+        }
+
+        if (ik.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion)) {
+            free(meta_buf);
+            free(page_buf);
+            return Status::NotFound("The key has been deleted");
+        }
+
+        auto rec = logManager_->readLog(ik.value_ptr.lpn, ik.value_ptr.offset);
+        if (!rec.has_value()) {
+            free(meta_buf);
+            free(page_buf);
+            return Status::IOError("Failed to read log for key");
+        }
+
+        value = rec->value;
+        free(meta_buf);
+        free(page_buf);
+        return Status::OK();
+     }
 
     free(buffer);
     return Status::NotFound("The key isn't in the DB");
 }
 
 #endif
-
+#if PACKING_TYPE != 3 
 Status API::get(std::string key,Record& rec){
     if(key.empty()){
         return Status::IOError("Key string is empty");
@@ -663,6 +804,94 @@ Status API::get(std::string key,Record& rec){
     rec = result.value();
     return Status::OK();
 }
+#else
+Status API::get(std::string key,Record& rec){
+    if (key.empty()) {
+        return Status::IOError("Key string is empty");
+    }
+
+    Key userKey(key);
+    InternalKey search_key(key);
+
+    // ---- 1) 先查 memtable / immutable ----
+    auto result = memtable_->get_record(key);
+    if (!result.has_value() && immutable_memtable_) {
+        result = immutable_memtable_->get_record(key);
+    }
+    if (result.has_value()) {
+        if (result->internal_key.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion)) {
+            return Status::NotFound("The key has been deleted");
+        }
+        rec = *result;
+        return Status::OK();
+    }
+
+    // ---- 2) 查 SSTables ----
+    auto sstables = lsmTree_->search_key(userKey);
+    if (sstables.empty()) {
+        return Status::NotFound("The key isn't in the DB");
+    }
+
+    char* buffer = (char*)allocateAligned(BLOCK_SIZE);
+
+    while (!sstables.empty()) {
+        auto sstable = sstables.front();
+        sstables.pop();
+
+        sstableManager_->readSSTable(sstable->filename, buffer);
+        getSSTable()->waitAllTasksDone();
+
+        // ✅ kIdxBloomData 不能用 parse_sstable()
+        if (packing_ == PackingType::kIdxBloomData) {
+            InternalKey ik{};
+            if (!IdxBloomLookup(buffer, key, ik)) {
+                continue;
+            }
+            if (ik.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion)) {
+                free(buffer);
+                return Status::NotFound("The key has been deleted");
+            }
+
+            auto record = logManager_->readLog(ik.value_ptr.lpn, ik.value_ptr.offset);
+            if (!record.has_value()) {
+                pr_debug("Failed to read log for key: %s at LPN: %u, offset: %u", key.c_str(),
+                         ik.value_ptr.lpn, ik.value_ptr.offset);
+                free(buffer);
+                return Status::IOError("Failed to read log for key");
+            }
+
+            rec = *record;
+            free(buffer);
+            return Status::OK();
+        }
+
+        // ---- 其他 packing：維持既有流程 ----
+        auto keys = parse_sstable(buffer);
+        auto it = keys.find(search_key);
+        if (it == keys.end()) continue;
+
+        if (it->info.type == static_cast<uint8_t>(ValueType::kTypeDeletion)) {
+            free(buffer);
+            return Status::NotFound("The key has been deleted");
+        }
+
+        auto record = logManager_->readLog(it->value_ptr.lpn, it->value_ptr.offset);
+        if (!record.has_value()) {
+            pr_debug("Failed to read log for key: %s at LPN: %u, offset: %u", key.c_str(),
+                     it->value_ptr.lpn, it->value_ptr.offset);
+            free(buffer);
+            return Status::IOError("Failed to read log for key");
+        }
+
+        rec = *record;
+        free(buffer);
+        return Status::OK();
+    }
+
+    free(buffer);
+    return Status::NotFound("The key isn't in the DB");
+}
+#endif
 
 std::set<InternalKey ,SetComparator> API::parse_sstable(char* buffer) {
     size_t offset = 0;
@@ -769,7 +998,7 @@ std::optional<std::set<std::string>> API::read_key_range(const std::string& file
         free(buffer);
         return std::nullopt;
     }
-    
+
     auto keys = parse_sstable_page(buffer);
     free(buffer);
 
@@ -893,13 +1122,30 @@ Status API::search(std::string key ,std::string& value){
     pr_debug("Search key: %s", key.c_str());
     Key userKey(key);
     InternalKey internalKey(key);
+    // if (memtable_) {
+    //     auto result = memtable_->Get(key);
+    //     if (!result.has_value() && immutable_memtable_) {
+    //         result = immutable_memtable_->Get(key);
+    //     }
+    //     if (result.has_value()) {
+    //         value = *result;
+    //         return Status::OK();
+    //     }
+    // }
     if (memtable_) {
-        auto result = memtable_->Get(key);
-        if (!result.has_value() && immutable_memtable_) {
-            result = immutable_memtable_->Get(key);
+        auto r = memtable_->get_record(key);
+        if (r.has_value()) {
+            if (r->internal_key.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion))
+                return Status::OK();
+            // 你現在不需要 value 就不填
+            return Status::OK();
         }
-        if (result.has_value()) {
-            value = *result;
+    }
+    if (immutable_memtable_) {
+        auto r = immutable_memtable_->get_record(key);
+        if (r.has_value()) {
+            if (r->internal_key.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion))
+                return Status::OK();
             return Status::OK();
         }
     }
@@ -912,74 +1158,130 @@ Status API::search(std::string key ,std::string& value){
         return Status::OK();
     }
     SearchPackageD search_package;
+    if(packing_ == PackingType::kIdxBloomData){
+        auto sstables = lsmTree_->search_key(Key(key));
+        // char* buffer = (char*)allocateAligned(BLOCK_SIZE);
+        const uint32_t meta_pages = static_cast<uint32_t>(IDX_BLOOM_META_PAGES);
+        const uint32_t meta_bytes = meta_pages * IMS_PAGE_SIZE;
 
-    while( !sstables.empty() ){
-        auto sstable = sstables.front();
-        pr_debug("Find SStable: %s  Key range [ %s ~ %s ]",sstable->filename.c_str(),sstable->rangeMin.toString().c_str(),sstable->rangeMax.toString().c_str());
+        char* meta_buf = (char*)allocateAligned(meta_bytes);
+        char* page_buf = (char*)allocateAligned(IMS_PAGE_SIZE);
 
-        sstables.pop();
-        SearchPatternD pattern_info;
-        switch (packing_){
-            case PackingType::kKeyPerPage:{
-                pattern_info.slot_index = 0;
-                break;
+        while (!sstables.empty()) {
+            auto sstable = sstables.front();
+            sstables.pop();
+
+            // sstableManager_->readSSTable(sstable->filename, buffer);
+            getSSTable()->waitAllTasksDone();
+
+            if (nvme_->nvme_read_sstable_page(sstable->filename,0,meta_pages ,meta_buf) != COMMAND_SUCCESS) {
+                free(meta_buf);
+                free(page_buf);
+                return Status::IOError("Failed to read SSTable meta");
             }
-            case PackingType::kHash:{
-                pattern_info.slot_index = HashModN(internalKey, SLOT_NUM_PER_PAGE); 
-                break;
-            }
-            case PackingType::kKeyRange: {
-                try {
-                    auto key_range = keyRangeCache_->get(sstable->filename);
 
-                    if (!key_range.has_value() || key_range->empty()) {
-                        auto fresh = read_key_range(sstable->filename);
-                        if (!fresh.has_value() || fresh->empty()) {
-                            pr_error("KeyRange is empty after read: %s", sstable->filename.c_str());
-                            return Status::Corruption("KeyRange empty: " + sstable->filename);
+            uint32_t page_off = 0;
+            uint16_t valid_slots = 0;
+            uint32_t page_size = 0;
+            if (!IdxBloomLocateInMeta(meta_buf, meta_bytes, key, page_off, valid_slots, page_size)) {
+                continue;
+            }
+
+            if (nvme_->nvme_read_sstable_page(sstable->filename, page_off,1, page_buf) != COMMAND_SUCCESS) {
+                free(meta_buf);
+                free(page_buf);
+                return Status::IOError("Failed to read SSTable data page");
+            }
+
+            InternalKey ik{};
+            if (!IdxBloomScanDataPage(page_buf, page_size, valid_slots, key, ik)) {
+                continue;
+            }
+
+            if (ik.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion)) {
+                free(meta_buf);
+                free(page_buf);
+                return Status::NotFound("The key has been deleted");
+            }
+            free(meta_buf);
+            free(page_buf);
+            return Status::OK();
+        }
+        free(meta_buf);
+        free(page_buf);
+        // free(buffer);
+    }
+    else{
+        while( !sstables.empty() ){
+            auto sstable = sstables.front();
+            pr_debug("Find SStable: %s  Key range [ %s ~ %s ]",sstable->filename.c_str(),sstable->rangeMin.toString().c_str(),sstable->rangeMax.toString().c_str());
+
+            sstables.pop();
+            SearchPatternD pattern_info;
+            switch (packing_){
+                case PackingType::kKeyPerPage:{
+                    pattern_info.slot_index = 0;
+                    break;
+                }
+                case PackingType::kHash:{
+                    pattern_info.slot_index = HashModN(internalKey, SLOT_NUM_PER_PAGE); 
+                    break;
+                }
+                case PackingType::kKeyRange: {
+                    try {
+                        auto key_range = keyRangeCache_->get(sstable->filename);
+                        total_cache_read_count++;
+                        if (!key_range.has_value() || key_range->empty()) {
+                            total_cache_read_miss_count++;
+                            auto fresh = read_key_range(sstable->filename);
+                            if (!fresh.has_value() || fresh->empty()) {
+                                pr_error("KeyRange is empty after read: %s", sstable->filename.c_str());
+                                return Status::Corruption("KeyRange empty: " + sstable->filename);
+                            }
+
+                            keyRangeCache_->put(sstable->filename, *fresh);
+                            key_range = std::move(fresh);
                         }
 
-                        keyRangeCache_->put(sstable->filename, *fresh);
-                        key_range = std::move(fresh);
+                        pattern_info = generate_SearchPatternD(sstable->filename, userKey, *key_range);
+                    } catch (const std::exception& e) {
+                        pr_error("Build KeyRange pattern failed for %s: %s",
+                                sstable->filename.c_str(), e.what());
+                        return Status::IOError(std::string("Build KeyRange pattern failed: ") + e.what());
                     }
-
-                    pattern_info = generate_SearchPatternD(sstable->filename, userKey, *key_range);
-                } catch (const std::exception& e) {
-                    pr_error("Build KeyRange pattern failed for %s: %s",
-                            sstable->filename.c_str(), e.what());
-                    return Status::IOError(std::string("Build KeyRange pattern failed: ") + e.what());
+                    break;
                 }
-                break;
+                default:
+                    return Status::NotFound("Unknown packing type");
             }
-            default:
-                return Status::NotFound("Unknown packing type");
+            pattern_info.sstable_name = sstable->filename;
+            search_package.searchPatterns.emplace_back(pattern_info);
         }
-        pattern_info.sstable_name = sstable->filename;
-        search_package.searchPatterns.emplace_back(pattern_info);
-    }
-    if (search_package.searchPatterns.empty()) {
-        return Status::NotFound("No valid SSTable patterns");
-    }
-    search_package.search_key = userKey.toString();
-    search_package.header.pattern_num = static_cast<uint32_t>(search_package.searchPatterns.size());
-    const std::string encoded_package = search_package.encode();
-    if (encoded_package.empty()) {
-        return Status::IOError("Encoded search package is empty");
-    }
-    search_pattern_io += encoded_package.size();
-    // search_package.dump();
-    void *buffer;
-    int rc = posix_memalign(&buffer, 4096, encoded_package.size());
-    if (rc != 0) {
-        pr_error("posix_memalign failed in API::search, rc=%d", rc);
-        return Status::IOError("posix_memalign failed");
-    }
-    memcpy(buffer, encoded_package.data(), encoded_package.size());
+        if (search_package.searchPatterns.empty()) {
+            return Status::NotFound("No valid SSTable patterns");
+        }
+        search_package.search_key = userKey.toString();
+        search_package.header.pattern_num = static_cast<uint32_t>(search_package.searchPatterns.size());
+        const std::string encoded_package = search_package.encode();
+        if (encoded_package.empty()) {
+            return Status::IOError("Encoded search package is empty");
+        }
+        search_pattern_io += encoded_package.size();
+        // search_package.dump();
+        void *buffer;
+        int rc = posix_memalign(&buffer, 4096, encoded_package.size());
+        if (rc != 0) {
+            pr_error("posix_memalign failed in API::search, rc=%d", rc);
+            return Status::IOError("posix_memalign failed");
+        }
+        memcpy(buffer, encoded_package.data(), encoded_package.size());
 
-    nvme_->nvme_search(reinterpret_cast<char*>(buffer), encoded_package.size());
-
-    free(buffer);
-    
+        int err = nvme_->nvme_search(reinterpret_cast<char*>(buffer), encoded_package.size());
+        if(err != OPERATION_SUCCESS){
+            pr_error("nvme_search failed in API");
+        }
+        free(buffer);
+    }
     return Status::OK();
 }
 #elif (SEARCH_PATTERN == 1)
@@ -1209,7 +1511,6 @@ void API::SimulateDeviceIOIfNeeded(const std::vector<std::shared_ptr<TreeNode>> 
     meta.dst_files.reserve(dstNodes.size());
 
     for (const auto& n : srcNodes) {
-        // 注意：這裡假設 TreeNode 有 filename 欄位，名稱請照你實際的來
         meta.src_files.push_back(n->filename);
     }
     for (const auto& n : dstNodes) {
@@ -1334,7 +1635,7 @@ void API::compaction() {
         Key nextKey(optKey->UserKey());
         auto srcNode = getLSMTree()->getNextNode(level, nextKey);
         if (!srcNode) {
-            pr_error("No next node at level %d", level);
+            pr_debug("No next node at level %d", level);
             continue;
         }
         std::vector<std::shared_ptr<TreeNode>> srcNodes;
@@ -1347,7 +1648,6 @@ void API::compaction() {
         InternalKey srcMinKey = LowerSentinel(srcNode->rangeMin.toString());
         InternalKey srcMaxKey = UpperSentinel(srcNode->rangeMax.toString());
         SimulateDeviceIOIfNeeded(srcNodes,dstNodes);
-        // 聚合目的層的 user key 範圍（允許為空）
         Key dstMinUser = srcNode->rangeMin, dstMaxUser = srcNode->rangeMax;
         bool hasDst = false;
         for (const auto& sp : dstNodes) {
