@@ -30,6 +30,13 @@ enum Operation {
 
 class CoreWorkload {
  public:
+
+  // 新增：讀取預先產生的 key trace
+  static const std::string KEY_TRACE_FILE_PROPERTY;
+  static const std::string KEY_TRACE_FILE_DEFAULT;
+  static const std::string KEY_TRACE_LOOP_PROPERTY;
+  static const std::string KEY_TRACE_LOOP_DEFAULT;
+
   /// 
   /// The name of the database table to run queries against.
   ///

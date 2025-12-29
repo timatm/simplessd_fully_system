@@ -12,7 +12,9 @@
 #include "skewed_latest_generator.h"
 #include "const_generator.h"
 #include "core_workload.h"
-
+#include <fstream>
+#include <atomic>
+#include <vector>
 #include <string>
 
 using ycsbc::CoreWorkload;
@@ -23,6 +25,12 @@ const string CoreWorkload::TABLENAME_DEFAULT = "usertable";
 
 const string CoreWorkload::FIELD_COUNT_PROPERTY = "fieldcount";
 const string CoreWorkload::FIELD_COUNT_DEFAULT = "10";
+
+const std::string CoreWorkload::KEY_TRACE_FILE_PROPERTY = "keytracefile";
+const std::string CoreWorkload::KEY_TRACE_FILE_DEFAULT = "";
+const std::string CoreWorkload::KEY_TRACE_LOOP_PROPERTY = "keytraceloop";
+const std::string CoreWorkload::KEY_TRACE_LOOP_DEFAULT = "true";
+
 
 const string CoreWorkload::FIELD_LENGTH_DISTRIBUTION_PROPERTY =
     "field_len_dist";
@@ -75,6 +83,60 @@ const string CoreWorkload::INSERT_START_DEFAULT = "0";
 
 const string CoreWorkload::RECORD_COUNT_PROPERTY = "recordcount";
 const string CoreWorkload::OPERATION_COUNT_PROPERTY = "operationcount";
+
+
+
+namespace ycsbc {
+
+class TraceGenerator : public Generator<uint64_t> {
+ public:
+  TraceGenerator(const std::string& path, bool loop)
+      : loop_(loop) {
+    std::ifstream in(path);
+    if (!in.is_open()) {
+      throw utils::Exception("Cannot open keytracefile: " + path);
+    }
+
+    uint64_t x;
+    while (in >> x) {
+      keys_.push_back(x);
+    }
+    if (keys_.empty()) {
+      throw utils::Exception("keytracefile is empty: " + path);
+    }
+    last_.store(keys_[0], std::memory_order_relaxed);
+  }
+
+  uint64_t Next() override {
+    uint64_t i = idx_.fetch_add(1, std::memory_order_relaxed);
+
+    uint64_t v;
+    if (loop_) {
+      v = keys_[i % keys_.size()];
+    } else {
+      if (i >= keys_.size()) v = keys_.back();
+      else v = keys_[i];
+    }
+
+    last_.store(v, std::memory_order_relaxed);
+    return v;
+  }
+
+  uint64_t Last() override {
+    return last_.load(std::memory_order_relaxed);
+  }
+
+ private:
+  std::vector<uint64_t> keys_;
+  bool loop_;
+  std::atomic<uint64_t> idx_{0};
+  std::atomic<uint64_t> last_{0};
+};
+
+} // namespace ycsbc
+
+ 
+
 
 void CoreWorkload::Init(const utils::Properties &p) {
   table_name_ = p.GetProperty(TABLENAME_PROPERTY,TABLENAME_DEFAULT);
@@ -145,9 +207,20 @@ void CoreWorkload::Init(const utils::Properties &p) {
     // that is larger than what exists at the beginning of the test.
     // If the generator picks a key that is not inserted yet, we just ignore it
     // and pick another key.
-    int op_count = std::stoi(p.GetProperty(OPERATION_COUNT_PROPERTY));
-    int new_keys = (int)(op_count * insert_proportion * 2); // a fudge factor
-    key_chooser_ = new ScrambledZipfianGenerator(record_count_ + new_keys);
+    std::string trace = p.GetProperty(KEY_TRACE_FILE_PROPERTY,
+                                      KEY_TRACE_FILE_DEFAULT);
+    bool loop = utils::StrToBool(p.GetProperty(KEY_TRACE_LOOP_PROPERTY,
+                                               KEY_TRACE_LOOP_DEFAULT));
+
+    if (!trace.empty()) {
+      // 走「模擬外預產生 key 序列」路徑：避免在模擬器裡做 Zipfian 初始化/運算
+      key_chooser_ = new TraceGenerator(trace, loop);
+    } else {
+      // 原本行為：在模擬器裡建 Zipfian（recordcount 大會非常慢）
+      int op_count = std::stoi(p.GetProperty(OPERATION_COUNT_PROPERTY));
+      int new_keys = (int)(op_count * insert_proportion * 2); // a fudge factor
+      key_chooser_ = new ScrambledZipfianGenerator(record_count_ + new_keys);
+    }
     
   } else if (request_dist == "latest") {
     key_chooser_ = new SkewedLatestGenerator(insert_key_sequence_);

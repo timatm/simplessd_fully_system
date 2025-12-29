@@ -172,6 +172,10 @@ IMS_interface::IMS_interface() {
         // 只有 host 測試時才在建構子就 init
         init_IMS();
     #endif
+    sstable_count_per_ch.clear();
+    for(int i = 0;i < CHANNEL_NUM;i++){
+        sstable_count_per_ch.push_back(0);
+    }
 }
 
 IMS_interface::~IMS_interface() {
@@ -289,6 +293,7 @@ int IMS_interface::write_sstable(uint64_t &lbn) {
     pr_debug("Allocated LBN %lu (CH=%d) for file: %s",lbn, LBN2CH(lbn), filename.c_str());
     node->channelInfo = LBN2CH(lbn);
     mappingTable_->insert_mapping(filename, lbn);
+    sstable_count_per_ch[node->channelInfo]++;
     // if (ENABLE_DISK) {
     //     err = persistenceManager_->writeBlock(lbn, buffer, BLOCK_SIZE);
     // }
@@ -1055,6 +1060,10 @@ void IMS_interface::print_result(){
     pr_info("================= IMS experient result =================");
     for(int i = 0;i < CHANNEL_NUM;i++){
         pr_stat("waer leveling CH[%d]=%u",i,ch_info[i]);
+    }
+    pr_info("================= SStable count per CH =================");
+    for(int i = 0;i < CHANNEL_NUM;i++){
+        pr_stat("write SStable count CH[%d]=%u",i,sstable_count_per_ch[i]);
     }
     pr_stat("inter=%f (Impact on search performance)",alpha_inter_);
     pr_stat("intra=%f (Impact on compaction performance)",alpha_intra_);

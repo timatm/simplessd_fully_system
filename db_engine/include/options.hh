@@ -25,12 +25,12 @@ static_assert(
 );
 
 
-#define LEVEL0_MAX 4
+#define LEVEL0_MAX 8
 #define LEVEL1_MAX 10
-#define LEVEL2_MAX LEVEL1_MAX * 10
-#define LEVEL3_MAX LEVEL2_MAX * 10
-#define LEVEL4_MAX LEVEL3_MAX * 10
-#define LEVEL5_MAX LEVEL4_MAX * 10
+#define LEVEL2_MAX LEVEL1_MAX * 2
+#define LEVEL3_MAX LEVEL2_MAX * 2
+#define LEVEL4_MAX LEVEL3_MAX * 2
+#define LEVEL5_MAX LEVEL4_MAX * 2
 #define LEVEL6_MAX LEVEL5_MAX * 10
 
 

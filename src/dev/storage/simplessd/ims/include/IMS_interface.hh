@@ -135,6 +135,7 @@ private:
     std::unique_ptr<LSMTree> lsmTree_;
     super_page* sp_ptr_ = nullptr;
     bool closed_ = false;
+    std::vector<uint32_t> sstable_count_per_ch;;
     uint32_t searh_parallel_block_num = 0;
     uint32_t compaction_parallel_block_num = 0;
 };

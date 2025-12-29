@@ -321,15 +321,15 @@ void PrintConfig() {
     #endif
     ;
 
-    // ---- SELECT_POLICY 說明 ----
-    const char* select_policy_str = nullptr;
-    switch (SELECT_POLICY) {
-        case 0: select_policy_str = "WROSTCASE"; break;
-        case 1: select_policy_str = "RR";        break;
-        case 2: select_policy_str = "LEVEL2CH";  break;
-        case 3: select_policy_str = "MYPOLICY";  break;
-        default: select_policy_str = "UNKNOWN";  break;
-    }
+    // // ---- SELECT_POLICY 說明 ----
+    // const char* select_policy_str = nullptr;
+    // switch (SELECT_POLICY) {
+    //     case 0: select_policy_str = "WROSTCASE"; break;
+    //     case 1: select_policy_str = "RR";        break;
+    //     case 2: select_policy_str = "LEVEL2CH";  break;
+    //     case 3: select_policy_str = "MYPOLICY";  break;
+    //     default: select_policy_str = "UNKNOWN";  break;
+    // }
 
     // ---- PACKING_TYPE 說明 ----
     const char* packing_type_str = nullptr;
@@ -346,7 +346,7 @@ void PrintConfig() {
     pr_info("RUNTYPE            = %d (%s)", RUNTYPE, runtype_str);
     pr_info("ENABLE_DISK        = %d (%s)", ENABLE_DISK, enable_disk_str);
     pr_info("NVME_DRIVER        = %d (%s)", NVME_DRIVER, nvme_driver_str);
-    pr_info("SELECT_POLICY      = %d (%s)", SELECT_POLICY, select_policy_str);
+    // pr_info("SELECT_POLICY      = %d (%s)", SELECT_POLICY, select_policy_str);
 #ifdef PACKING_TYPE
     pr_info("PACKING_TYPE       = %d (%s)", PACKING_TYPE, packing_type_str);
 #endif
@@ -1172,7 +1172,7 @@ Status API::search(std::string key ,std::string& value){
             sstables.pop();
 
             // sstableManager_->readSSTable(sstable->filename, buffer);
-            getSSTable()->waitAllTasksDone();
+            // getSSTable()->waitAllTasksDone();
 
             if (nvme_->nvme_read_sstable_page(sstable->filename,0,meta_pages ,meta_buf) != COMMAND_SUCCESS) {
                 free(meta_buf);

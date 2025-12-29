@@ -10,7 +10,7 @@
 // [SSD setting start]
 
 #define CHANNEL_NUM         8
-#define PACKAGE_NUM         4
+#define PACKAGE_NUM         8
 #define DIE_NUM             2
 #define PLANE_NUM           2
 #define BLOCK_NUM           64
