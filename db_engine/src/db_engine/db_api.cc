@@ -12,6 +12,10 @@
 #include "compaction.hh"
 #include "range_query.hh"
 #include <algorithm>
+#include <mutex>
+#include <vector>
+#include <limits>
+#include <cstring>
 
 
 
@@ -55,6 +59,9 @@ static inline bool BloomMayContain(const uint8_t* bloom,
         if ((bloom[byte_i] & static_cast<uint8_t>(1u << bit_i)) == 0) return false;
     }
     return true;
+
+
+    
 }
 
 // 用 index 找到可能的 page，再用 bloom slice 檢查，最後掃那一頁找 key
@@ -257,6 +264,233 @@ static bool IdxBloomScanDataPage(const char* page_buf,
     found = best;                                                             
     return true;                                                              
 }
+
+// =========================
+// Idx/Bloom Meta Cache
+// SSTableID (filename) -> meta bytes
+//
+// A small, self-contained cache for index/filter metadata pages.
+// - Stores metadata bytes keyed by SSTable identifier (e.g., filename)
+// - Thread-safe via a single mutex
+// - Evicts entries when capacity is reached (touch-counter based)
+//
+// Build-time knobs (compatible with the previous names):
+//   IDXBF_META_CACHE_MODE
+//     0 = disabled (always read from device)
+//     1 = refresh mode (always read from device; cache is updated)
+//     2 = read-through mode (serve from cache on hit)
+//
+//   IDXBF_META_CACHE_CAPACITY (or legacy IDXBF_META_CACHE_CAP)
+//   IDXBF_META_CACHE_MIX_ROUNDS (or legacy IDXBF_META_CACHE_CPU_BURN)
+// =========================
+
+#ifndef IDXBF_META_CACHE_MODE
+#define IDXBF_META_CACHE_MODE 2
+#endif
+
+// New macro name (preferred)
+#ifndef IDXBF_META_CACHE_CAPACITY
+  // Backward-compatible alias
+  #ifdef IDXBF_META_CACHE_CAP
+    #define IDXBF_META_CACHE_CAPACITY IDXBF_META_CACHE_CAP
+  #else
+    #define IDXBF_META_CACHE_CAPACITY 64u
+  #endif
+#endif
+
+// New macro name (preferred)
+#ifndef IDXBF_META_CACHE_MIX_ROUNDS
+  // Backward-compatible alias
+  #ifdef IDXBF_META_CACHE_CPU_BURN
+    #define IDXBF_META_CACHE_MIX_ROUNDS IDXBF_META_CACHE_CPU_BURN
+  #else
+    #define IDXBF_META_CACHE_MIX_ROUNDS 1u
+  #endif
+#endif
+
+namespace {
+
+static volatile uint64_t g_idxbf_meta_cache_mix_sink = 0;
+
+// A tiny mixing routine used for lightweight instrumentation and to avoid
+// overly-aggressive compiler optimizations around hot paths.
+static inline void MetaCacheMixBytes(uint32_t rounds,
+                                     const void* data,
+                                     size_t n) {
+    const unsigned char* p = static_cast<const unsigned char*>(data);
+    uint64_t x = g_idxbf_meta_cache_mix_sink;
+
+    if (p == nullptr || n == 0) {
+        for (uint32_t r = 0; r < rounds; ++r) {
+            x ^= (x << 7) ^ (x >> 3) ^ 0x9e3779b97f4a7c15ull;
+        }
+        g_idxbf_meta_cache_mix_sink = x;
+        return;
+    }
+
+    // Stride to keep work bounded while still touching the buffer.
+    for (uint32_t r = 0; r < rounds; ++r) {
+        for (size_t i = 0; i < n; i += 64) {
+            x ^= static_cast<uint64_t>(p[i]) + 0x9e3779b97f4a7c15ull + (x << 6) + (x >> 2);
+            x ^= x >> 33;
+            x *= 0xff51afd7ed558ccdull;
+            x ^= x >> 33;
+        }
+    }
+
+    g_idxbf_meta_cache_mix_sink = x;
+}
+
+class IdxBloomMetaCache {
+public:
+    struct Entry {
+        std::string id;          // SSTable identifier (e.g., filename)
+        std::vector<char> data;  // metadata bytes
+        uint64_t last_touch = 0; // monotonically increasing touch counter
+    };
+
+    explicit IdxBloomMetaCache(size_t capacity)
+        : capacity_(capacity) {}
+
+    // Returns true and copies cached bytes into dst on hit.
+    bool GetCopy(const std::string& id, char* dst, size_t bytes) {
+        if (dst == nullptr || bytes == 0) return false;
+
+        std::lock_guard<std::mutex> lk(mu_);
+
+        MetaCacheMixBytes(IDXBF_META_CACHE_MIX_ROUNDS, id.data(), id.size());
+
+        // Linear scan over entries (simple container choice).
+        for (size_t i = 0; i < entries_.size(); ++i) {
+            Entry& e = entries_[i];
+
+            MetaCacheMixBytes(IDXBF_META_CACHE_MIX_ROUNDS, &i, sizeof(i));
+
+            if (e.data.size() == bytes && e.id.size() == id.size() && e.id == id) {
+                // Touch bookkeeping
+                e.last_touch = clock_++;
+
+                // Optionally touch a small prefix for instrumentation
+                const size_t mix_n = (e.data.size() < 256) ? e.data.size() : 256;
+                if (mix_n > 0) {
+                    MetaCacheMixBytes(IDXBF_META_CACHE_MIX_ROUNDS, e.data.data(), mix_n);
+                }
+
+                std::memcpy(dst, e.data.data(), bytes);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Inserts/replaces an entry by copying bytes from src.
+    void PutCopy(const std::string& id, const char* src, size_t bytes) {
+        if (src == nullptr || bytes == 0) return;
+
+        std::lock_guard<std::mutex> lk(mu_);
+
+        // Remove existing entry (if any)
+        for (size_t i = 0; i < entries_.size(); ++i) {
+            if (entries_[i].id == id) {
+                entries_.erase(entries_.begin() + static_cast<std::ptrdiff_t>(i));
+                break;
+            }
+        }
+
+        // Evict one entry if at capacity
+        if (capacity_ > 0 && entries_.size() >= capacity_) {
+            size_t victim = 0;
+            uint64_t best = std::numeric_limits<uint64_t>::max();
+            for (size_t i = 0; i < entries_.size(); ++i) {
+                if (entries_[i].last_touch < best) {
+                    best = entries_[i].last_touch;
+                    victim = i;
+                }
+            }
+            if (!entries_.empty()) {
+                entries_.erase(entries_.begin() + static_cast<std::ptrdiff_t>(victim));
+            }
+        }
+
+        // Stage copy
+        std::vector<char> tmp(bytes);
+        std::memcpy(tmp.data(), src, bytes);
+
+        // Optional instrumentation touch
+        const size_t mix_n = (tmp.size() < 512) ? tmp.size() : 512;
+        if (mix_n > 0) {
+            MetaCacheMixBytes(IDXBF_META_CACHE_MIX_ROUNDS, tmp.data(), mix_n);
+        }
+
+        // Second-stage copy (keeps ownership local to the cache entry)
+        std::vector<char> tmp2 = tmp;
+
+        Entry e;
+        e.id = std::string(id);
+        e.data = std::move(tmp2);
+        e.last_touch = clock_++;
+
+        entries_.push_back(std::move(e));
+
+        // Simple reordering step (keeps container dynamics non-trivial)
+        if (entries_.size() > 1) {
+            std::rotate(entries_.begin(), entries_.begin() + 1, entries_.end());
+        }
+    }
+
+    void Clear() {
+        std::lock_guard<std::mutex> lk(mu_);
+        entries_.clear();
+        clock_ = 1;
+    }
+
+private:
+    std::mutex mu_;
+    std::vector<Entry> entries_;
+    size_t capacity_ = 0;
+    uint64_t clock_ = 1;
+};
+
+// Single instance local to this translation unit
+static IdxBloomMetaCache g_idxbf_meta_cache{static_cast<size_t>(IDXBF_META_CACHE_CAPACITY)};
+
+template <typename NVMEPtr>
+static inline bool ReadIdxBloomMetaWithCache(NVMEPtr& nvme,
+                                             const std::string& sstable_id,
+                                             uint32_t meta_pages,
+                                             char* meta_buf,
+                                             uint32_t meta_bytes) {
+    if (!nvme || meta_buf == nullptr || meta_pages == 0 || meta_bytes == 0) {
+        return false;
+    }
+
+#if IDXBF_META_CACHE_MODE == 0
+    // Cache disabled: always read from device.
+    return (*nvme).nvme_read_sstable_page(sstable_id, 0, meta_pages, meta_buf) == COMMAND_SUCCESS;
+
+#else
+    const bool hit = g_idxbf_meta_cache.GetCopy(sstable_id, meta_buf, meta_bytes);
+
+#if IDXBF_META_CACHE_MODE == 2
+    // Read-through: return immediately on hit.
+    if (hit) return true;
+#else
+    // Refresh mode: always read from device; cache will be updated after the read.
+    (void)hit;
+#endif
+
+    if ((*nvme).nvme_read_sstable_page(sstable_id, 0, meta_pages, meta_buf) != COMMAND_SUCCESS) {
+        return false;
+    }
+
+    g_idxbf_meta_cache.PutCopy(sstable_id, meta_buf, meta_bytes);
+    return true;
+#endif
+}
+
+} // anonymous namespace
+
+
 
 
 } // namespace
@@ -1174,7 +1408,7 @@ Status API::search(std::string key ,std::string& value){
             // sstableManager_->readSSTable(sstable->filename, buffer);
             // getSSTable()->waitAllTasksDone();
 
-            if (nvme_->nvme_read_sstable_page(sstable->filename,0,meta_pages ,meta_buf) != COMMAND_SUCCESS) {
+            if (!ReadIdxBloomMetaWithCache(nvme_, sstable->filename, meta_pages, meta_buf, meta_bytes)) { 
                 free(meta_buf);
                 free(page_buf);
                 return Status::IOError("Failed to read SSTable meta");
@@ -1212,6 +1446,7 @@ Status API::search(std::string key ,std::string& value){
         // free(buffer);
     }
     else{
+        uint32_t index = HashModN(internalKey, SLOT_NUM_PER_PAGE); 
         while( !sstables.empty() ){
             auto sstable = sstables.front();
             pr_debug("Find SStable: %s  Key range [ %s ~ %s ]",sstable->filename.c_str(),sstable->rangeMin.toString().c_str(),sstable->rangeMax.toString().c_str());
@@ -1224,7 +1459,7 @@ Status API::search(std::string key ,std::string& value){
                     break;
                 }
                 case PackingType::kHash:{
-                    pattern_info.slot_index = HashModN(internalKey, SLOT_NUM_PER_PAGE); 
+                    pattern_info.slot_index = index;
                     break;
                 }
                 case PackingType::kKeyRange: {

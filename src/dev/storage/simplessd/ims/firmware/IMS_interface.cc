@@ -512,7 +512,7 @@ int IMS_interface::allocate_block(uint64_t *l) {
         return OPERATION_FAILURE;
     }
 
-    uint64_t lbn = lbnPool_->RRpolicy();
+    uint64_t lbn = lbnPool_->RRpolicyForLog();
     if (lbn == INVALIDLBN) {
         pr_error("Allocate value log block failed: no free block or policy issue");
         return OPERATION_FAILURE;
@@ -534,8 +534,8 @@ int IMS_interface::rebuild_super_page() {
     sp_ptr_->magic = MAGIC;
     sp_ptr_->mapping_page_num = 0;
     sp_ptr_->log_page_num = 0;
-    sp_ptr_->currentLogLBN = lbnPool_->RRpolicy();
-    sp_ptr_->nextLogLBN = lbnPool_->RRpolicy();
+    sp_ptr_->currentLogLBN = lbnPool_->RRpolicyForLog();
+    sp_ptr_->nextLogLBN = lbnPool_->RRpolicyForLog();
     get_logManager()->insert_logRecord(sp_ptr_->currentLogLBN);
     get_logManager()->insert_logRecord(sp_ptr_->nextLogLBN);
     sp_ptr_->logOffset = 0;
@@ -995,7 +995,9 @@ int IMS_interface::search(std::vector<uint64_t> &pbn_list){
         ch_list[ch]++;
     }
     auto it = std::max_element(ch_list.begin(),ch_list.end());
+    
     if (it != ch_list.end()) {
+        pr_info("Search block num in parllel:%u",*it);
         searh_parallel_block_num += *it;
     }
     return OPERATION_SUCCESS;

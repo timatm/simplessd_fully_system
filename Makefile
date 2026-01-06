@@ -22,7 +22,9 @@ KERNEL	:= aarch64-vmlinux-4.9.92
 DISK	:= ${M5DIR}/disks/linaro-aarch64-linux.img
 endif
 
-
+SCRIPT_DIR  := script
+SCRIPT_PATH := ${SCRIPT_DIR}/exec_ycsb.sh
+SCRIPT_FLAG := --script ${SCRIPT_PATH}
 # hardware configs
 CPU	:= AtomicSimpleCPU
 CORES	:= 4
@@ -72,8 +74,8 @@ SIMPLESSD_FLAGS	:= --ssd-interface=nvme --ssd-config=${SSS_CFG}
 #### config done ####
 
 GEM5_TARGET	= ${GEM5DIR}/${ISA}/gem5.${VARIANT}
-GEM5_EXEC_CMD	= ${GEM5_TARGET} ${DEBUG_FLAGS} ${GEM5_CFG} ${SYS_FLAGS} ${SIMPLESSD_FLAGS}
-
+GEM5_EXEC_CMD = ${GEM5_TARGET} ${DEBUG_FLAGS} ${GEM5_CFG} ${SYS_FLAGS} ${SIMPLESSD_FLAGS}
+GEM5_EXEC_CMD_WITH_SCRIPT = ${GEM5_TARGET} ${DEBUG_FLAGS} ${GEM5_CFG} ${SYS_FLAGS} ${SIMPLESSD_FLAGS} ${SCRIPT_FLAG}
 build: setup
 	scons ${GEM5_TARGET} -j 8 --ignore-style
 
@@ -86,6 +88,12 @@ run: setup
 	touch ${M5_STAT_LOG}
 	ln -srf ${M5_STAT_LOG} m5out/stats.txt
 	${GEM5_EXEC_CMD} | tee ${M5_DEBUG_LOG}
+
+run-script: setup
+	echo "M5_PATH at $$M5_PATH"
+	touch ${M5_STAT_LOG}
+	ln -srf ${M5_STAT_LOG} m5out/stats.txt
+	${GEM5_EXEC_CMD_WITH_SCRIPT} | tee ${M5_DEBUG_LOG}
 
 m5term:
 	${MAKE} -C util/term

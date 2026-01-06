@@ -56,6 +56,7 @@ int LBNPool::init_lbn_pool(const std::vector<uint64_t>& used_lbn_list) {
         }
         insert_freeLBNList(lbn);
     }
+    lastUsedChannel_log = 0;
     // 
     return used_LBN_num;
 }
@@ -239,6 +240,23 @@ uint64_t LBNPool::worst_policy(){
     return INVALIDLBN;
 }
 
+uint64_t LBNPool::RRpolicyForLog(){
+    uint64_t lbn = INVALIDLBN;
+
+    int start_ch = (lastUsedChannel_log + 1) % CHANNEL_NUM;
+    int ch = start_ch;
+
+    do {
+        if (!freeLBNList_[ch].empty()) {
+            lbn = getFront_freeLBNList(ch);
+            lastUsedChannel_log = ch; 
+            return lbn;
+        }
+        ch = (ch + 1) % CHANNEL_NUM;
+    } while (ch != start_ch);
+    pr_error("LBN pool(RRpolicy) doesn't have free LBN");
+    return INVALIDLBN;
+}
 uint64_t LBNPool::RRpolicy(){
     uint64_t lbn = INVALIDLBN;
 
@@ -251,11 +269,11 @@ uint64_t LBNPool::RRpolicy(){
             lastUsedChannel_ = ch; 
             return lbn;
         }
+        pr_info("CH:%d does't have free block, choose next channel",ch);
         ch = (ch + 1) % CHANNEL_NUM;
     } while (ch != start_ch);
     pr_error("LBN pool(RRpolicy) doesn't have free LBN");
     return INVALIDLBN;
-
 }
 
 uint64_t LBNPool::level2CH(int level){

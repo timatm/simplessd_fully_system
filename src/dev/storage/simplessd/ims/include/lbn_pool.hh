@@ -35,6 +35,7 @@ public:
     void dump_LBNPool();
     uint64_t worst_policy();
     uint64_t RRpolicy();
+    uint64_t RRpolicyForLog();
     uint64_t level2CH(int level);
     uint64_t my_policy(const RelateChInfo& relate_ch_list);
     void clear();
@@ -54,6 +55,7 @@ private:
     std::vector<uint32_t> used_count_per_ch_; 
     std::deque<uint64_t> valueLogList_;
     uint8_t lastUsedChannel_;
+    uint8_t lastUsedChannel_log;
 };
 
 

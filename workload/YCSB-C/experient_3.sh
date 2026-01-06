@@ -23,7 +23,7 @@ if [ "$#" -lt 1 ]; then
 fi
 
 for bin in "$@"; do
-  rm -rf "$DISK_FILE"
+  # rm -rf "$DISK_FILE"
   if [ ! -x "$bin" ]; then
     echo "⚠️  找不到可執行檔: $bin" >&2
     continue
