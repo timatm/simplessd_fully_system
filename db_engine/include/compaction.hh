@@ -36,10 +36,10 @@ public:
     CompactionRunner(   SstableManager *smgr,LogManager *lmgr,LSMTree *tree,const InternalKeyComparator* icmp,
                         PackingType type,int level,
                         std::vector<std::shared_ptr<TreeNode>> srcSstables,
-                        std::vector<std::shared_ptr<TreeNode>> dstSstables);
+                        std::vector<std::shared_ptr<TreeNode>> dstSstables,
+                        uint32_t &sstable_write_count);
     // 執行 compaction，回傳新檔 metas 與統計資訊。
     Status Run();
-    
 private:
     // 2-way merge （左：src iterator，右：dst iterator），輸出到多個檔
 
@@ -62,6 +62,7 @@ private:
     std::unique_ptr<InternalIterator> dstLevelIter_;
     std::queue<std::string> sortedList_;
     std::vector<uint32_t> hash_num_;
+    uint32_t &sstable_write_count_compaction;
 };
 
 

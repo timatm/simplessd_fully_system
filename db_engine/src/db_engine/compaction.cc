@@ -94,14 +94,16 @@ CompactionRunner::CompactionRunner( SstableManager *smgr,
                                     PackingType type,
                                     int level,
                                     std::vector<std::shared_ptr<TreeNode>> srcSstables,
-                                    std::vector<std::shared_ptr<TreeNode>> dstSstables)
+                                    std::vector<std::shared_ptr<TreeNode>> dstSstables,
+                                    uint32_t &sstable_write_count)
         :   smgr_(smgr),
             lmgr_(lmgr),
             tree_(tree),
             icmp_(icmp),
             nums_(0),
             packType_(type),
-            srcLevel_(level){
+            srcLevel_(level),
+            sstable_write_count_compaction(sstable_write_count){
 
             if (level == 0) {
                 srcLevelIter_ = std::make_unique<Level0Iterator>(smgr_, lmgr_, icmp_, tree_, std::move(srcSstables), true);
@@ -174,7 +176,7 @@ Status CompactionRunner::Run() {
     // flush()：把目前 chunk 寫成一個檔，並重置所有累計
     auto flush = [&]() -> Status {
         if (sortedList_.empty()) return Status::OK();
-
+        sstable_write_count_compaction++;
         // 基本防呆
         if (sortedList_.front().size() != sizeof(InternalKey) ||
             sortedList_.back().size()  != sizeof(InternalKey)) {
@@ -198,9 +200,7 @@ Status CompactionRunner::Run() {
         return Status::OK();
     };
 
-    // emit()：把一個 key 放入 chunk；若滿了就 flush()
     auto emit = [&](std::string_view k) -> Status {
-        // 實際拷貝一份（queue 內持有）
         InternalKey a = InternalKey::Decode(std::string(k.data(),k.size()));
         if(a.key.key_size == 0){
             pr_error("Compation sorted list insert a error internal key");

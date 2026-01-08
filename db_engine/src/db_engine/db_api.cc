@@ -656,7 +656,7 @@ void API::print_result() {
     double search_pattern_ioM =
         static_cast<double>(search_pattern_io) / 1024.0 / 1024.0;
 
-    pr_info("================== DB experiment result ==================");
+    pr_stat("================== DB experiment result ==================");
     if (total_SStable_num == 0.0) {
         pr_error("The average space utilization: N/A (no SSTables)");
     } else {
@@ -670,7 +670,10 @@ void API::print_result() {
         pr_stat("cache_miss_rate=%.4f", avg_util);
     }
     pr_stat("search_pattern_io=%.4fM", search_pattern_ioM);
-    pr_info("================== DB experiment result end ==================");
+    pr_stat("compaction_count=%u", compaction_count);
+    pr_stat("Write SStable count trigger by compaction: %u",sstable_write_count_compaction);
+    pr_stat("Write SStable count trigger by immutable: %u",sstable_write_count_immtable);
+    pr_info("==========================================================");
 }
 
 
@@ -701,6 +704,7 @@ Status API::close(){
             return Status::IOError("Packing failed");
         }
         sstableManager_->writeSSTable(0, minK, maxK, std::move(buffer), /*clearImmutableTable=*/true);
+        sstable_write_count_immtable++;
     }
     sstableManager_->waitAllTasksDone();
 
@@ -773,6 +777,7 @@ Status API::put_impl(std::string key ,std::string value,PutType t){
     }
 
     if (need_flush) {
+        sstable_write_count_immtable++;
         const auto& list_ref = imm_hold->GetSkipList(); 
         auto buffer = sstableManager_->packingTable(list_ref);
         if ( buffer.data() == nullptr || buffer.size != BLOCK_SIZE) return Status::IOError("Packing failed");
@@ -1769,6 +1774,7 @@ void API::compaction() {
     bool compaction = false;
     // ---------- L0 -> L1 ----------
     if (getLSMTree()->get_level_num(0) >= LEVEL0_MAX) {
+        compaction_count++;
         pr_debug("Compaction start tree info:");
         // lsmTree_->dump_lsmtere();
         compaction = true;
@@ -1838,7 +1844,7 @@ void API::compaction() {
 
         CompactionRunner compaction(sstableManager_.get(), logManager_.get(),
                                     lsmTree_.get(), &icmp_, packing_,0,
-                                    srcNodes,dstNodes);
+                                    srcNodes,dstNodes,sstable_write_count_compaction);
         Status s = compaction.Run();
         if (s.ok()) {
             // 記錄下一輪起點（上界哨兵）
@@ -1855,6 +1861,7 @@ void API::compaction() {
     // ---------- Lk -> Lk+1 ----------
     for (int level = 1; level < MAX_LEVEL; ++level) {
         if (!compactionTrigger(level)) continue;
+        compaction_count++;
         pr_debug("Compaction triggered at Level %d", level);
         pr_debug("Compaction start tree info:");
         // lsmTree_->dump_lsmtere();
@@ -1905,7 +1912,7 @@ void API::compaction() {
 
         CompactionRunner compaction(sstableManager_.get(), logManager_.get(),
                                     lsmTree_.get(), &icmp_, packing_,level,
-                                    srcNodes, dstNodes);
+                                    srcNodes, dstNodes,sstable_write_count_compaction);
         Status s = compaction.Run();
         if (s.ok()) {
             set_compaction_key_list(srcMaxKey, level);  // 更新進度（上界哨兵）

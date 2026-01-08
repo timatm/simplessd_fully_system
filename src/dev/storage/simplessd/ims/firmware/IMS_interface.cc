@@ -294,6 +294,7 @@ int IMS_interface::write_sstable(uint64_t &lbn) {
     node->channelInfo = LBN2CH(lbn);
     mappingTable_->insert_mapping(filename, lbn);
     sstable_count_per_ch[node->channelInfo]++;
+    total_sstable_write_count++;
     // if (ENABLE_DISK) {
     //     err = persistenceManager_->writeBlock(lbn, buffer, BLOCK_SIZE);
     // }
@@ -997,9 +998,10 @@ int IMS_interface::search(std::vector<uint64_t> &pbn_list){
     auto it = std::max_element(ch_list.begin(),ch_list.end());
     
     if (it != ch_list.end()) {
-        pr_info("Search block num in parllel:%u",*it);
-        searh_parallel_block_num += *it;
+        // pr_info("Search block num in parllel:%u",*it);
+        total_search_parallel_block_num += *it;
     }
+    total_search_count++;
     return OPERATION_SUCCESS;
 }
 
@@ -1045,7 +1047,7 @@ int IMS_interface::simulate_compaction_io(std::vector<uint64_t> &lbn_list) {
 
     auto it = std::max_element(ch_list.begin(), ch_list.end());
     if (it != ch_list.end()) {
-        compaction_parallel_block_num += *it;
+        total_compaction_parallel_block_num += *it;
     }
 
     return OPERATION_SUCCESS;
@@ -1058,18 +1060,22 @@ void IMS_interface::print_result(){
     if(ch_info.empty() || ch_info.size() != CHANNEL_NUM){
         pr_error("Channel info size is error");
     }
-
-    pr_info("================= IMS experient result =================");
+    pr_stat("================= IMS experient result =================");
     for(int i = 0;i < CHANNEL_NUM;i++){
         pr_stat("waer leveling CH[%d]=%u",i,ch_info[i]);
     }
-    pr_info("================= SStable count per CH =================");
+    pr_stat("================= SStable count per CH =================");
     for(int i = 0;i < CHANNEL_NUM;i++){
-        pr_stat("write SStable count CH[%d]=%u",i,sstable_count_per_ch[i]);
+        pr_stat("SStable write count CH[%d]=%u",i,sstable_count_per_ch[i]);
     }
-    pr_stat("inter=%f (Impact on search performance)",alpha_inter_);
-    pr_stat("intra=%f (Impact on compaction performance)",alpha_intra_);
-    pr_stat("searh_parallel_block_num=%u",searh_parallel_block_num);
-    pr_stat("compaction_parallel_block_num=%u",compaction_parallel_block_num);
-    pr_info("================= IMS experient end =================");
+    pr_stat("=========================================================");
+    pr_stat("Total SStable write count %u",total_sstable_write_count);
+    // pr_stat("inter=%f (Impact on search performance)",alpha_inter_);
+    // pr_stat("intra=%f (Impact on compaction performance)",alpha_intra_);
+    pr_stat("Total_search_parallel_block_num=%u ",total_search_parallel_block_num);
+    pr_stat("Total_search_count=%u",total_search_count);
+    double block_per_search = (double)(total_search_parallel_block_num) / (double)(total_search_count);
+    pr_stat("Avg. search parallel block per search =%04f",block_per_search);
+    pr_stat("Total compaction_parallel_block_num =%u",total_compaction_parallel_block_num);
+    pr_stat("================= IMS experient end =================");
 }

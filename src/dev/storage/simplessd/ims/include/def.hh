@@ -81,7 +81,7 @@ enum class SelectT {
     MYPOLICY  = 3
 };
 #ifndef SELECT_POLICY
-#define SELECT_POLICY 2
+#define SELECT_POLICY 3
 #endif
 
 // RUNTYPE          : My enviroment / SimpleSSD = 0 / 1

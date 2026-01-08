@@ -91,6 +91,10 @@ private:
     double total_SStable_num            = 0.0;
     double total_cache_read_count       = 0.0;
     double total_cache_read_miss_count  = 0.0;
+
     uint64_t search_pattern_io = 0;
+    uint32_t compaction_count = 0;
+    uint32_t sstable_write_count_immtable = 0;
+    uint32_t sstable_write_count_compaction = 0;
 };
 #endif

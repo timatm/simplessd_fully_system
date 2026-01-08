@@ -10,7 +10,7 @@
 #endif
 #if RUNTYPE
 namespace SimpleSSD {
-    class Disk;      // forward 宣告，告訴編譯器有這個名字
+    class Disk; 
 }
 #else
 class Disk;         // 你的 ims/disk.hh 那個 Disk，可以 forward 或 include

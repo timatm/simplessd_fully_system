@@ -1,4 +1,7 @@
 # env configs
+TZ ?= Asia/Taipei
+export TZ
+
 BDIR 	:= /tmp/sss-build
 GEM5DIR := ./build
 M5DIR	:= ${HOME}/m5
@@ -25,6 +28,7 @@ endif
 SCRIPT_DIR  := script
 SCRIPT_PATH := ${SCRIPT_DIR}/exec_ycsb.sh
 SCRIPT_FLAG := --script ${SCRIPT_PATH}
+
 # hardware configs
 CPU	:= AtomicSimpleCPU
 CORES	:= 4
@@ -83,17 +87,61 @@ run-timing: CPU = TimingSimpleCPU
 run-timing: CORES = 1
 run-timing: run
 
+
+
 run: setup
 	echo "M5_PATH at $$M5_PATH"
 	touch ${M5_STAT_LOG}
 	ln -srf ${M5_STAT_LOG} m5out/stats.txt
 	${GEM5_EXEC_CMD} | tee ${M5_DEBUG_LOG}
 
+
+YCSB_PATH := $(CURDIR)/workload/YCSB-C
+# YCSB_SCRIPTS := exec_ycsba.sh exec_ycsbb.sh exec_ycsbc.sh exec_ycsbd.sh exec_ycsbf.sh
+YCSB_SCRIPTS := exec_ycsba.sh
+DISK_IMG := $(YCSB_PATH)/test.img
+SIMPLESSD_DISK_DIR := $(CURDIR)/cp2m5/disks
+SUMMARY_DIR := $(LOG_DIR)/summary
+
 run-script: setup
 	echo "M5_PATH at $$M5_PATH"
 	touch ${M5_STAT_LOG}
 	ln -srf ${M5_STAT_LOG} m5out/stats.txt
 	${GEM5_EXEC_CMD_WITH_SCRIPT} | tee ${M5_DEBUG_LOG}
+
+
+.PHONY: run-script-5
+run-script-5: setup
+	@mkdir -p "$(SUMMARY_DIR)"; \
+	runid=$$(date +%m%d-%H%M); \
+	agg="$(SUMMARY_DIR)/MYDB-STAT.$$runid.log"; \
+	: > "$$agg"; \
+	\
+	for s in $(YCSB_SCRIPTS); do \
+		tag=$${s%.sh}; \
+		ts=$$(date +%m%d-%H%M); \
+		suffix=".$$tag"; \
+		echo "=== [$$tag] reset disk and run (ts=$$ts) ==="; \
+		\
+		cp -f "$(DISK_IMG)" "$(SIMPLESSD_DISK_DIR)/test.img"; \
+		\
+		$(MAKE) run-script \
+			SCRIPT_PATH="$(SCRIPT_DIR)/$$s" \
+			M5_LOG_SUFFIX="$$suffix" \
+			TIME="$$ts" \
+			|| exit $$?; \
+		\
+		debug="$(LOG_DIR)/$$ts$$suffix.debug.log"; \
+		\
+		{ \
+			echo "----- ts=$$ts tag=$$tag -----"; \
+			grep '\[MYDB-STAT\]' "$$debug" || true; \
+			echo; \
+		} >> "$$agg"; \
+	done; \
+	\
+	echo "✅ MYDB-STAT aggregated to: $$agg"
+
 
 m5term:
 	${MAKE} -C util/term
