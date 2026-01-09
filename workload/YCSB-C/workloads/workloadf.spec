@@ -17,6 +17,7 @@ updateproportion=0
 scanproportion=0
 insertproportion=0
 readmodifywriteproportion=0.5
-
+keytracefile=./zipfian.ktrc
+keytraceloop=false
 requestdistribution=zipfian
 
