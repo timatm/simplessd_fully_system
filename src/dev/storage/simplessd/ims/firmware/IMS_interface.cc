@@ -1044,7 +1044,7 @@ int IMS_interface::simulate_compaction_io(std::vector<uint64_t> &lbn_list) {
 
     handle_one_side(meta.src_files, "src");
     handle_one_side(meta.dst_files, "dst");
-
+    total_compaction_count++;
     auto it = std::max_element(ch_list.begin(), ch_list.end());
     if (it != ch_list.end()) {
         total_compaction_parallel_block_num += *it;
@@ -1077,5 +1077,8 @@ void IMS_interface::print_result(){
     double block_per_search = (double)(total_search_parallel_block_num) / (double)(total_search_count);
     pr_stat("Avg. search parallel block per search =%04f",block_per_search);
     pr_stat("Total compaction_parallel_block_num =%u",total_compaction_parallel_block_num);
+    pr_stat("Total compaction count=%u",total_compaction_count);
+    double block_per_compaction = (double)(total_compaction_parallel_block_num) / (double)(total_compaction_count);
+    pr_stat("Avg. compaction parallel block per compaction =%04f",block_per_compaction);
     pr_stat("================= IMS experient end =================");
 }

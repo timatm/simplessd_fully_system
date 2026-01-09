@@ -16,6 +16,16 @@
 #include <atomic>
 #include <vector>
 #include <string>
+#include <algorithm>
+#include <cctype>
+#include <cstdint>
+#include <cstring>
+#include <fstream>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
 
 using ycsbc::CoreWorkload;
 using std::string;
@@ -25,12 +35,6 @@ const string CoreWorkload::TABLENAME_DEFAULT = "usertable";
 
 const string CoreWorkload::FIELD_COUNT_PROPERTY = "fieldcount";
 const string CoreWorkload::FIELD_COUNT_DEFAULT = "10";
-
-const std::string CoreWorkload::KEY_TRACE_FILE_PROPERTY = "keytracefile";
-const std::string CoreWorkload::KEY_TRACE_FILE_DEFAULT = "";
-const std::string CoreWorkload::KEY_TRACE_LOOP_PROPERTY = "keytraceloop";
-const std::string CoreWorkload::KEY_TRACE_LOOP_DEFAULT = "true";
-
 
 const string CoreWorkload::FIELD_LENGTH_DISTRIBUTION_PROPERTY =
     "field_len_dist";
@@ -84,9 +88,181 @@ const string CoreWorkload::INSERT_START_DEFAULT = "0";
 const string CoreWorkload::RECORD_COUNT_PROPERTY = "recordcount";
 const string CoreWorkload::OPERATION_COUNT_PROPERTY = "operationcount";
 
+const std::string CoreWorkload::KEY_TRACE_FILE_PROPERTY = "keytracefile";
+const std::string CoreWorkload::KEY_TRACE_FILE_DEFAULT  = "";       // 空字串 = 不啟用
+const std::string CoreWorkload::KEY_TRACE_LOOP_PROPERTY = "keytraceloop";
+const std::string CoreWorkload::KEY_TRACE_LOOP_DEFAULT  = "false";
 
 
 namespace ycsbc {
+
+namespace {
+
+static inline std::string Trim(std::string s) {
+  auto not_space = [](unsigned char ch) { return !std::isspace(ch); };
+  s.erase(s.begin(), std::find_if(s.begin(), s.end(), not_space));
+  s.erase(std::find_if(s.rbegin(), s.rend(), not_space).base(), s.end());
+  return s;
+}
+
+struct KtrcHeaderV1 {
+  char magic[4];       // "KTRC"
+  uint32_t version;    // 1
+  uint32_t reserved;   // 0
+  uint64_t nkeys;      // N
+};
+
+static inline void ReadFully(std::ifstream &in, void *buf, size_t bytes, const std::string &path) {
+  char *p = reinterpret_cast<char *>(buf);
+  size_t done = 0;
+  while (done < bytes) {
+    const size_t chunk = std::min(bytes - done, static_cast<size_t>(1 << 20)); // 1MB chunks
+    in.read(p + done, static_cast<std::streamsize>(chunk));
+    if (!in) {
+      throw std::runtime_error("LoadKeyTraceFile: truncated/failed read: " + path);
+    }
+    done += chunk;
+  }
+}
+
+class VectorTraceGenerator : public Generator<uint64_t> {
+ public:
+  VectorTraceGenerator(const std::vector<uint64_t>* keys, bool loop)
+      : keys_(keys), loop_(loop) {
+    if (!keys_ || keys_->empty()) {
+      throw utils::Exception("VectorTraceGenerator: empty key trace");
+    }
+    last_.store((*keys_)[0], std::memory_order_relaxed);
+  }
+
+  uint64_t Next() override {
+    uint64_t i = idx_.fetch_add(1, std::memory_order_relaxed);
+    uint64_t v;
+    if (loop_) {
+      v = (*keys_)[i % keys_->size()];
+    } else {
+      v = (i >= keys_->size()) ? keys_->back() : (*keys_)[i];
+    }
+    last_.store(v, std::memory_order_relaxed);
+    return v;
+  }
+
+  uint64_t Last() override {
+    return last_.load(std::memory_order_relaxed);
+  }
+
+ private:
+  const std::vector<uint64_t>* keys_;
+  bool loop_;
+  std::atomic<uint64_t> idx_{0};
+  std::atomic<uint64_t> last_{0};
+};
+
+} // namespace
+
+void CoreWorkload::LoadKeyTraceFile(const std::string &path) {
+  key_trace_.clear();
+  key_trace_pos_.store(0, std::memory_order_relaxed);
+
+  // 先用 binary 模式打開
+  std::ifstream in(path, std::ios::binary);
+  if (!in.is_open()) {
+    throw std::runtime_error("LoadKeyTraceFile: cannot open: " + path);
+  }
+
+  // 取得檔案大小
+  in.seekg(0, std::ios::end);
+  std::streamoff fsize = in.tellg();
+  in.seekg(0, std::ios::beg);
+
+  if (fsize < 4) {
+    throw std::runtime_error("LoadKeyTraceFile: file too small: " + path);
+  }
+
+  // 讀 magic
+  char magic[4] = {0, 0, 0, 0};
+  in.read(magic, 4);
+  if (!in) {
+    throw std::runtime_error("LoadKeyTraceFile: cannot read header: " + path);
+  }
+
+  // ---- Case A: KTRC header ----
+  if (std::memcmp(magic, "KTRC", 4) == 0) {
+    uint32_t version = 0;
+    uint32_t reserved = 0;
+    uint64_t nkeys = 0;
+
+    ReadFully(in, &version, sizeof(version), path);
+    ReadFully(in, &reserved, sizeof(reserved), path);
+    ReadFully(in, &nkeys, sizeof(nkeys), path);
+
+    if (version != 1) {
+      throw std::runtime_error("LoadKeyTraceFile: unsupported KTRC version=" +
+                               std::to_string(version) + " path=" + path);
+    }
+    if (nkeys == 0) {
+      throw std::runtime_error("LoadKeyTraceFile: KTRC nkeys=0 path=" + path);
+    }
+
+    const std::streamoff expect =
+        static_cast<std::streamoff>(4 + sizeof(version) + sizeof(reserved) + sizeof(nkeys)) +
+        static_cast<std::streamoff>(nkeys) * static_cast<std::streamoff>(sizeof(uint64_t));
+    if (fsize < expect) {
+      throw std::runtime_error("LoadKeyTraceFile: KTRC truncated (size mismatch) path=" + path);
+    }
+
+    key_trace_.resize(static_cast<size_t>(nkeys));
+    ReadFully(in, key_trace_.data(), static_cast<size_t>(nkeys) * sizeof(uint64_t), path);
+    return;
+  }
+
+  // ---- Case B: raw uint64 binary (no header) ----
+  in.seekg(0, std::ios::beg);
+  if (fsize > 0 && (fsize % static_cast<std::streamoff>(sizeof(uint64_t)) == 0)) {
+    const size_t nkeys = static_cast<size_t>(fsize / static_cast<std::streamoff>(sizeof(uint64_t)));
+    if (nkeys == 0) {
+      throw std::runtime_error("LoadKeyTraceFile: raw-binary has 0 keys: " + path);
+    }
+    key_trace_.resize(nkeys);
+    ReadFully(in, key_trace_.data(), nkeys * sizeof(uint64_t), path);
+    return;
+  }
+
+  // ---- Case C: text fallback (one integer per line, allow # comments) ----
+  in.close();
+  std::ifstream txt(path);
+  if (!txt.is_open()) {
+    throw std::runtime_error("LoadKeyTraceFile: cannot reopen as text: " + path);
+  }
+
+  std::string line;
+  while (std::getline(txt, line)) {
+    // 去掉行尾 \r（Windows 檔案常見）
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+
+    // 去掉 inline comment
+    auto hash = line.find('#');
+    if (hash != std::string::npos) line = line.substr(0, hash);
+
+    line = Trim(line);
+    if (line.empty()) continue;
+
+    // 允許前後空白、但內容要是 uint64
+    uint64_t v = 0;
+    try {
+      v = static_cast<uint64_t>(std::stoull(line));
+    } catch (...) {
+      throw std::runtime_error("LoadKeyTraceFile: invalid line: '" + line + "' in " + path);
+    }
+    key_trace_.push_back(v);
+  }
+
+  if (key_trace_.empty()) {
+    throw std::runtime_error("LoadKeyTraceFile: text trace empty: " + path);
+  }
+}
+
+
 
 class TraceGenerator : public Generator<uint64_t> {
  public:
@@ -178,6 +354,17 @@ void CoreWorkload::Init(const utils::Properties &p) {
     ordered_inserts_ = true;
   }
   
+  const std::string trace = p.GetProperty(KEY_TRACE_FILE_PROPERTY, KEY_TRACE_FILE_DEFAULT);
+  key_trace_loop_ = (p.GetProperty(KEY_TRACE_LOOP_PROPERTY, KEY_TRACE_LOOP_DEFAULT) == "true");
+
+  if (!trace.empty() && trace != "none") {
+    LoadKeyTraceFile(trace);
+    use_key_trace_ = true;
+  } else {
+    use_key_trace_ = false;
+  }
+
+
   key_generator_ = new CounterGenerator(insert_start);
   
   if (read_proportion > 0) {
@@ -202,26 +389,14 @@ void CoreWorkload::Init(const utils::Properties &p) {
     key_chooser_ = new UniformGenerator(0, record_count_ - 1);
     
   } else if (request_dist == "zipfian") {
-    // If the number of keys changes, we don't want to change popular keys.
-    // So we construct the scrambled zipfian generator with a keyspace
-    // that is larger than what exists at the beginning of the test.
-    // If the generator picks a key that is not inserted yet, we just ignore it
-    // and pick another key.
-    std::string trace = p.GetProperty(KEY_TRACE_FILE_PROPERTY,
-                                      KEY_TRACE_FILE_DEFAULT);
-    bool loop = utils::StrToBool(p.GetProperty(KEY_TRACE_LOOP_PROPERTY,
-                                               KEY_TRACE_LOOP_DEFAULT));
-
-    if (!trace.empty()) {
-      // 走「模擬外預產生 key 序列」路徑：避免在模擬器裡做 Zipfian 初始化/運算
-      key_chooser_ = new TraceGenerator(trace, loop);
+    if (use_key_trace_) {
+      key_chooser_ = new VectorTraceGenerator(&key_trace_, key_trace_loop_);
     } else {
-      // 原本行為：在模擬器裡建 Zipfian（recordcount 大會非常慢）
       int op_count = std::stoi(p.GetProperty(OPERATION_COUNT_PROPERTY));
-      int new_keys = (int)(op_count * insert_proportion * 2); // a fudge factor
+      int new_keys = (int)(op_count * insert_proportion * 2);
       key_chooser_ = new ScrambledZipfianGenerator(record_count_ + new_keys);
     }
-    
+
   } else if (request_dist == "latest") {
     key_chooser_ = new SkewedLatestGenerator(insert_key_sequence_);
     

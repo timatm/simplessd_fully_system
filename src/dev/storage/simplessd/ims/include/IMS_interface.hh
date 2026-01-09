@@ -140,6 +140,7 @@ private:
     uint32_t total_search_parallel_block_num = 0;
     uint32_t total_search_count = 0;
     uint32_t total_compaction_parallel_block_num = 0;
+    uint32_t total_compaction_count = 0;
     // uint32_t compaction_count = 0;
 };
 

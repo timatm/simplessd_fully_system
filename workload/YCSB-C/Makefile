@@ -67,12 +67,17 @@ endif
 
 # ===== Sources =====
 DISABLED_SRCS := db/redis_db.cc
+
+# ✅ 新增：排除根目錄的工具檔（避免被 ycsbc link 進去）
+DISABLED_TOP_SRCS := key_gen.cc keytrace_gen.cc
+
 SUBSRCS_ALL := $(wildcard core/*.cc) $(wildcard db/*.cc)
 SUBSRCS     := $(filter-out $(DISABLED_SRCS),$(SUBSRCS_ALL))
 OBJECTS     := $(SUBSRCS:.cc=.o)
 DEPS        := $(OBJECTS:.o=.d)
 
-TOP_SRCS    := $(wildcard *.cc)
+# ✅ 改這行：把 DISABLED_TOP_SRCS filter 掉
+TOP_SRCS    := $(filter-out $(DISABLED_TOP_SRCS),$(wildcard *.cc))
 TOP_OBJS    := $(TOP_SRCS:.cc=.o)
 TOP_DEPS    := $(TOP_OBJS:.o=.d)
 

@@ -92,8 +92,13 @@ private:
     double total_cache_read_count       = 0.0;
     double total_cache_read_miss_count  = 0.0;
 
+    uint32_t total_put_count = 0;
+    uint32_t total_get_count = 0;
+
     uint64_t search_pattern_io = 0;
     uint32_t compaction_count = 0;
+    uint32_t search_hit_in_memory = 0;
+
     uint32_t sstable_write_count_immtable = 0;
     uint32_t sstable_write_count_compaction = 0;
 };

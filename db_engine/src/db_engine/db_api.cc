@@ -657,6 +657,8 @@ void API::print_result() {
         static_cast<double>(search_pattern_io) / 1024.0 / 1024.0;
 
     pr_stat("================== DB experiment result ==================");
+    pr_stat("Total Put() count: %u", total_put_count);
+    pr_stat("Total Get() count: %u", total_get_count);
     if (total_SStable_num == 0.0) {
         pr_error("The average space utilization: N/A (no SSTables)");
     } else {
@@ -673,6 +675,7 @@ void API::print_result() {
     pr_stat("compaction_count=%u", compaction_count);
     pr_stat("Write SStable count trigger by compaction: %u",sstable_write_count_compaction);
     pr_stat("Write SStable count trigger by immutable: %u",sstable_write_count_immtable);
+    pr_stat("Search hit in memory count: %u",search_hit_in_memory);
     pr_info("==========================================================");
 }
 
@@ -748,6 +751,7 @@ Status API::close(){
 
 
 Status API::put(std::string key, std::string value) {
+    total_put_count++;
     return put_impl(std::move(key), std::move(value), PutType::kPutByUser);
 }
 
@@ -1355,6 +1359,7 @@ std::set<InternalKey ,SetComparator> API::parse_sstable_page(char* buffer) {
 
 #if (SEARCH_PATTERN == 0)
 Status API::search(std::string key ,std::string& value){
+    total_get_count++;
     if(key.empty()){
         return Status::IOError("Key string is empty");
     }
@@ -1374,13 +1379,14 @@ Status API::search(std::string key ,std::string& value){
     if (memtable_) {
         auto r = memtable_->get_record(key);
         if (r.has_value()) {
+            search_hit_in_memory++;
             if (r->internal_key.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion))
                 return Status::OK();
-            // 你現在不需要 value 就不填
             return Status::OK();
         }
     }
     if (immutable_memtable_) {
+        search_hit_in_memory++;
         auto r = immutable_memtable_->get_record(key);
         if (r.has_value()) {
             if (r->internal_key.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion))

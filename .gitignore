@@ -74,3 +74,7 @@ workload/YCSB-C/ycsbc_pack2_place3_real
 workload/YCSB-C/ycsbc_pack2_place3_sim
 workload/YCSB-C/ycsbc_pack3_place1_sim
 workload/YCSB-C/ycsbc_pack3_place1_real
+
+workload/YCSB-C/latest.ktrc
+workload/YCSB-C/zipfian.ktrc
+workload/YCSB-C/keytrace_gen

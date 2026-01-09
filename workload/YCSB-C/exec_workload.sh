@@ -10,7 +10,7 @@ DISK_FILE="${DISK_FILE:-test.img}"
 
 LOAD_SPEC_PATH="${LOAD_SPEC_PATH:-workloads/workload.spec}"
 
-WORKLOAD_SET="${WORKLOAD_SET:-A}"
+WORKLOAD_SET="${WORKLOAD_SET:-C}"
 
 WORKLOAD_SPEC_FMT="${WORKLOAD_SPEC_FMT:-workloads/workload%s.spec}"
 

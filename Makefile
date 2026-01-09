@@ -102,6 +102,8 @@ YCSB_SCRIPTS := exec_ycsba.sh
 DISK_IMG := $(YCSB_PATH)/test.img
 SIMPLESSD_DISK_DIR := $(CURDIR)/cp2m5/disks
 SUMMARY_DIR := $(LOG_DIR)/summary
+TERMINAL_OUT_DIR := $(CURDIR)/m5out
+TERMINAL_OUT := $(TERMINAL_OUT_DIR)/system.pc.com_1.device
 
 run-script: setup
 	echo "M5_PATH at $$M5_PATH"
@@ -109,17 +111,16 @@ run-script: setup
 	ln -srf ${M5_STAT_LOG} m5out/stats.txt
 	${GEM5_EXEC_CMD_WITH_SCRIPT} | tee ${M5_DEBUG_LOG}
 
-
 .PHONY: run-script-5
 run-script-5: setup
 	@mkdir -p "$(SUMMARY_DIR)"; \
-	runid=$$(date +%m%d-%H%M); \
+	runid=$$(date +%m%d-%H%M%S); \
 	agg="$(SUMMARY_DIR)/MYDB-STAT.$$runid.log"; \
 	: > "$$agg"; \
 	\
 	for s in $(YCSB_SCRIPTS); do \
 		tag=$${s%.sh}; \
-		ts=$$(date +%m%d-%H%M); \
+		ts=$$(date +%m%d-%H%M%S); \
 		suffix=".$$tag"; \
 		echo "=== [$$tag] reset disk and run (ts=$$ts) ==="; \
 		\
@@ -131,16 +132,22 @@ run-script-5: setup
 			TIME="$$ts" \
 			|| exit $$?; \
 		\
-		debug="$(LOG_DIR)/$$ts$$suffix.debug.log"; \
+		term_log="$(LOG_DIR)/$$ts$$suffix.terminal.log"; \
+		if [ -f "$(TERMINAL_OUT)" ]; then \
+			cp -f "$(TERMINAL_OUT)" "$$term_log"; \
+		else \
+			echo "[WARN] missing terminal out: $(TERMINAL_OUT)" >> "$$term_log"; \
+		fi; \
 		\
 		{ \
 			echo "----- ts=$$ts tag=$$tag -----"; \
-			grep '\[MYDB-STAT\]' "$$debug" || true; \
+			grep '\[MYDB-STAT\]' "$$term_log" || true; \
 			echo; \
 		} >> "$$agg"; \
 	done; \
 	\
 	echo "✅ MYDB-STAT aggregated to: $$agg"
+
 
 
 m5term:
