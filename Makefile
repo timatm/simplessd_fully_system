@@ -96,9 +96,9 @@ run: setup
 	${GEM5_EXEC_CMD} | tee ${M5_DEBUG_LOG}
 
 
-# YCSB_PATH := $(CURDIR)/workload/YCSB-C
+YCSB_PATH := $(CURDIR)/workload/YCSB-C
 YCSB_SCRIPTS := exec_ycsba.sh exec_ycsbb.sh exec_ycsbc.sh exec_ycsbd.sh exec_ycsbf.sh
-YCSB_SCRIPTS := exec_ycsba.sh
+# YCSB_SCRIPTS := exec_ycsba.sh
 DISK_IMG := $(YCSB_PATH)/test.img
 SIMPLESSD_DISK_DIR := $(CURDIR)/cp2m5/disks
 SUMMARY_DIR := $(LOG_DIR)/summary
