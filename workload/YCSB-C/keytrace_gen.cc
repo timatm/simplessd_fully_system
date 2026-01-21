@@ -1,8 +1,8 @@
 // Compile commamd
 // g++ -O3 -std=c++17 -Wall -Wextra -Wno-unused-parameter -pthread -I. -I./core -o keytrace_gen keytrace_gen.cc
 // How to use
-// ./keytrace_gen --dist zipfian --recordcount 10000000 --operationcount 10000000 --out zipfian.ktrc
-// ./keytrace_gen --dist latest  --recordcount 10000000 --operationcount 10000000 --out latest.ktrc
+// ./keytrace_gen --dist zipfian --recordcount 10000000 --operationcount 5000000 --out zipfian.ktrc
+// ./keytrace_gen --dist latest  --recordcount 10000000 --operationcount 5000000 --out latest.ktrc
 
 
 

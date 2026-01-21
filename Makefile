@@ -97,18 +97,23 @@ run: setup
 
 
 YCSB_PATH := $(CURDIR)/workload/YCSB-C
-YCSB_SCRIPTS := exec_ycsba.sh exec_ycsbb.sh exec_ycsbc.sh exec_ycsbd.sh exec_ycsbf.sh
+YCSB_SCRIPTS := exec_ycsbc.sh exec_ycsbd.sh exec_ycsbf.sh
+# YCSB_SCRIPTS := exec_ycsba.sh exec_ycsbb.sh exec_ycsbc.sh exec_ycsbd.sh exec_ycsbf.sh
 # YCSB_SCRIPTS := exec_ycsba.sh
 DISK_IMG := $(YCSB_PATH)/test.img
 SIMPLESSD_DISK_DIR := $(CURDIR)/cp2m5/disks
 SUMMARY_DIR := $(LOG_DIR)/summary
 TERMINAL_OUT_DIR := $(CURDIR)/m5out
 TERMINAL_OUT := $(TERMINAL_OUT_DIR)/system.pc.com_1.device
+TERMIAL_LOG := ${LOG_DIR}/${TIME}${M5_LOG_SUFFIX}.terminal.log
+
+term_log := ${LOG_DIR}/${TIME}${M5_LOG_SUFFIX}.terminal.log
 
 run-script: setup
 	echo "M5_PATH at $$M5_PATH"
 	touch ${M5_STAT_LOG}
-	ln -srf ${M5_STAT_LOG} m5out/stats.txt
+	ln -sf "$(abspath ${M5_STAT_LOG})" m5out/stats.txt
+	ln -sf "$(abspath ${term_log})" m5out/system.pc.com_1.device
 	${GEM5_EXEC_CMD_WITH_SCRIPT} | tee ${M5_DEBUG_LOG}
 
 .PHONY: run-script-5
