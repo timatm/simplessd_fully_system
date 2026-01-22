@@ -73,14 +73,7 @@ AlignedBuf SstableManager::packingTable(const SkipList<Record, RecordComparator>
     }
 }
 
-// ———— 下面三個 packer：示範骨架（把你原本寫入邏輯搬進來） ————
-// 假設：
-// - AlignedBuf 有 data()/size 成員；MakeAlignedBlockSize() 會回傳 4096 對齊、大小 = IMS_PAGE_NUM*IMS_PAGE_SIZE 的緩衝
-// - InternalKey::Encode() 產生的長度 <= IMS_PAGE_SIZE（你原本就檢查了）
-// - HashModN(const InternalKey&, size_t) 已存在
-// - InternalKey 具備成員 key.key_size（0 表示空槽；和你原本 hash 版本一致）
 
-// 小工具：邊界檢查寫入
 static inline void write_bytes_at(AlignedBuf& buf, size_t off, const void* src, size_t len) {
     if (off + len > buf.size) {
         throw std::runtime_error("write_bytes_at OOB: off=" + std::to_string(off) +
@@ -90,7 +83,7 @@ static inline void write_bytes_at(AlignedBuf& buf, size_t off, const void* src, 
     std::memcpy(buf.data() + off, src, len);
 }
 
-// 小工具：把區間填成某個 byte 值
+
 static inline void fill_bytes_at(AlignedBuf& buf, size_t off, uint8_t val, size_t len) {
     if (off + len > buf.size) {
         throw std::runtime_error("fill_bytes_at OOB: off=" + std::to_string(off) +
@@ -101,7 +94,6 @@ static inline void fill_bytes_at(AlignedBuf& buf, size_t off, uint8_t val, size_
 }
 
 AlignedBuf SstableManager::keyPerPagePacking(const SkipList<Record, RecordComparator>& skiplist) const {
-    // 總大小 = IMS_PAGE_NUM * IMS_PAGE_SIZE（等於你原本 total_size）
     AlignedBuf out = MakeAlignedBlockSize();
 
     auto it = skiplist.GetIterator();
@@ -127,9 +119,6 @@ AlignedBuf SstableManager::keyPerPagePacking(const SkipList<Record, RecordCompar
 }
 
 AlignedBuf SstableManager::keyHashPacking(const SkipList<Record, RecordComparator>& skiplist) const {
-    // 按你原本算法：slots_per_page = IMS_PAGE_SIZE / sizeof(InternalKey)
-    // 總 slot = IMS_PAGE_NUM * slots_per_page，總 bytes = total_slots * sizeof(InternalKey)
-    // 而 IMS_PAGE_NUM*IMS_PAGE_SIZE == total_slots*sizeof(InternalKey)（等價）
     AlignedBuf out = MakeAlignedBlockSize();
 
     const size_t slots_per_page = IMS_PAGE_SIZE / sizeof(InternalKey);
@@ -266,8 +255,8 @@ AlignedBuf SstableManager::keyHashPacking(std::queue<std::string> sortedList) co
     }
     const size_t total_slots = IMS_PAGE_NUM * slots_per_page;
 
-    AlignedBuf out = MakeAlignedBlockSize();   // 大小等同 total_slots * sizeof(InternalKey)
-    std::memset(out.data(), 0, out.size);      // 與舊版一致：清 0，讓 key_size==0 當空槽
+    AlignedBuf out = MakeAlignedBlockSize();
+    std::memset(out.data(), 0, out.size);
 
     while (!sortedList.empty()) {
         const std::string& enc = sortedList.front();
@@ -336,7 +325,6 @@ AlignedBuf SstableManager::idxBloomDataPacking(std::queue<std::string> sortedLis
         throw std::runtime_error("idxBloomDataPacking(queue): too many entries for fixed 2MB SSTable");
     }
 
-    // entry_count==0 防呆（理論上不該發生，但避免 index_entry_count==0 除零）
     const uint32_t data_pages_used   = (entry_count == 0) ? 0 : (entry_count + slots_per_page - 1) / slots_per_page;
     const uint32_t index_entry_count = data_pages_used;
 
@@ -351,7 +339,6 @@ AlignedBuf SstableManager::idxBloomDataPacking(std::queue<std::string> sortedLis
 
     uint16_t filter_bytes_per_page = 0;
     if (index_entry_count > 0 && bloom_bytes > 0) {
-        // floor；太小就退化成 no-bloom（filter_bytes_per_page=0）
         filter_bytes_per_page = static_cast<uint16_t>(bloom_bytes / index_entry_count);
         if (filter_bytes_per_page == 0) {
             filter_bytes_per_page = 0;
@@ -360,7 +347,6 @@ AlignedBuf SstableManager::idxBloomDataPacking(std::queue<std::string> sortedLis
 
     AlignedBuf out = MakeAlignedBlockSize();
 
-    // bloom region 一定要清 0（MakeAlignedBlockSize() 可能預設填 0xFF）
     if (bloom_bytes > 0) {
         std::memset(out.data() + bloom_off, 0, bloom_bytes);
     }
@@ -534,7 +520,6 @@ AlignedBuf SstableManager::idxBloomDataPacking(const SkipList<Record, RecordComp
         throw std::runtime_error("idxBloomDataPacking: too many entries for fixed 2MB SSTable");
     }
 
-    // 空表也要能寫：index_entry_count=0, filter_bytes_per_page=0
     const uint32_t data_pages_used     = (entry_count == 0) ? 0 : (entry_count + slots_per_page - 1) / slots_per_page;
     const uint32_t index_entry_count   = data_pages_used;
 
@@ -783,8 +768,6 @@ Status SstableIterator::Init() {
     entries_.clear();
     pos_ = -1;
 
-    // 让 readSSTable 读满一个块；失败时返回错误
-    // 例如：Status readSSTable(const std::string&, char*& out_buf); 保障 out_buf 指向 BLOCK_SIZE 的内存
     sstable_mgr_->readSSTable(filename_, buf_.data());
     // sstable_mgr_->waitAllTasksDone();
     if (buf_.data() == nullptr) {

@@ -118,12 +118,6 @@ void Mapping::dump_mapping() const {
     pr_info("================================");
 }
 
-int Mapping::flush_mapping_table() {
-    // TODO：根據 mappingTable_ 分頁序列化成 mappingTablePerPage 結構後寫入
-    // 你可以將其對應的 LPN 為 sp_ptr_new_->mapping_store 開始的連續區塊
-    return OPERATION_SUCCESS;
-}
-
 void Mapping::clear() {
     mappingTable_.clear();
 }

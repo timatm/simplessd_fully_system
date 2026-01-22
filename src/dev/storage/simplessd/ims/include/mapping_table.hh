@@ -47,7 +47,6 @@ public:
     uint64_t getLBN(const std::string& filename) const;
     void remove_mapping(const std::string& filename);
     void dump_mapping() const;
-    int flush_mapping_table(); 
     void clear();
 
     const std::unordered_map<std::string, uint64_t>& get_table() const {

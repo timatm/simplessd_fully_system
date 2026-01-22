@@ -49,7 +49,7 @@ Record Record::Decode(const std::string& data) {
     if (rec.internal_key_size != sizeof(InternalKey)) {
         pr_error("[Record::Decode] invalid internal_key_size=%u, total_len=%zu",
                  rec.internal_key_size, data.size());
-        return rec;   // 或乾脆丟掉
+        return rec;
     }
     // 3) key
     std::string ikey_blob = data.substr(offset, rec.internal_key_size);

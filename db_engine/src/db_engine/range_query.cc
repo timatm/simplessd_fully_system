@@ -5,7 +5,6 @@
 
 static constexpr size_t kIKeySize = sizeof(InternalKey);
 
-// ------------- 小工具：上界檢查（key < upper 才在區間內） -------------
 namespace {
 inline bool InUpperBound(const InternalKeyComparator& ic,
                          std::string_view key,
@@ -15,7 +14,7 @@ inline bool InUpperBound(const InternalKeyComparator& ic,
 }
 } // namespace
 
-// ------------- HeapCmp 實作 -------------
+
 
 
 
@@ -29,8 +28,6 @@ bool QueryIterator::HeapCmp::LessKey(const InternalKeyComparator& ic,
 }
 
 bool QueryIterator::HeapCmp::operator()(size_t a, size_t b) const {
-    // priority_queue 的 Compare 應回傳「a 的優先級是否低於 b」
-    // 若要最小堆（最小 key 在 top），則在 a > b 時回傳 true
     const auto& ca = (*children)[a];
     const auto& cb = (*children)[b];
 
@@ -40,16 +37,13 @@ bool QueryIterator::HeapCmp::operator()(size_t a, size_t b) const {
     const std::string_view ka = ca.it->key();
     const std::string_view kb = cb.it->key();
 
-    // a > b 等價於 LessKey(kb, ka)
     return LessKey(*icmp, kb, ka);
 }
 
-// ------------- QueryIterator 私有方法 -------------
 
 Status QueryIterator::BuildChildren_() {
     children_.clear();
     
-    // 如果你也想把 memtable/immutable 納入，這裡可以先 push 進 children_
     if (memIter_) {
         children_.push_back(Child{std::move(memIter_), false});
     }
@@ -57,10 +51,9 @@ Status QueryIterator::BuildChildren_() {
         children_.push_back(Child{std::move(immuteIter_), false});
     }
 
-    // 將各 level 的 iterator 建好後「push 進 children_」
     for (int level = 0; level < MAX_LEVEL; level++) {
         if (tree_->get_level_num(level) > 0) {
-            build_iter(level);  // 這個函式內部會 push_back 到 children_
+            build_iter(level);
         }
     }
 

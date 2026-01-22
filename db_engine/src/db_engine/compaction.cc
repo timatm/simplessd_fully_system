@@ -3,7 +3,6 @@
 #include <limits>
 #include <cstring>
 
-// ===== 工具：安全解碼 / 萃取 user-key（translation unit 內可用） =====
 static inline bool DecodeInternal(std::string_view s, InternalKey& out) {
     if (s.size() != sizeof(InternalKey)) {
         pr_error("DecodeInternal: bad size=%zu (expect=%zu)", s.size(), sizeof(InternalKey));
@@ -173,11 +172,9 @@ Status CompactionRunner::Run() {
         return std::memcmp(&a, &b, sizeof(InternalKey)) == 0;
     };
 
-    // flush()：把目前 chunk 寫成一個檔，並重置所有累計
     auto flush = [&]() -> Status {
         if (sortedList_.empty()) return Status::OK();
         sstable_write_count_compaction++;
-        // 基本防呆
         if (sortedList_.front().size() != sizeof(InternalKey) ||
             sortedList_.back().size()  != sizeof(InternalKey)) {
             pr_error("flush: bad internal key size (front/back)");
@@ -191,7 +188,6 @@ Status CompactionRunner::Run() {
         // minK.dump();
         // maxK.dump();
         smgr_->writeSSTable( static_cast<uint8_t>(srcLevel_ + 1), minK, maxK, std::move(buffer), /*clearImmuteTable=*/false);
-        // 清空 queue、重置計數
         
 
         while (!sortedList_.empty()) sortedList_.pop();
@@ -225,14 +221,13 @@ Status CompactionRunner::Run() {
         return Status::OK();
     };
 
-    // 兩路併合
     bool l_valid = srcLevelIter_->Valid();
     bool r_valid = dstLevelIter_->Valid();
 
-    std::string last_user_key; // 折疊同 user（internal 同 user 按 seq 降序）
+    std::string last_user_key;
     bool have_last = false;
 
-    // 單調性檢查（debug）
+
     bool has_prev = false;
     InternalKey prev_internal{};
 
@@ -306,7 +301,6 @@ Status CompactionRunner::Run() {
         }
     }
 
-    // 收尾 flush
     if (!sortedList_.empty()) {
         auto fs = flush();
         if (!fs.ok()){

@@ -1,8 +1,8 @@
 #include "level_iter.hh"
 #include <algorithm>
-#include <limits>      // std::numeric_limits
-#include <stdexcept>   // std::invalid_argument
-#include <cstdint>     // uint64_t（若未在别处包含）
+#include <limits> 
+#include <stdexcept> 
+#include <cstdint> 
 
 static constexpr size_t kIKeySize = sizeof(InternalKey);
 
@@ -17,7 +17,7 @@ inline InternalKey UpperSentinel(const std::string& uk) {
 
 uint64_t to_u64_stoull(const std::string& s, int base = 10) {
     size_t pos = 0;
-    uint64_t v = std::stoull(s, &pos, base); // base=10；若想自动识别 0x 前缀，用 base=0
+    uint64_t v = std::stoull(s, &pos, base);
     if (pos != s.size()) throw std::invalid_argument("trailing chars");
     return v;
 }
@@ -191,8 +191,6 @@ void Level0Iterator::Next() {
 
 void Level0Iterator::Prev() {
     if (!Valid()) { SeekToLast(); return; }
-
-    // 反向遍歷：以當前 key 為上界，重建每個 child 的位置到 <= cur
     std::string cur(key_.data(), key_.size());
     clear_heap_();
     curr_idx_ = static_cast<size_t>(-1);
@@ -203,10 +201,8 @@ void Level0Iterator::Prev() {
 
         ch.it->Seek(std::string_view(cur.data(), cur.size()));
         if (!ch.it->Valid()) {
-            // cur 比此文件的所有 key 都大 → 回到该文件的最后一个 key
             ch.it->SeekToLast();
         } else if (!LessKey_(ch.it->key(), cur)) {
-            // 否则，如果 key >= cur，则退一格，落到 < cur
             ch.it->Prev();
         }
         if (ch.it->Valid() && ge_lower_(ch.it->key())) push_heap_(i);
@@ -264,14 +260,14 @@ void Level0Iterator::pull_top_max_() {
     tmp.reserve(heap_.size());
 
     while (!heap_.empty()) {
-        last = heap_.top();           // 记录“当前弹出的”
+        last = heap_.top(); 
         tmp.push_back(last);
         heap_.pop();
     }
 
-    for (size_t idx : tmp) heap_.push(idx);  // 还原堆
+    for (size_t idx : tmp) heap_.push(idx);
 
-    curr_idx_ = last;                        // last 就是“最大值”
+    curr_idx_ = last; 
     key_      = children_[last].it->key();
     has_top_  = true;
 }
@@ -381,9 +377,7 @@ void Level0Iterator::build_bounds_from_opts_() {
 
 bool Level0Iterator::LoadL0Metas_() {
     metas_.clear();
-
-    // 1) 決定查詢的 user-key 區間
-    Key qmin;                              // 最小：空 key
+    Key qmin;                          
     Key qmax; qmax.key_size = 40; std::memset(qmax.key, 0xFF, 40); // 最大：40B 0xFF
 
     if (canon_lower_.has_value()) {
@@ -399,7 +393,6 @@ bool Level0Iterator::LoadL0Metas_() {
         qmax = upper.key;
     }
 
-    // 2) 取覆蓋此 user 區間的 L0 檔案（vector）
     auto sstables = tree_->search_one_level(0, qmin, qmax);
 
     metas_.reserve(sstables.size());
@@ -412,16 +405,14 @@ bool Level0Iterator::LoadL0Metas_() {
         meta.max_key  = UpperSentinel(sstable->rangeMax.toString()).Encode();
         if (meta.min_key.size() != kIKeySize || meta.max_key.size() != kIKeySize) return false;
 
-        // 檔名非純數字時避免丟例外
         try {
             meta.file_id = to_u64_stoull(sstable->filename);
         } catch (...) {
-            meta.file_id = fid_fallback++; // 保底 tie-break
+            meta.file_id = fid_fallback++; 
         }
         metas_.push_back(std::move(meta));
     }
 
-    // 4) compaction 模式：載完 metas 才清掉上下界，後續 Seek/SeekToFirst 無界遍歷
     if (compaction_) {
         canon_lower_.reset();
         canon_upper_.reset();
@@ -481,8 +472,6 @@ Status LevelNIterator::Init() {
     }
     children_.resize(metas_.size());
     for (size_t i = 0; i < metas_.size(); ++i) children_[i].meta = metas_[i];
-
-    // 不開檔，在第一次使用時才 lazy open
     SeekToFirst();
     return st_;
 }
@@ -557,7 +546,6 @@ void LevelNIterator::Seek(std::string_view internal_target) {
 
     for (; i < children_.size(); ++i) {
         if (position_child_to_target_ge_(i, tgt)) {
-            // 再檢查一下下界
             if (!ge_lower_(children_[i].it->key())) continue;
             cur_file_ = i;
             key_ = children_[i].it->key(); 
@@ -578,7 +566,6 @@ void LevelNIterator::Next() {
         key_ = it.key();
         return;
     }
-    // 換到下一檔
     size_t i = cur_file_ + 1;
     for (; i < children_.size(); ++i) {
         if (position_child_to_first_(i)) {
@@ -599,7 +586,6 @@ void LevelNIterator::Prev() {
     it.Prev();
     if (it.Valid() && ge_lower_(it.key())) { key_ = it.key(); return; }
 
-    // 需換到前一檔
     if (cur_file_ == 0) {
         has_top_ = false;
         key_ = {};
@@ -787,8 +773,6 @@ Status LevelNIterator::ensure_child_open_(size_t i) {
         lru_touch_(i);
         return Status::OK();
     }
-
-    // 先開，後驅逐（避免把自己立刻趕走）
     auto it = std::make_unique<SstableIterator>(smgr_, lmgr_, icmp_, ch.meta.filename, kPackingType);
     auto s = it->Init();
     if (!s.ok()) return s;
@@ -801,7 +785,6 @@ Status LevelNIterator::ensure_child_open_(size_t i) {
 }
 
 void LevelNIterator::lru_touch_(size_t i) {
-    // 移除舊位置
     for (auto it = open_lru_.begin(); it != open_lru_.end(); ++it) {
         if (*it == i) {
             open_lru_.erase(it); 
@@ -816,9 +799,8 @@ void LevelNIterator::lru_evict_if_needed_() {
         size_t victim = open_lru_.front();
         open_lru_.pop_front();
         if (victim == cur_file_) {
-            // 避免把正在使用的游標關掉，放到隊尾重新考慮
             open_lru_.push_back(victim);
-            if (open_lru_.size() == 1) return; // 只有自己，無法驅逐
+            if (open_lru_.size() == 1) return;
             continue;
         }
         auto& ch = children_[victim];

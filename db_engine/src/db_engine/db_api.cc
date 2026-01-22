@@ -1083,8 +1083,6 @@ Status API::get(std::string key,Record& rec){
 
         sstableManager_->readSSTable(sstable->filename, buffer);
         getSSTable()->waitAllTasksDone();
-
-        // ✅ kIdxBloomData 不能用 parse_sstable()
         if (packing_ == PackingType::kIdxBloomData) {
             InternalKey ik{};
             if (!IdxBloomLookup(buffer, key, ik)) {
@@ -1227,7 +1225,6 @@ std::optional<std::set<std::string>> API::read_key_range(const std::string& file
     char* buffer = reinterpret_cast<char*>(p);
     std::memset(buffer, 0xFF, IMS_PAGE_SIZE);
 
-    // ⚠️ 關鍵：用 err != 0 判斷（適用於 passthru 回傳 errno / status code 的情況）
     int err = nvme_->nvme_read_ssKeyRange(filename, buffer);
     if (err != 0) {
         pr_error("read_key_range: nvme_read_ssKeyRange failed for %s, err=%d",
@@ -1253,7 +1250,6 @@ std::optional<std::set<std::string>> API::read_key_range(const std::string& file
 
     std::set<std::string> user_key_range;
     for (const auto& ik : keys) {
-        // 更保守：空 key/不合法 key 直接跳過
         if (ik.key.key_size == 0) continue;
         if (!ik.IsValid()) continue;
         user_key_range.insert(ik.UserKey());
@@ -1645,16 +1641,13 @@ Status API::range_query(std::string start_key,
         return Status::InvalidArgument("Start key cannot be greater than end key");
     }
 
-    // 1) 準備 [lower, upper) 的 InternalKey（已編碼）
     const std::string lower =InternalKey(start_key, 0, ValueType::kTypeMin).Encode();
     const std::string upper =InternalKey(end_key, UINT64_MAX, ValueType::kTypeMax).Encode();
 
-    // 2) 準備 MemTable iter（擁有權移交給 QueryIterator）
     std::unique_ptr<MemTableIterator> memIter;
     std::unique_ptr<MemTableIterator> immuteIter;
 
     if (memtable_) {
-        // 假設 GetSkipList() 回傳的是 shared_ptr<SkipList<...>>
         // 且 MemTableIterator(list, const InternalKeyComparator*) 簽名成立
         memIter = std::make_unique<MemTableIterator>(memtable_->GetSkipList(), &icmp_);
     }
@@ -1665,11 +1658,10 @@ Status API::range_query(std::string start_key,
     QueryIterator it(getSSTable(),
                      getLogManager(),
                      getLSMTree(),
-                     &icmp_,         // 若 icmp_ 本來就是指標，這裡改成 icmp_
+                     &icmp_,
                      std::move(memIter),
                      std::move(immuteIter));
 
-    // 5) 設定區間 + Init
     it.SetInternalRange(lower, upper);
     Status s = it.Init();
     if (!s.ok()) return s;
@@ -1696,17 +1688,11 @@ Status API::scan(std::string start_key,
         return Status::InvalidArgument("Start or end key string is empty");
     }
     const std::string lower = InternalKey(start_key, 0, ValueType::kTypeMin).Encode();
-    // 1) 準備 [lower, upper) 的 InternalKey（已編碼）
-    // const std::string lower =InternalKey(start_key, 0, ValueType::kTypeMin).Encode();
-    // const std::string upper =InternalKey(end_key, UINT64_MAX, ValueType::kTypeMax).Encode();
-
-    // 2) 準備 MemTable iter（擁有權移交給 QueryIterator）
     std::unique_ptr<MemTableIterator> memIter;
     std::unique_ptr<MemTableIterator> immuteIter;
 
     if (memtable_) {
-        // 假設 GetSkipList() 回傳的是 shared_ptr<SkipList<...>>
-        // 且 MemTableIterator(list, const InternalKeyComparator*) 簽名成立
+
         memIter = std::make_unique<MemTableIterator>(memtable_->GetSkipList(), &icmp_);
     }
     if (immutable_memtable_) {
@@ -1825,10 +1811,7 @@ void API::compaction() {
         //     dstNode->dump();   
         // }
         pr_debug("Dump destination nodes end");
-        // 正確的 internal key 哨兵
-        
 
-        // 聚合目的層的 user key 範圍（允許為空）
         Key dstMinUser = node->rangeMin, dstMaxUser = node->rangeMax;
         bool hasDst = false;
         for (const auto& sp : dstNodes) {
@@ -1853,9 +1836,7 @@ void API::compaction() {
                                     srcNodes,dstNodes,sstable_write_count_compaction);
         Status s = compaction.Run();
         if (s.ok()) {
-            // 記錄下一輪起點（上界哨兵）
             set_compaction_key_list(srcMaxKey, 0);
-            // 安全刪除（跳過 nullptr）
             for (const auto& sp : dstNodes) if (sp) removeSSable(sp);
             for (const auto& sp : srcNodes) if (sp) removeSSable(sp);
         } else {
@@ -1877,7 +1858,6 @@ void API::compaction() {
         if (!optKey.has_value()) {
             auto firstNode = getLSMTree()->getLevelFirstNode(level);
             if (!firstNode) continue;
-            // 預設起點要用【下界哨兵】
             optKey = LowerSentinel(firstNode->rangeMin.toString());
         }
         Key nextKey(optKey->UserKey());
