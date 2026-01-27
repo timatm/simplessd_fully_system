@@ -30,7 +30,11 @@ SCRIPT_PATH := ${SCRIPT_DIR}/exec_ycsb.sh
 SCRIPT_FLAG := --script ${SCRIPT_PATH}
 
 # hardware configs
-CPU	:= AtomicSimpleCPU
+
+# CPU Type:
+# TimingSimpleCPU
+# AtomicSimpleCPU
+CPU	:= TimingSimpleCPU
 CORES	:= 4
 CLK	:= 3GHz
 CACHE	:= --caches --l2cache
