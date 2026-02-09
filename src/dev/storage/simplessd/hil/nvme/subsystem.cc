@@ -475,7 +475,6 @@ void Subsystem::readIMSDirectFTL(Namespace *ns, uint64_t slpn, uint64_t nlpn,
 
   DMAFunction doRead = [this](uint64_t, void *context) {
     auto req = (Request *)context;
-
     // 關鍵：呼叫 HIL 的直通版本
     pHIL->readDirectFTL(*req);
 
@@ -489,6 +488,35 @@ void Subsystem::readIMSDirectFTL(Namespace *ns, uint64_t slpn, uint64_t nlpn,
 
   execute(CPU::NVME__SUBSYSTEM, CPU::CONVERT_UNIT, doRead, req);
 }
+
+void Subsystem::readIMSDirectFTLBatch(Namespace *ns,
+                                      const std::vector<uint64_t> &lpnList,
+                                      DMAFunction &func, void *context) {
+  (void)ns;
+
+  struct BatchCtx {
+    Request req;
+    std::vector<uint64_t> lpns;
+  };
+  Request baseReq(func, context);
+  baseReq.range.slpn = lpnList.empty() ? 0 : lpnList.front();
+  baseReq.range.nlp  = lpnList.size();
+  baseReq.offset     = 0;
+  baseReq.length     = lpnList.size() * logicalPageSize; 
+
+  BatchCtx *pCtx = new BatchCtx{baseReq, lpnList};
+
+  DMAFunction doRead = [this](uint64_t, void *ctx) {
+    auto pCtx = (BatchCtx *)ctx;
+
+    pHIL->readDirectFTLBatch(pCtx->lpns, pCtx->req);
+
+    delete pCtx;
+  };
+
+  execute(CPU::NVME__SUBSYSTEM, CPU::CONVERT_UNIT, doRead, pCtx);
+}
+
 
 void Subsystem::write(Namespace *ns, uint64_t slba, uint64_t nlblk,
                       DMAFunction &func, void *context) {

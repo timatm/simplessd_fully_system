@@ -2283,35 +2283,34 @@ void Namespace::search_key(SQEntryWrapper &req, RequestFunction &func) {
   if (!err) {
     DMAFunction doRead = [this](uint64_t tick, void *context) {
       DMAFunction dmaDone = [this](uint64_t tick, void *context) {
-        DMAFunction searchDone = [this](uint64_t tick, void *context){
+        DMAFunction searchDone = [this](uint64_t tick, void *context) {
           IOContext *pContext = (IOContext *)context;
-          pContext->beginAt++;
-          
-          if(pContext->beginAt == pContext->nlb){
-            pContext->resp.makeStatus(false, false,
-                                      TYPE_GENERIC_COMMAND_STATUS,
-                                      STATUS_SUCCESS);
-            pContext->function(pContext->resp);
-            
-            // 清理 buffer / DMA / context
-            if (pContext->buffer) {
-              free(pContext->buffer);
-              pContext->buffer = nullptr;
-            }
-            debugprint(
-              LOG_IMS,
-              "NVM     | Search_key  | CQ %u | SQ %u:%u | CID %u | NSID %-5d | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
-              pContext->resp.cqID, pContext->resp.entry.dword2.sqID,
-              pContext->resp.sqUID, pContext->resp.entry.dword3.commandID, nsid, pContext->tick, tick,
-              tick - pContext->tick);
-            if (pContext->dma) {
-              delete pContext->dma;
-              pContext->dma = nullptr;
-            }
 
-            delete pContext;
+          pContext->resp.makeStatus(false, false,
+                                    TYPE_GENERIC_COMMAND_STATUS,
+                                    STATUS_SUCCESS);
+          pContext->function(pContext->resp);
+
+          if (pContext->buffer) {
+            free(pContext->buffer);
+            pContext->buffer = nullptr;
           }
+
+          debugprint(LOG_IMS,
+            "NVM     | Search_key  | CQ %u | SQ %u:%u | CID %u | NSID %-5d | %" PRIu64
+            " - %" PRIu64 " (%" PRIu64 ")",
+            pContext->resp.cqID, pContext->resp.entry.dword2.sqID,
+            pContext->resp.sqUID, pContext->resp.entry.dword3.commandID,
+            nsid, pContext->tick, tick, tick - pContext->tick);
+
+          if (pContext->dma) {
+            delete pContext->dma;
+            pContext->dma = nullptr;
+          }
+
+          delete pContext;
         };
+
         IOContext *pContext = (IOContext *)context;
         std::vector<uint64_t> lbn_list;
 
@@ -2359,15 +2358,13 @@ void Namespace::search_key(SQEntryWrapper &req, RequestFunction &func) {
           delete pContext;
         } 
         else {
-          // record how mant time searchDone will be execute 
-          pContext->nlb = lbn_list.size();
-          debugprint(LOG_IMS,
-                      "NVM     | SEARCH_KEY | ims.search() success");
-          for(auto lbn : lbn_list){
-            uint64_t slpn = LBN2LPN(lbn);
-            uint64_t nlpn = 1;
-            pParent->readIMSDirectFTL(this, slpn, nlpn, searchDone, pContext);
-          } 
+          std::vector<uint64_t> lpn_list;
+          lpn_list.reserve(lbn_list.size());
+          for (auto lbn : lbn_list) {
+            lpn_list.push_back(LBN2LPN(lbn));
+          }
+          debugprint(LOG_IMS, "NVM     | SEARCH_KEY | ims.search() success (batch)");
+          pParent->readIMSDirectFTLBatch(this, lpn_list, searchDone, pContext);
         }
       };
 

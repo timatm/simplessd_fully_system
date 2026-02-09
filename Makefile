@@ -35,7 +35,7 @@ SCRIPT_FLAG := --script ${SCRIPT_PATH}
 # TimingSimpleCPU
 # AtomicSimpleCPU
 CPU	:= TimingSimpleCPU
-CORES	:= 4
+CORES	:= 1
 CLK	:= 3GHz
 CACHE	:= --caches --l2cache
 MEM	:= DDR4_2400_8x8
@@ -45,6 +45,9 @@ DUAL	:=
 # debug configs
 DPRINT_FLAGS	:= M5Print
 DEBUG_FLAGS	:= --debug-flag=${DPRINT_FLAGS} --debug-file=debug.txt --listener-mode=on
+
+# DPRINT_FLAGS	:= 
+# DEBUG_FLAGS	:= 
 
 M5_LOG_SUFFIX	:=
 M5_DEBUG_LOG	:= ${LOG_DIR}/${TIME}${M5_LOG_SUFFIX}.debug.log
@@ -101,9 +104,9 @@ run: setup
 
 
 YCSB_PATH := $(CURDIR)/workload/YCSB-C
-YCSB_SCRIPTS := exec_ycsbc.sh exec_ycsbd.sh exec_ycsbf.sh
+# YCSB_SCRIPTS := exec_ycsbc.sh exec_ycsbd.sh exec_ycsbf.sh
 # YCSB_SCRIPTS := exec_ycsba.sh exec_ycsbb.sh exec_ycsbc.sh exec_ycsbd.sh exec_ycsbf.sh
-# YCSB_SCRIPTS := exec_ycsba.sh
+YCSB_SCRIPTS := exec_ycsbc.sh
 DISK_IMG := $(YCSB_PATH)/test.img
 SIMPLESSD_DISK_DIR := $(CURDIR)/cp2m5/disks
 SUMMARY_DIR := $(LOG_DIR)/summary

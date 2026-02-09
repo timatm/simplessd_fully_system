@@ -24,9 +24,9 @@
 #include "util/algorithm.hh"
 #include "util/def.hh"
 
-namespace SimpleSSD {
+namespace SimpleSSD{
 
-namespace ICL {
+namespace ICL{
 
 ICL::ICL(ConfigReader &c) : conf(c) {
   switch (conf.readInt(CONFIG_DRAM, DRAM::DRAM_MODEL)) {
@@ -219,4 +219,4 @@ void ICL::resetStatValues() {
 
 }  // namespace ICL
 
-}  // namespace SimpleSSD
+} // namespace SimpleSSD

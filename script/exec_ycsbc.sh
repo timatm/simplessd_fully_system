@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-EXEC="./ycsbc_pack1_place3_real"
+EXEC="./ycsbc_pack1_place2_real"
 WORKLOAD_DIR="workloads"
 WORKLOAD="workloadc.spec"
 WORKLOAD_PATH="${WORKLOAD_DIR}/${WORKLOAD}"

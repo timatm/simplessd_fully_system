@@ -64,6 +64,7 @@ class HIL : public StatObject {
 
   void write_sstable(Request &);
   void readDirectFTL(Request &req);
+  void readDirectFTLBatch(const std::vector<uint64_t> &lpnList, Request &req);
   void format(Request &, bool);
 
   void getLPNInfo(uint64_t &, uint32_t &);

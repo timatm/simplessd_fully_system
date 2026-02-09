@@ -1072,13 +1072,13 @@ void IMS_interface::print_result(){
     pr_stat("Total SStable write count %u",total_sstable_write_count);
     // pr_stat("inter=%f (Impact on search performance)",alpha_inter_);
     // pr_stat("intra=%f (Impact on compaction performance)",alpha_intra_);
-    pr_stat("Total_search_parallel_block_num=%u ",total_search_parallel_block_num);
-    pr_stat("Total_search_count=%u",total_search_count);
-    double block_per_search = (double)(total_search_parallel_block_num) / (double)(total_search_count);
-    pr_stat("Avg. search parallel block per search =%04f",block_per_search);
     pr_stat("Total compaction_parallel_block_num =%u",total_compaction_parallel_block_num);
     pr_stat("Total compaction count=%u",total_compaction_count);
     double block_per_compaction = (double)(total_compaction_parallel_block_num) / (double)(total_compaction_count);
     pr_stat("Avg. compaction parallel block per compaction =%04f",block_per_compaction);
+    pr_stat("Total_search_parallel_block_num=%u ",total_search_parallel_block_num);
+    pr_stat("Total_search_count=%u",total_search_count);
+    double block_per_search = (double)(total_search_parallel_block_num) / (double)(total_search_count);
+    pr_stat("Avg. search parallel block per search =%04f",block_per_search);
     pr_stat("================= IMS experient end =================");
 }

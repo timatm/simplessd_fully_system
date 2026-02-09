@@ -234,6 +234,57 @@ void HIL::readDirectFTL(Request &req) {
   execute(CPU::HIL, CPU::READ, doRead, new Request(req));
 }
 
+void HIL::readDirectFTLBatch(const std::vector<uint64_t> &lpnList, Request &req) {
+  struct BatchContext {
+    Request req;
+    std::vector<uint64_t> lpns;
+  };
+
+  BatchContext *pCtx = new BatchContext{req, lpnList};
+
+  DMAFunction doRead = [this](uint64_t beginAt, void *context) {
+    auto pCtx = (BatchContext *)context;
+
+    pCtx->req.reqID = ++reqCount;
+
+    uint64_t totalLogicalPages = 0;
+    uint32_t logicalPageSize  = 0;
+    pICL->getLPNInfo(totalLogicalPages, logicalPageSize);
+
+    uint64_t finishedAt = beginAt;
+
+    for (size_t i = 0; i < pCtx->lpns.size(); i++) {
+      uint64_t lpn = pCtx->lpns[i];
+
+      Request subReq = pCtx->req;
+      subReq.range.slpn = lpn;
+      subReq.range.nlp  = 1;
+      subReq.offset     = 0;
+      subReq.length     = logicalPageSize;
+
+      uint64_t subTick = beginAt;
+
+      ICL::Request reqInternal(subReq);
+      pICL->readDirectFTL(reqInternal, subTick);
+
+      finishedAt = MAX(finishedAt, subTick);
+    }
+
+    // stats / busy time：用整體最慢那筆作為 batch 完成時間
+    stat.request[0]++;                 // 視為 1 個 read request
+    stat.iosize[0] += pCtx->req.length; // bytes 由上層填總量
+    updateBusyTime(0, beginAt, finishedAt);
+    updateBusyTime(2, beginAt, finishedAt);
+
+    pCtx->req.finishedAt = finishedAt;
+    completionQueue.push(pCtx->req);
+    updateCompletion();
+
+    delete pCtx;
+  };
+
+  execute(CPU::HIL, CPU::READ, doRead, pCtx);
+}
 
 void HIL::getLPNInfo(uint64_t &totalLogicalPages, uint32_t &logicalPageSize) {
   pICL->getLPNInfo(totalLogicalPages, logicalPageSize);
