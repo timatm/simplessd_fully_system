@@ -43,11 +43,11 @@ MEM_GB	:= 4
 DUAL	:=
 
 # debug configs
-DPRINT_FLAGS	:= M5Print
-DEBUG_FLAGS	:= --debug-flag=${DPRINT_FLAGS} --debug-file=debug.txt --listener-mode=on
+# DPRINT_FLAGS	:= M5Print
+# DEBUG_FLAGS	:= --debug-flag=${DPRINT_FLAGS} --debug-file=debug.txt --listener-mode=on
 
-# DPRINT_FLAGS	:= 
-# DEBUG_FLAGS	:= 
+DPRINT_FLAGS	:= 
+DEBUG_FLAGS	:= 
 
 M5_LOG_SUFFIX	:=
 M5_DEBUG_LOG	:= ${LOG_DIR}/${TIME}${M5_LOG_SUFFIX}.debug.log
