@@ -45,16 +45,25 @@ public:
     const std::array<std::deque<uint64_t>, CHANNEL_NUM>& get_usedLBNList() const {
         return usedLBNList_;
     }
-    std::deque<uint64_t>& get_freeLBNList_ref(int ch) {
-        return freeLBNList_[ch];
+    std::deque<uint64_t>& get_freeLBNList_ref(int ch, int die){
+        return freeLBNList_[ch][die];
     }
 
+    uint64_t getFront_freeLBNList_chOnly(int ch) const;
+    uint64_t pop_freeLBNList_chOnly(int ch);
+
+    int pickDieRR(int ch, bool forLog);
+    bool hasFreeInChannel(int ch) const;
 private:
     std::array<std::deque<uint64_t>, CHANNEL_NUM> usedLBNList_;
-    std::array<std::deque<uint64_t>, CHANNEL_NUM> freeLBNList_;
+    // std::array<std::deque<uint64_t>, CHANNEL_NUM> freeLBNList_;
+    using LBNDeque = std::deque<uint64_t>;
+    std::array<std::array<LBNDeque, DIE_NUM>, CHANNEL_NUM> freeLBNList_;
     std::vector<uint32_t> used_count_per_ch_; 
     std::deque<uint64_t> valueLogList_;
     uint8_t lastUsedChannel_;
+    std::array<int, CHANNEL_NUM> lastUsedDie_;
+    std::array<int, CHANNEL_NUM> lastUsedDie_log_;
     uint8_t lastUsedChannel_log;
 };
 

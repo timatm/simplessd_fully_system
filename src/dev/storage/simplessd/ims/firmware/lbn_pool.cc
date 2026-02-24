@@ -8,6 +8,8 @@
 #include <iostream>
 #include <algorithm>
 #include <numeric>
+#include <cmath>  
+#include <sstream>
 
 #include "tree.hh"
 #include "print.hh"
@@ -15,14 +17,40 @@
 #include "mapping_table.hh"
 #include "log.hh"
 #include "IMS_interface.hh"
-// freeLBNList 操作
+
+
+bool LBNPool::hasFreeInChannel(int ch) const {
+    for (int die = 0; die < DIE_NUM; ++die) {
+        if (!freeLBNList_[ch][die].empty()) return true;
+    }
+    return false;
+}
+
+int LBNPool::pickDieRR(int ch, bool forLog) {
+    auto &last = forLog ? lastUsedDie_log_[ch] : lastUsedDie_[ch];
+
+    int start = (last + 1) % DIE_NUM;
+    int d = start;
+
+    do {
+        if (!freeLBNList_[ch][d].empty()) {
+            last = d;           // 更新 RR 指標
+            return d;
+        }
+        d = (d + 1) % DIE_NUM;
+    } while (d != start);
+
+    return -1; // 沒有任何 die 有 free
+}
+
 void LBNPool::reset_lbn_pool(){
     int used_LBN_num = 0;
     for (int ch = 0; ch < CHANNEL_NUM; ++ch) {
-        while (!freeLBNList_[ch].empty()) {
-            freeLBNList_[ch].pop_front();
+        for (int die = 0; die < DIE_NUM; ++die) {
+            freeLBNList_[ch][die].clear();
         }
     }
+
     for (int ch = 0; ch < CHANNEL_NUM; ++ch) {
         while (!usedLBNList_[ch].empty()) {
             usedLBNList_[ch].pop_front();
@@ -30,6 +58,39 @@ void LBNPool::reset_lbn_pool(){
     }
 }
 
+uint64_t LBNPool::getFront_freeLBNList_chOnly(int ch) const {
+    int best_die = -1;
+    uint64_t best_lbn = UINT64_MAX;
+
+    for (int die = 0; die < DIE_NUM; ++die) {
+        if (freeLBNList_[ch][die].empty()) continue;
+        uint64_t f = freeLBNList_[ch][die].front();
+        if (best_die == -1 || f < best_lbn) {
+            best_die = die;
+            best_lbn = f;
+        }
+    }
+
+    return (best_die == -1) ? INVALIDLBN : best_lbn;
+}
+
+uint64_t LBNPool::pop_freeLBNList_chOnly(int ch) {
+    int best_die = -1;
+    uint64_t best_lbn = UINT64_MAX;
+
+    for (int die = 0; die < DIE_NUM; ++die) {
+        if (freeLBNList_[ch][die].empty()) continue;
+        uint64_t f = freeLBNList_[ch][die].front();
+        if (best_die == -1 || f < best_lbn) {
+            best_die = die;
+            best_lbn = f;
+        }
+    }
+
+    if (best_die == -1) return INVALIDLBN;
+    freeLBNList_[ch][best_die].pop_front();
+    return best_lbn;
+}
 
 
 
@@ -56,60 +117,68 @@ int LBNPool::init_lbn_pool(const std::vector<uint64_t>& used_lbn_list) {
         }
         insert_freeLBNList(lbn);
     }
-    lastUsedChannel_log = 0;
+    lastUsedChannel_ = CHANNEL_NUM - 1;
+    lastUsedChannel_log = CHANNEL_NUM - 1;
+    for (int ch = 0; ch < CHANNEL_NUM; ++ch) {
+        lastUsedDie_[ch] = -1;
+        lastUsedDie_log_[ch] = -1;
+    }
     // 
     return used_LBN_num;
 }
 
-
 void LBNPool::insert_freeLBNList(uint64_t lbn) {
-    uint64_t ch = LBN2CH(lbn);
-    uint64_t package = LBN2PACKAGE(lbn);
-    uint64_t die = LBN2DIE(lbn);
-    uint64_t plane = LBN2PLANE(lbn);
-    // pr_info("insert free LBN:%8lu to [CH]: %lu [PACK]: %lu [DIE]: %lu [PLANE]: %lu", lbn, channel, package, die, plane);
-    auto it = std::find(freeLBNList_[ch].begin(),freeLBNList_[ch].end(),lbn);
-    if(it != freeLBNList_[ch].end()){
-        pr_error("This LBN:%lld hae been in freeLBNList",lbn);
+    int ch  = (int)LBN2CH(lbn);
+    int die = (int)LBN2DIE(lbn);
+
+    auto &dq = freeLBNList_[ch][die];
+
+    auto it = std::find(dq.begin(), dq.end(), lbn);
+    if (it != dq.end()) {
+        pr_error("This LBN:%lld has been in freeLBNList_[%d][%d]", lbn, ch, die);
         return;
     }
-    freeLBNList_[ch].push_back(lbn);
-    return;
+    dq.push_back(lbn);
 }
+
 
 bool LBNPool::remove_freeLBNList(uint64_t lbn) {
-    uint64_t channel = LBN2CH(lbn);
-    auto& deque = freeLBNList_[channel];
-    for (auto it = deque.begin(); it != deque.end(); ++it) {
+    int ch  = (int)LBN2CH(lbn);
+    int die = (int)LBN2DIE(lbn);
+
+    auto &dq = freeLBNList_[ch][die];
+    for (auto it = dq.begin(); it != dq.end(); ++it) {
         if (*it == lbn) {
-            deque.erase(it);
+            dq.erase(it);
             return true;
         }
-    }
-    return false; // not found
-}
-
-bool LBNPool::get_freeLBNList(uint64_t lbn) {
-    uint64_t channel = LBN2CH(lbn);
-    auto& deque = freeLBNList_[channel];
-    for (const auto& val : deque) {
-        if (val == lbn)
-            return true;
     }
     return false;
 }
 
-uint64_t LBNPool::getFront_freeLBNList(int ch){
-    uint64_t lbn = freeLBNList_[ch].front();
+bool LBNPool::get_freeLBNList(uint64_t lbn) {
+    int ch  = (int)LBN2CH(lbn);
+    int die = (int)LBN2DIE(lbn);
+
+    auto &dq = freeLBNList_[ch][die];
+    return std::find(dq.begin(), dq.end(), lbn) != dq.end();
+}
+
+uint64_t LBNPool::getFront_freeLBNList(int ch) {
+    int die = pickDieRR(ch, /*forLog=*/false);
+    if (die < 0) return INVALIDLBN;
+    return freeLBNList_[ch][die].front();
+}
+
+uint64_t LBNPool::pop_freeLBNList(int ch) {
+    int die = pickDieRR(ch, /*forLog=*/false);
+    if (die < 0) return INVALIDLBN;
+
+    uint64_t lbn = freeLBNList_[ch][die].front();
+    freeLBNList_[ch][die].pop_front();
     return lbn;
 }
 
-
-uint64_t LBNPool::pop_freeLBNList(int ch){
-    uint64_t lbn = freeLBNList_[ch].front();
-    freeLBNList_[ch].pop_front();
-    return lbn;
-}
 
 void LBNPool::insert_usedLBNList(uint64_t lbn) {
     if(lbn < 0 || lbn > LBN_NUM){
@@ -137,6 +206,7 @@ bool LBNPool::remove_usedLBNList(uint64_t lbn) {
     for (auto it = deque.begin(); it != deque.end(); ++it) {
         if (*it == lbn) {
             deque.erase(it);
+            if (used_count_per_ch_[ch] > 0) used_count_per_ch_[ch]--;
             return true;
         }
     }
@@ -206,23 +276,12 @@ void LBNPool::dump_LBNPool() {
     }
 
     pr_info("=== Free LBN List ===");
-    for (size_t ch = 0; ch < CHANNEL_NUM; ++ch) {
-        std::ostringstream oss;
-        pr_info("Channel[%d]:",ch);
-
-        int cnt = 0;
-        for (auto lbn : freeLBNList_[ch]) {
-            oss << lbn << " ";
-            if (++cnt % 16 == 0) {
-                pr_info("%s", oss.str().c_str());
-                oss.str("");
-                oss.clear();
-            }
-        }
-        if (cnt % 16 != 0) {
-            pr_info("%s", oss.str().c_str());
+    for (int ch = 0; ch < CHANNEL_NUM; ++ch) {
+        for (int die = 0; die < DIE_NUM; ++die) {
+            pr_info("Free[CH:%d][DIE:%d] size=%zu", ch, die, freeLBNList_[ch][die].size());
         }
     }
+
 
     pr_info("======================\n");
 }
@@ -231,7 +290,7 @@ void LBNPool::dump_LBNPool() {
 uint64_t LBNPool::worst_policy(){
     uint64_t lbn = INVALIDLBN;
     for (int ch = 0;ch < CHANNEL_NUM;ch++){
-        if (freeLBNList_[ch].size() != 0){
+        if (hasFreeInChannel(ch)){
             lbn = pop_freeLBNList(ch);
             insert_usedLBNList(lbn);
             return lbn;
@@ -247,7 +306,7 @@ uint64_t LBNPool::RRpolicyForLog(){
     int ch = start_ch;
 
     do {
-        if (!freeLBNList_[ch].empty()) {
+        if (hasFreeInChannel(ch)) {
             lbn = getFront_freeLBNList(ch);
             lastUsedChannel_log = ch; 
             return lbn;
@@ -257,65 +316,41 @@ uint64_t LBNPool::RRpolicyForLog(){
     pr_error("LBN pool(RRpolicy) doesn't have free LBN");
     return INVALIDLBN;
 }
-uint64_t LBNPool::RRpolicy(){
-    uint64_t lbn = INVALIDLBN;
-
+uint64_t LBNPool::RRpolicy() {
     int start_ch = (lastUsedChannel_ + 1) % CHANNEL_NUM;
     int ch = start_ch;
 
     do {
-        if (!freeLBNList_[ch].empty()) {
-            lbn = getFront_freeLBNList(ch);
-            lastUsedChannel_ = ch; 
+        if (hasFreeInChannel(ch)) {
+            uint64_t lbn = getFront_freeLBNList_chOnly(ch); 
+            lastUsedChannel_ = ch;
             return lbn;
         }
-        pr_info("CH:%d does't have free block, choose next channel",ch);
         ch = (ch + 1) % CHANNEL_NUM;
     } while (ch != start_ch);
+
     pr_error("LBN pool(RRpolicy) doesn't have free LBN");
     return INVALIDLBN;
 }
 
+
 uint64_t LBNPool::level2CH(int level){
     uint64_t lbn = INVALIDLBN;
-    if (level < 0 || level >= CHANNEL_NUM) {
+    if (level < 0) {
         pr_error("Invalid level index: %d", level);
         return INVALIDLBN;
     }
-    if(!freeLBNList_[level].empty()){
-        lbn = getFront_freeLBNList(level);
-        return lbn;
+    if(level > CHANNEL_NUM){
+        return RRpolicy();
     }
-    else{
-        pr_error("LBN pool(level2CH) doesn't have free LBN");
+    if (hasFreeInChannel(level)) {
+        return getFront_freeLBNList(level);
     }
+    pr_error("LBN pool(level2CH) doesn't have free LBN");
     return INVALIDLBN;
 }
-// uint64_t LBNPool::my_policy(const std::vector<int>& relate_ch_list) {
-//     uint64_t lbn = INVALIDLBN;
 
-//     std::vector<int> indices(relate_ch_list.size());
-//     std::iota(indices.begin(), indices.end(), 0);
 
-//     std::sort(indices.begin(), indices.end(), [&](int a, int b) {
-//         if(relate_ch_list[a] == relate_ch_list[b]){
-//             return used_count_per_ch_[a] < used_count_per_ch_[b];
-//         }
-//         return relate_ch_list[a] < relate_ch_list[b];
-//     });
-
-//     for (int i : indices) {
-//         int ch = relate_ch_list[i];
-//         if (!freeLBNList_[ch].empty()) {
-//             lbn = getFront_freeLBNList(ch);
-//             pr_debug("My policy selected LBN: %lu from channel: %d", lbn, ch);
-//             return lbn;
-//         }
-//     }
-
-//     return INVALIDLBN;
-// }
-#include <cmath>   // for std::fabs
 
 uint64_t LBNPool::my_policy(const RelateChInfo& info) {
     uint64_t lbn = INVALIDLBN;
@@ -338,7 +373,7 @@ uint64_t LBNPool::my_policy(const RelateChInfo& info) {
     uint64_t best_usage = 0;
 
     for (int c = 0; c < CHANNEL_NUM; ++c) {
-        if (freeLBNList_[c].empty()) continue;
+        if (!hasFreeInChannel(c)) continue;
 
         if (select_ch == -1) {
             select_ch  = c;
@@ -382,6 +417,8 @@ uint64_t LBNPool::my_policy(const RelateChInfo& info) {
 
 void LBNPool::clear(){
     for (auto& q : usedLBNList_) q.clear();
-    for (auto& q : freeLBNList_) q.clear();
+    for (auto& deq : freeLBNList_){
+        for(auto& q : deq) q.clear();
+    } 
     return;
 }

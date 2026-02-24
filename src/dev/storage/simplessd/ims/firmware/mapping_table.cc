@@ -80,7 +80,7 @@ void Mapping::insert_mapping(const std::string& filename, uint64_t lbn) {
     if (mappingTable_.find(filename) != mappingTable_.end()) {
         std::cerr << "File already exists in the mapping table, updating to LBN: " << lbn << "\n";
     }
-    auto& list = lbnPool_.get_freeLBNList_ref(LBN2CH(lbn)); 
+    auto& list = lbnPool_.get_freeLBNList_ref(LBN2CH(lbn),LBN2DIE(lbn)); 
     auto it = std::find(list.begin(), list.end(), lbn);
     if (it == list.end()) {
         pr_error("Free list does not have LBN: %llu(CH:%d)", lbn,LBN2CH(lbn));
