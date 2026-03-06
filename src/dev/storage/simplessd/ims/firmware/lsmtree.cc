@@ -60,6 +60,19 @@ RelateChInfo LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
     std::queue<std::shared_ptr<TreeNode>> Pqueue, Cqueue;
     std::unordered_set<TreeNode*> Pvisited, Cvisited;
 
+    auto l0 = tree_->search_overlap(0, node->rangeMin, node->rangeMax);
+
+    for (auto &n0 : l0) {
+        if (!n0) continue;
+        if (n0.get() == node.get()) continue;
+        if (Pvisited.count(n0.get()) || Cvisited.count(n0.get())) continue;
+
+        const int ch = n0->channelInfo;
+        if (0 <= ch && ch < CHANNEL_NUM) {
+            info.inter[ch]++;
+        }
+    }
+
     // === Inter-level impact: parents / ancestors ===
     for (auto &parent : node->parent) {
         if (auto sp = parent.lock()) {
@@ -145,7 +158,6 @@ RelateChInfo LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
         (*next)->channelInfo < CHANNEL_NUM) {
         info.intra[(*next)->channelInfo]++;      // intra_impact[next_ch]++
     }
-
     return info;
 }
 

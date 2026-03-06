@@ -21,7 +21,7 @@ class Client {
   Client(DB &db, CoreWorkload &wl) : db_(db), workload_(wl) { }
   
   virtual bool DoInsert();
-  virtual bool DoTransaction();
+  virtual bool DoTransaction(Operation *op = nullptr);
   
   virtual ~Client() { }
   
@@ -45,9 +45,13 @@ inline bool Client::DoInsert() {
   return (db_.Insert(workload_.NextTable(), key, pairs) == DB::kOK);
 }
 
-inline bool Client::DoTransaction() {
+inline bool Client::DoTransaction(Operation *op) {
   int status = -1;
-  switch (workload_.NextOperation()) {
+  Operation chosen = workload_.NextOperation();
+  if (op) {
+    *op = chosen;
+  }
+  switch (chosen) {
     case READ:
       status = TransactionRead();
       break;

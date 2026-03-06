@@ -340,11 +340,9 @@ uint64_t LBNPool::level2CH(int level){
         pr_error("Invalid level index: %d", level);
         return INVALIDLBN;
     }
-    if(level > CHANNEL_NUM){
-        return RRpolicy();
-    }
-    if (hasFreeInChannel(level)) {
-        return getFront_freeLBNList(level);
+    int ch = level % CHANNEL_NUM;
+    if (hasFreeInChannel(ch)) {
+        return getFront_freeLBNList(ch);
     }
     pr_error("LBN pool(level2CH) doesn't have free LBN");
     return INVALIDLBN;

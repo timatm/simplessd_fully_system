@@ -7,6 +7,7 @@ GEM5DIR := ./build
 M5DIR	:= ${HOME}/m5
 LOG_DIR := ./logs
 
+
 TIME	:= $(shell date +%m%d-%H%M)
 
 export M5_PATH=${M5DIR}
@@ -43,16 +44,17 @@ MEM_GB	:= 4
 DUAL	:=
 
 # debug configs
-# DPRINT_FLAGS	:= M5Print
-# DEBUG_FLAGS	:= --debug-flag=${DPRINT_FLAGS} --debug-file=debug.txt --listener-mode=on
-
-DPRINT_FLAGS	:= 
-DEBUG_FLAGS	:= 
+DPRINT_FLAGS	:= M5Print
+DEBUG_FLAGS	:= --debug-flags=${DPRINT_FLAGS} --debug-file=debug.txt --listener-mode=on
+# DPRINT_FLAGS	:=
+# DEBUG_FLAGS	:= 
 
 M5_LOG_SUFFIX	:=
 M5_DEBUG_LOG	:= ${LOG_DIR}/${TIME}${M5_LOG_SUFFIX}.debug.log
 M5_STAT_LOG	:= ${LOG_DIR}/${TIME}${M5_LOG_SUFFIX}.stat.txt
 M5_HOST_LOG	:= ${LOG_DIR}/${TIME}${M5_LOG_SUFFIX}.host.log
+
+REDIR_FLAGS := -d ${LOG_DIR} -r -e  --stderr-file=${M5_DEBUG_LOG}
 
 GDB_BIN		:= gdb
 GDB_LOGGING	:= on
@@ -122,8 +124,8 @@ run-script: setup
 	touch ${M5_STAT_LOG}
 	ln -sf "$(abspath ${M5_STAT_LOG})" m5out/stats.txt
 	ln -sf "$(abspath ${term_log})" m5out/system.pc.com_1.device
-	${GEM5_EXEC_CMD_WITH_SCRIPT} | tee ${M5_DEBUG_LOG}
-
+	${GEM5_EXEC_CMD_WITH_SCRIPT} 2> ${M5_DEBUG_LOG}
+# ${GEM5_EXEC_CMD_WITH_SCRIPT} | tee ${M5_DEBUG_LOG}
 .PHONY: run-script-5
 run-script-5: setup
 	@mkdir -p "$(SUMMARY_DIR)"; \

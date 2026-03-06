@@ -38,6 +38,14 @@
 #include <memory>
 #include <functional>
 #include <vector>
+
+#include <cstdio>
+
+#define MYDB_LOG(fmt, ...)                                                   \
+  do {                                                                       \
+    std::fprintf(stderr, "[MYDB-STAT] " fmt "\n", ##__VA_ARGS__);            \
+    std::fflush(stderr);                                                     \
+  } while (0)
 namespace SimpleSSD {
 
 namespace HIL {
@@ -89,16 +97,14 @@ static uint64_t percentileNearestRank(const std::vector<uint64_t> &sorted,
 }
 
 static void dumpSearchFlashStatsAndReset() {
-  debugprint(LOG_IMS,
-             "[MYDB-STAT] SEARCH_KEY count: total=%" PRIu64
+  MYDB_LOG(  "[MYDB-STAT] SEARCH_KEY count: total=%" PRIu64
              " with_flash=%" PRIu64 " no_flash=%" PRIu64,
              g_search_flash_stats.total_searches,
              g_search_flash_stats.searches_with_flash,
              g_search_flash_stats.searches_no_flash);
 
   if (g_search_flash_stats.searches_with_flash == 0) {
-    debugprint(LOG_IMS,
-               "[MYDB-STAT] SEARCH_KEY flash-only ticks: (no samples)");
+    MYDB_LOG("[MYDB-STAT] SEARCH_KEY flash-only ticks: (no samples)");
     g_search_flash_stats.reset();
     return;
   }
@@ -112,11 +118,9 @@ static void dumpSearchFlashStatsAndReset() {
       static_cast<double>(g_search_flash_stats.sum_tflash) /
       static_cast<double>(g_search_flash_stats.searches_with_flash);
 
-  debugprint(LOG_IMS,
-             "[MYDB-STAT] SEARCH_KEY flash-only ticks: avg=%.3f p95=%" PRIu64
+  MYDB_LOG(  "[MYDB-STAT] SEARCH_KEY flash-only ticks: avg=%.3f p95=%" PRIu64
              " p99=%" PRIu64 " sum=%" PRIu64,
              avg, p95, p99, g_search_flash_stats.sum_tflash);
-
   g_search_flash_stats.reset();
 }
 
