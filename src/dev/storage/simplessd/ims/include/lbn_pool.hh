@@ -38,6 +38,7 @@ public:
     uint64_t RRpolicyForLog();
     uint64_t level2CH(int level);
     uint64_t my_policy(const RelateChInfo& relate_ch_list);
+    uint64_t my_policyL0(const RelateChInfo& info);
     void clear();
     uint8_t get_lastUsedChannel(){return lastUsedChannel_;};
     void set_lastUsedChannel(uint8_t ch) {lastUsedChannel_ = ch;}

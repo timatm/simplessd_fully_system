@@ -362,8 +362,22 @@ uint64_t LBNPool::my_policy(const RelateChInfo& info) {
 
     std::vector<double> score(CHANNEL_NUM, 0.0);
     for (int c = 0; c < CHANNEL_NUM; ++c) {
-        score[c] = alpha_inter_ * static_cast<double>(info.inter[c])
-                 + alpha_intra_ * static_cast<double>(info.intra[c]);
+        // score[c] = alpha_inter_ * static_cast<double>(info.inter[c])
+        //          + alpha_intra_ * static_cast<double>(info.intra[c]);
+        double inter_score = 0;
+        for(int i = 0;i < info.inter[c].size();i++){
+            if(info.inter[c][i] < info.node_level){
+                inter_score += 1;
+            }
+            else if(info.inter[c][i] > info.node_level){
+                int level_gap = info.inter[c][i] - info.node_level;
+                inter_score += 1.0 / std::pow(LEVEL_TIMES, level_gap);
+            }
+            else{
+                pr_error("Key range of same level can't overlap");
+            }
+        }
+        score[c] =  inter_score + static_cast<double>(info.L0[c]);
     }
 
     int select_ch = -1;
@@ -399,12 +413,90 @@ uint64_t LBNPool::my_policy(const RelateChInfo& info) {
     }
 
     lbn = getFront_freeLBNList(select_ch);
-    pr_debug("My policy selected LBN: %lu from channel: %d "
-             "(score=%.3f, inter=%d, intra=%d, usage=%lu)",
+    pr_info("My policy selected LBN: %lu from channel: %d "
+             "(score=%.3f, inter=%d, intra=%d, L0=%d, usage=%lu)",
              lbn, select_ch,
              best_score,
              info.inter[select_ch],
              info.intra[select_ch],
+             info.L0[select_ch],
+             best_usage);
+    return lbn;
+}
+
+
+
+uint64_t LBNPool::my_policyL0(const RelateChInfo& info) {
+    uint64_t lbn = INVALIDLBN;
+
+    if (info.inter.size() != CHANNEL_NUM ||
+        info.intra.size() != CHANNEL_NUM) {
+        pr_error("my_policy: RelateChInfo size mismatch, inter=%zu intra=%zu CHANNEL_NUM=%d",
+                 info.inter.size(), info.intra.size(), CHANNEL_NUM);
+        return INVALIDLBN;
+    }
+    std::vector<double> score(CHANNEL_NUM, 0.0);
+    std::vector<int> candidate;
+    for (int c = 0; c < CHANNEL_NUM; ++c) {
+        // score[c] = alpha_inter_ * static_cast<double>(info.inter[c])
+        //          + alpha_intra_ * static_cast<double>(info.intra[c]);
+        double inter_score = 0;
+        for(int i = 0;i < info.inter[c].size();i++){
+            if(info.inter[c][i] < info.node_level){
+                inter_score += 1;
+            }
+            else if(info.inter[c][i] > info.node_level){
+                int level_gap = info.inter[c][i] - info.node_level;
+                inter_score += 1.0 / std::pow(LEVEL_TIMES, level_gap);
+            }
+            else{
+                pr_error("Key range of same level can't overlap");
+            }
+        }
+        if(info.L0[c] == 0) candidate.push_back(c);
+        score[c] =  inter_score + static_cast<double>(info.L0[c]);
+    }
+    int select_ch = -1;
+    double best_score = 0.0;
+    uint64_t best_usage = 0;
+
+    for (int i = 0; i < candidate.size(); ++i) {
+        int c = candidate[i];
+        if (!hasFreeInChannel(c)) continue;
+
+        if (select_ch == -1) {
+            select_ch  = c;
+            best_score = score[c];
+            best_usage = used_count_per_ch_[c];   // usage[c]
+            continue;
+        }
+        if (score[c] < best_score ) {
+            select_ch  = c;
+            best_score = score[c];
+            best_usage = used_count_per_ch_[c];
+        }
+        else if (score[c] == best_score) {
+            if (used_count_per_ch_[c] < best_usage) {
+                select_ch  = c;
+                best_score = score[c];
+                best_usage = used_count_per_ch_[c];
+            }
+        }
+    }
+
+    if (select_ch == -1) {
+        pr_error("LBNPool::my_policy: no free LBN in any channel");
+        return INVALIDLBN;
+    }
+
+    lbn = getFront_freeLBNList(select_ch);
+    pr_info("My policy selected LBN: %lu from channel: %d "
+             "(score=%.3f, inter=%d, intra=%d, L0=%d, usage=%lu)",
+             lbn, select_ch,
+             best_score,
+             info.inter[select_ch],
+             info.intra[select_ch],
+             info.L0[select_ch],
              best_usage);
     return lbn;
 }

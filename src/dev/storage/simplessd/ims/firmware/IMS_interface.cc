@@ -270,7 +270,19 @@ int IMS_interface::write_sstable(uint64_t &lbn) {
         }
     }
     else if (level == 0){
-        selectLBN = lbnPool_->RRpolicy();
+        switch(SELECT_POLICY){
+            case static_cast<int>(SelectT::WROSTCASE):
+            case static_cast<int>(SelectT::RR):
+            case static_cast<int>(SelectT::LEVEL2CH):
+                selectLBN = lbnPool_->RRpolicy();
+                break;
+            case static_cast<int>(SelectT::MYPOLICY):
+                selectLBN = lbnPool_->my_policyL0(relateList);
+                break;
+            default:
+                pr_error("The type of policy is invalid ,check your pass parameter");
+                return INVALIDLBN;
+        }
     }
     else{
         pr_error("Level info is not correct (%d)", level);

@@ -70,9 +70,20 @@ static constexpr uint32_t INVALID_32 = 0xFFFFFFFFu;
 
 
 // [DB setting]
+constexpr int LEVEL_TIMES = 2;
+constexpr int LEVEL0_MAX = 8;
+constexpr int LEVEL1_MAX = 10;
+constexpr int LEVEL2_MAX = LEVEL1_MAX * LEVEL_TIMES;
+constexpr int LEVEL3_MAX = LEVEL2_MAX * LEVEL_TIMES;
+constexpr int LEVEL4_MAX = LEVEL3_MAX * LEVEL_TIMES;
+constexpr int LEVEL5_MAX = LEVEL4_MAX * LEVEL_TIMES;
+constexpr int LEVEL6_MAX = LEVEL5_MAX * LEVEL_TIMES;
+
 struct RelateChInfo {
-    std::vector<int> inter;  // inter-level impact[c]
+    std::vector<std::vector<int>> inter;  // inter-level impact[c]
     std::vector<int> intra;  // intra-level impact[c]
+    std::vector<int> L0;
+    int node_level;
 };
 enum class SelectT {
     WROSTCASE = 0,

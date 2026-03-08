@@ -51,10 +51,12 @@ std::queue<std::shared_ptr<TreeNode>> LSMTree::search_key(const Key& key) {
 }
 
 RelateChInfo LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
+    pr_info("Insert new SStable Name:%s Level->%d KeyRange: %s ~ %s",node->filename.c_str(),node->levelInfo,node->rangeMin.toString().c_str(),node->rangeMax.toString().c_str());
     RelateChInfo info;
-    info.inter.assign(CHANNEL_NUM, 0);  // inter_impact[c]
+    info.inter.assign(CHANNEL_NUM, std::vector<int>{});  // inter_impact[c]
     info.intra.assign(CHANNEL_NUM, 0);  // intra_impact[c]
-
+    info.L0.assign(CHANNEL_NUM, 0);
+    info.node_level = node->levelInfo;
     if (!node) return info;
 
     std::queue<std::shared_ptr<TreeNode>> Pqueue, Cqueue;
@@ -69,7 +71,8 @@ RelateChInfo LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
 
         const int ch = n0->channelInfo;
         if (0 <= ch && ch < CHANNEL_NUM) {
-            info.inter[ch]++;
+            pr_error("L0 TreeNode:%s Level:%d in CH[%d]",n0->filename.c_str(), n0->levelInfo,n0->channelInfo);
+            info.L0[ch]++;
         }
     }
 
@@ -87,7 +90,8 @@ RelateChInfo LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
 
         if (parent->channelInfo >= 0 &&
             parent->channelInfo < CHANNEL_NUM) {
-            info.inter[parent->channelInfo]++;  // inter_impact[parent_ch]++
+            info.inter[parent->channelInfo].push_back(parent->levelInfo);  // inter_impact[parent_ch]++
+            pr_error("Parent TreeNode:%s Level:%d in CH[%d]",parent->filename.c_str(), parent->levelInfo,parent->channelInfo);
         }
 
         // 繼續往上找祖先，僅保留 key-range 有 overlap 的
@@ -113,7 +117,8 @@ RelateChInfo LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
 
         if (child->channelInfo >= 0 &&
             child->channelInfo < CHANNEL_NUM) {
-            info.inter[child->channelInfo]++;  // inter_impact[child_ch]++
+            info.inter[child->channelInfo].push_back(child->levelInfo);  // inter_impact[child_ch]++
+            pr_error("Child TreeNode:%s Level:%d in CH[%d]",child->filename.c_str(), child->levelInfo,child->channelInfo);
         }
 
         for (auto &[filename, grandchild] : child->children) {
@@ -160,6 +165,7 @@ RelateChInfo LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
     }
     return info;
 }
+
 
 void LSMTree::insert_sstable(std::shared_ptr<TreeNode> node) {
     tree_->insert_node(node);
