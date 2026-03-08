@@ -797,10 +797,10 @@ Status API::put_impl(std::string key ,std::string value,PutType t){
     Record internal_value(internal_key,value);
     logManager_->writeLog(internal_value);
     memtable_->Put(internal_value);
-    if(logManager_->get_log_block_num() >= LOG_GC_THRESHOLD && t == PutType::kPutByUser){
-        pr_error("GC running");
-        log_garbage_collection();
-    }
+    // if(logManager_->get_log_block_num() >= LOG_GC_THRESHOLD && t == PutType::kPutByUser){
+    //     pr_error("GC running");
+    //     log_garbage_collection();
+    // }
     return Status::OK();
 }
 
