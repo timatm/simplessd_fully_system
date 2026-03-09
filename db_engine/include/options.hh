@@ -25,7 +25,6 @@ static_assert(
 );
 
 
-
 #ifndef IDX_BLOOM_META_PAGES
 #define IDX_BLOOM_META_PAGES 2
 #endif

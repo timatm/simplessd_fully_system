@@ -507,9 +507,10 @@ int IMS_interface::search_key(Key key) {
 
     // 可選擇：處理 top candidate 或遍歷所有節點進一步搜尋
     // 這裡我們假設只印出 channel info 作為示範
+    pr_info("");
     while (!candidates.empty()) {
         auto node = candidates.front(); candidates.pop();
-        pr_debug("Candidate file: %s in Level %d, Channel %d",
+        pr_error("Candidate file: %s in Level %d, Channel %d",
                 node->filename.c_str(), node->levelInfo, node->channelInfo);
     }
 
@@ -1011,6 +1012,17 @@ int IMS_interface::search(std::vector<uint64_t> &pbn_list){
     
     if (it != ch_list.end()) {
         // pr_info("Search block num in parllel:%u",*it);
+        if(*it > 2){
+            pr_info("This search run is exceed 2 ,is %d",*it);
+            for(auto& pattern : search_package.searchPatterns){
+                auto& sstable_ID = pattern.sstable_name;
+                uint64_t lbn = mappingTable_->getLBN(sstable_ID);
+                if(lbn == INVALIDLBN){
+                    continue;
+                }
+                pr_info("Search SStable_ID:%s in CH[%d]",sstable_ID.c_str(),LBN2CH(lbn));
+            }
+        }
         total_search_parallel_block_num += *it;
     }
     total_search_count++;

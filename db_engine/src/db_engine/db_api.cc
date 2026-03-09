@@ -797,10 +797,10 @@ Status API::put_impl(std::string key ,std::string value,PutType t){
     Record internal_value(internal_key,value);
     logManager_->writeLog(internal_value);
     memtable_->Put(internal_value);
-    if(logManager_->get_log_block_num() >= LOG_GC_THRESHOLD && t == PutType::kPutByUser){
-        pr_error("GC running");
-        log_garbage_collection();
-    }
+    // if(logManager_->get_log_block_num() >= LOG_GC_THRESHOLD && t == PutType::kPutByUser){
+    //     pr_error("GC running");
+    //     log_garbage_collection();
+    // }
     return Status::OK();
 }
 
@@ -1392,7 +1392,7 @@ Status API::search(std::string key ,std::string& value){
     }
 
     auto sstables = lsmTree_->search_key(userKey);
-
+    
     
     if (sstables.empty()){
         pr_debug("No candidate SSTables found for key: %s", key.c_str());
@@ -1453,10 +1453,12 @@ Status API::search(std::string key ,std::string& value){
         // free(buffer);
     }
     else{
-        uint32_t index = HashModN(internalKey, SLOT_NUM_PER_PAGE); 
+        uint32_t index = HashModN(internalKey, SLOT_NUM_PER_PAGE);
+        pr_info("Search key: %s", key.c_str());
+        // pr_info("This search run has %d candidate",sstables.size());
         while( !sstables.empty() ){
             auto sstable = sstables.front();
-            pr_debug("Find SStable: %s  Key range [ %s ~ %s ]",sstable->filename.c_str(),sstable->rangeMin.toString().c_str(),sstable->rangeMax.toString().c_str());
+            // pr_error("Search SStable: %s  Level:%d Key range[ %s ~ %s ]",sstable->filename.c_str(),sstable->levelInfo,sstable->rangeMin.toString().c_str(),sstable->rangeMax.toString().c_str());
 
             sstables.pop();
             SearchPatternD pattern_info;
