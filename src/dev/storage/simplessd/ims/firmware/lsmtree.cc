@@ -51,27 +51,27 @@ std::queue<std::shared_ptr<TreeNode>> LSMTree::search_key(const Key& key) {
 }
 
 RelateChInfo LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
-    pr_info("Insert new SStable Name:%s Level->%d KeyRange: %s ~ %s",node->filename.c_str(),node->levelInfo,node->rangeMin.toString().c_str(),node->rangeMax.toString().c_str());
+    // pr_info("Insert new SStable Name:%s Level->%d KeyRange: %s ~ %s",node->filename.c_str(),node->levelInfo,node->rangeMin.toString().c_str(),node->rangeMax.toString().c_str());
     RelateChInfo info;
     info.inter.assign(CHANNEL_NUM, std::vector<int>{});  // inter_impact[c]
     info.intra.assign(CHANNEL_NUM, 0);  // intra_impact[c]
     info.L0.assign(CHANNEL_NUM, 0);
     info.node_level = node->levelInfo;
     if (!node) return info;
-    pr_info("node=%s level=%d parent_sz=%zu child_sz=%zu",
-        node->filename.c_str(),
-        node->levelInfo,
-        node->parent.size(),
-        node->children.size());
+    // pr_info("node=%s level=%d parent_sz=%zu child_sz=%zu",
+    //     node->filename.c_str(),
+    //     node->levelInfo,
+    //     node->parent.size(),
+    //     node->children.size());
     for (int lv = 0; lv < MAX_LEVEL; ++lv) {
     auto ov = tree_->search_overlap(lv, node->rangeMin, node->rangeMax);
-    for (auto &x : ov) {
-        if (!x || x.get() == node.get()) continue;
-        pr_info("[DIRECT-OV] new=%s(L%d) sees %s(L%d) CH[%d]",
-                node->filename.c_str(), node->levelInfo,
-                x->filename.c_str(), x->levelInfo, x->channelInfo);
-    }
-}
+    // for (auto &x : ov) {
+    //     if (!x || x.get() == node.get()) continue;
+    //     pr_info("[DIRECT-OV] new=%s(L%d) sees %s(L%d) CH[%d]",
+    //             node->filename.c_str(), node->levelInfo,
+    //             x->filename.c_str(), x->levelInfo, x->channelInfo);
+    // }
+    }   
     std::queue<std::shared_ptr<TreeNode>> Pqueue, Cqueue;
     std::unordered_set<TreeNode*> Pvisited, Cvisited;
 
@@ -84,7 +84,7 @@ RelateChInfo LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
 
         const int ch = n0->channelInfo;
         if (0 <= ch && ch < CHANNEL_NUM) {
-            pr_error("L0 TreeNode:%s Level:%d in CH[%d]",n0->filename.c_str(), n0->levelInfo,n0->channelInfo);
+            pr_debug("L0 TreeNode:%s Level:%d in CH[%d]",n0->filename.c_str(), n0->levelInfo,n0->channelInfo);
             info.L0[ch]++;
         }
     }

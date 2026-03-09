@@ -415,14 +415,14 @@ uint64_t LBNPool::my_policy(const RelateChInfo& info) {
     lbn = getFront_freeLBNList(select_ch);
     int inter_cnt = static_cast<int>(info.inter[select_ch].size());
 
-    pr_info("My policy selected LBN: %lu from channel: %d "
-            "(score=%.3f, inter=%d, intra=%d, L0=%d, usage=%lu)",
-            lbn, select_ch,
-            best_score,
-            inter_cnt,
-            info.intra[select_ch],
-            info.L0[select_ch],
-            best_usage);
+    // pr_info("My policy selected LBN: %lu from channel: %d "
+    //         "(score=%.3f, inter=%d, intra=%d, L0=%d, usage=%lu)",
+    //         lbn, select_ch,
+    //         best_score,
+    //         inter_cnt,
+    //         info.intra[select_ch],
+    //         info.L0[select_ch],
+    //         best_usage);
     return lbn;
 }
 
@@ -460,30 +460,39 @@ uint64_t LBNPool::my_policyL0(const RelateChInfo& info) {
     }
     int select_ch = -1;
     double best_score = 0.0;
+    int best_L0;
     uint64_t best_usage = 0;
-
-    for (int i = 0; i < candidate.size(); ++i) {
-        int c = candidate[i];
+    for (int c = 0; c < CHANNEL_NUM; ++c) {
         if (!hasFreeInChannel(c)) continue;
-
         if (select_ch == -1) {
             select_ch  = c;
             best_score = score[c];
             best_usage = used_count_per_ch_[c];   // usage[c]
+            best_L0 = info.L0[c];
             continue;
         }
-        if (score[c] < best_score ) {
+        if(best_L0 > info.L0[c]){
             select_ch  = c;
             best_score = score[c];
             best_usage = used_count_per_ch_[c];
+            best_L0 = info.L0[c];
         }
-        else if (score[c] == best_score) {
-            if (used_count_per_ch_[c] < best_usage) {
+        else if(best_L0 == info.L0[c]){
+            if (score[c] < best_score) {
                 select_ch  = c;
                 best_score = score[c];
                 best_usage = used_count_per_ch_[c];
+                best_L0 = info.L0[c];
+            }
+            else if (score[c] == best_score) {
+                if (used_count_per_ch_[c] < best_usage) {
+                    select_ch  = c;
+                    best_score = score[c];
+                    best_usage = used_count_per_ch_[c];
+                }
             }
         }
+        else continue;
     }
 
     if (select_ch == -1) {
@@ -494,14 +503,14 @@ uint64_t LBNPool::my_policyL0(const RelateChInfo& info) {
     lbn = getFront_freeLBNList(select_ch);
     int inter_cnt = static_cast<int>(info.inter[select_ch].size());
 
-    pr_info("My policy selected LBN: %lu from channel: %d "
-            "(score=%.3f, inter=%d, intra=%d, L0=%d, usage=%lu)",
-            lbn, select_ch,
-            best_score,
-            inter_cnt,
-            info.intra[select_ch],
-            info.L0[select_ch],
-            best_usage);
+    // pr_info("My policy selected LBN: %lu from channel: %d "
+    //         "(score=%.3f, inter=%d, intra=%d, L0=%d, usage=%lu)",
+    //         lbn, select_ch,
+    //         best_score,
+    //         inter_cnt,
+    //         info.intra[select_ch],
+    //         info.L0[select_ch],
+    //         best_usage);
     return lbn;
 }
 

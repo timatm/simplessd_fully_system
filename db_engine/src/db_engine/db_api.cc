@@ -1454,7 +1454,7 @@ Status API::search(std::string key ,std::string& value){
     }
     else{
         uint32_t index = HashModN(internalKey, SLOT_NUM_PER_PAGE);
-        pr_info("Search key: %s", key.c_str());
+        pr_debug("Search key: %s", key.c_str());
         // pr_info("This search run has %d candidate",sstables.size());
         while( !sstables.empty() ){
             auto sstable = sstables.front();
