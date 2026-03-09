@@ -413,14 +413,16 @@ uint64_t LBNPool::my_policy(const RelateChInfo& info) {
     }
 
     lbn = getFront_freeLBNList(select_ch);
+    int inter_cnt = static_cast<int>(info.inter[select_ch].size());
+
     pr_info("My policy selected LBN: %lu from channel: %d "
-             "(score=%.3f, inter=%d, intra=%d, L0=%d, usage=%lu)",
-             lbn, select_ch,
-             best_score,
-             info.inter[select_ch],
-             info.intra[select_ch],
-             info.L0[select_ch],
-             best_usage);
+            "(score=%.3f, inter=%d, intra=%d, L0=%d, usage=%lu)",
+            lbn, select_ch,
+            best_score,
+            inter_cnt,
+            info.intra[select_ch],
+            info.L0[select_ch],
+            best_usage);
     return lbn;
 }
 
@@ -490,14 +492,16 @@ uint64_t LBNPool::my_policyL0(const RelateChInfo& info) {
     }
 
     lbn = getFront_freeLBNList(select_ch);
+    int inter_cnt = static_cast<int>(info.inter[select_ch].size());
+
     pr_info("My policy selected LBN: %lu from channel: %d "
-             "(score=%.3f, inter=%d, intra=%d, L0=%d, usage=%lu)",
-             lbn, select_ch,
-             best_score,
-             info.inter[select_ch],
-             info.intra[select_ch],
-             info.L0[select_ch],
-             best_usage);
+            "(score=%.3f, inter=%d, intra=%d, L0=%d, usage=%lu)",
+            lbn, select_ch,
+            best_score,
+            inter_cnt,
+            info.intra[select_ch],
+            info.L0[select_ch],
+            best_usage);
     return lbn;
 }
 

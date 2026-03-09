@@ -46,7 +46,7 @@ std::queue<std::shared_ptr<TreeNode>> LSMTree::search_key(const Key& key) {
         }
 
     }
-
+    
     return result;
 }
 
@@ -58,7 +58,20 @@ RelateChInfo LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
     info.L0.assign(CHANNEL_NUM, 0);
     info.node_level = node->levelInfo;
     if (!node) return info;
-
+    pr_info("node=%s level=%d parent_sz=%zu child_sz=%zu",
+        node->filename.c_str(),
+        node->levelInfo,
+        node->parent.size(),
+        node->children.size());
+    for (int lv = 0; lv < MAX_LEVEL; ++lv) {
+    auto ov = tree_->search_overlap(lv, node->rangeMin, node->rangeMax);
+    for (auto &x : ov) {
+        if (!x || x.get() == node.get()) continue;
+        pr_info("[DIRECT-OV] new=%s(L%d) sees %s(L%d) CH[%d]",
+                node->filename.c_str(), node->levelInfo,
+                x->filename.c_str(), x->levelInfo, x->channelInfo);
+    }
+}
     std::queue<std::shared_ptr<TreeNode>> Pqueue, Cqueue;
     std::unordered_set<TreeNode*> Pvisited, Cvisited;
 
@@ -76,63 +89,73 @@ RelateChInfo LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
         }
     }
 
-    // === Inter-level impact: parents / ancestors ===
-    for (auto &parent : node->parent) {
-        if (auto sp = parent.lock()) {
-            Pqueue.push(sp);
-        }
-    }
+    // // === Inter-level impact: parents / ancestors ===
+    // for (auto &parent : node->parent) {
+    //     if (auto sp = parent.lock()) {
+    //         Pqueue.push(sp);
+    //     }
+    // }
 
-    while (!Pqueue.empty()) {
-        auto parent = Pqueue.front();
-        Pqueue.pop();
-        if (!Pvisited.insert(parent.get()).second) continue;
+    // while (!Pqueue.empty()) {
+    //     auto parent = Pqueue.front();
+    //     Pqueue.pop();
+    //     if (!Pvisited.insert(parent.get()).second) continue;
 
-        if (parent->channelInfo >= 0 &&
-            parent->channelInfo < CHANNEL_NUM) {
-            info.inter[parent->channelInfo].push_back(parent->levelInfo);  // inter_impact[parent_ch]++
-            pr_error("Parent TreeNode:%s Level:%d in CH[%d]",parent->filename.c_str(), parent->levelInfo,parent->channelInfo);
-        }
+    //     if (parent->channelInfo >= 0 &&
+    //         parent->channelInfo < CHANNEL_NUM) {
+    //         info.inter[parent->channelInfo].push_back(parent->levelInfo);  // inter_impact[parent_ch]++
+    //         pr_error("Parent TreeNode:%s Level:%d in CH[%d]",parent->filename.c_str(), parent->levelInfo,parent->channelInfo);
+    //     }
 
-        // 繼續往上找祖先，僅保留 key-range 有 overlap 的
-        for (auto &gp : parent->parent) {
-            if (auto sp = gp.lock()) {
-                if (compareKey(sp->rangeMin, node->rangeMax) <= 0 &&
-                    compareKey(sp->rangeMax, node->rangeMin) >= 0) {
-                    Pqueue.push(sp);
-                }
+    //     // 繼續往上找祖先，僅保留 key-range 有 overlap 的
+    //     for (auto &gp : parent->parent) {
+    //         if (auto sp = gp.lock()) {
+    //             if (compareKey(sp->rangeMin, node->rangeMax) <= 0 &&
+    //                 compareKey(sp->rangeMax, node->rangeMin) >= 0) {
+    //                 Pqueue.push(sp);
+    //             }
+    //         }
+    //     }
+    // }
+
+    // // === Inter-level impact: children / descendants ===
+    // for (auto &[_, child] : node->children) {
+    //     if (child) Cqueue.push(child);
+    // }
+
+    // while (!Cqueue.empty()) {
+    //     auto child = Cqueue.front();
+    //     Cqueue.pop();
+    //     if (!Cvisited.insert(child.get()).second) continue;
+
+    //     if (child->channelInfo >= 0 &&
+    //         child->channelInfo < CHANNEL_NUM) {
+    //         info.inter[child->channelInfo].push_back(child->levelInfo);  // inter_impact[child_ch]++
+    //         pr_error("Child TreeNode:%s Level:%d in CH[%d]",child->filename.c_str(), child->levelInfo,child->channelInfo);
+    //     }
+
+    //     for (auto &[filename, grandchild] : child->children) {
+    //         if (!grandchild) {
+    //             pr_debug("Filename: %s can't find pointer", filename.c_str());
+    //             continue;
+    //         }
+    //         if (compareKey(grandchild->rangeMin, node->rangeMax) <= 0 &&
+    //             compareKey(grandchild->rangeMax, node->rangeMin) >= 0) {
+    //             Cqueue.push(grandchild);
+    //         }
+    //     }
+    // }
+    for (int lv = 1; lv < MAX_LEVEL; ++lv) {
+        if (lv == node->levelInfo) continue;
+        auto ov = tree_->search_overlap(lv, node->rangeMin, node->rangeMax);
+        for (auto &x : ov) {
+            if (!x || x.get() == node.get()) continue;
+            int ch = x->channelInfo;
+            if (0 <= ch && ch < CHANNEL_NUM) {
+                info.inter[ch].push_back(x->levelInfo);
             }
         }
     }
-
-    // === Inter-level impact: children / descendants ===
-    for (auto &[_, child] : node->children) {
-        if (child) Cqueue.push(child);
-    }
-
-    while (!Cqueue.empty()) {
-        auto child = Cqueue.front();
-        Cqueue.pop();
-        if (!Cvisited.insert(child.get()).second) continue;
-
-        if (child->channelInfo >= 0 &&
-            child->channelInfo < CHANNEL_NUM) {
-            info.inter[child->channelInfo].push_back(child->levelInfo);  // inter_impact[child_ch]++
-            pr_error("Child TreeNode:%s Level:%d in CH[%d]",child->filename.c_str(), child->levelInfo,child->channelInfo);
-        }
-
-        for (auto &[filename, grandchild] : child->children) {
-            if (!grandchild) {
-                pr_debug("Filename: %s can't find pointer", filename.c_str());
-                continue;
-            }
-            if (compareKey(grandchild->rangeMin, node->rangeMax) <= 0 &&
-                compareKey(grandchild->rangeMax, node->rangeMin) >= 0) {
-                Cqueue.push(grandchild);
-            }
-        }
-    }
-
     // === Intra-level impact: 同 level 前後相鄰的 SSTable ===
     int level = node->levelInfo;
     if (level < 0 || level >= MAX_LEVEL) {

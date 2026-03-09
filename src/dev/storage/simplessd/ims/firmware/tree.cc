@@ -40,32 +40,28 @@ std::vector<std::shared_ptr<TreeNode>> Tree::search_overlap(int level, const Key
     
     return result;
 }
-
 void Tree::build_link(std::shared_ptr<TreeNode> node){
     int parent_level = node->levelInfo - 1;
     int children_level = node->levelInfo + 1;
-    if (children_level >= MAX_LEVEL) {
-        pr_debug("Children level is too high...");
-        return;
-    } 
+
     std::vector<std::shared_ptr<TreeNode>> Poverlap;
     std::vector<std::shared_ptr<TreeNode>> Coverlap;
-    if(parent_level > 0){
+
+    if (parent_level >= 1) {
         Poverlap = search_overlap(parent_level, node->rangeMin, node->rangeMax);
     }
-    if(children_level > MAX_LEVEL){
-        pr_debug("Children level is too high, no children node can be linked");
-    }
-    else{
+
+    if (children_level < MAX_LEVEL) {
         Coverlap = search_overlap(children_level, node->rangeMin, node->rangeMax);
     }
 
-    for(const auto& parent : Poverlap){
-        if(parent->children.find(node->filename) == parent->children.end()){
+    for (const auto& parent : Poverlap) {
+        if (parent->children.find(node->filename) == parent->children.end()) {
             parent->children[node->filename] = node;
             node->parent.push_back(parent);
         }
     }
+
     for (const auto& child : Coverlap) {
         bool found = false;
         for (const auto& parent : child->parent) {
