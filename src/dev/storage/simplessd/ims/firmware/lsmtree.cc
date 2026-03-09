@@ -189,6 +189,7 @@ RelateChInfo LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
     return info;
 }
 
+
 void LSMTree::insert_sstable(std::shared_ptr<TreeNode> node) {
     tree_->insert_node(node);
     int level = node->levelInfo;
