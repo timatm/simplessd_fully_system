@@ -61,23 +61,25 @@ void PrintBuildConfig() {
 
     // ---- PACKING_TYPE 說明 ----
     const char* packing_type_str = nullptr;
-#ifdef PACKING_TYPE
-    switch (PACKING_TYPE) {
-        case 0: packing_type_str = "kKeyPerPage"; break;
-        case 1: packing_type_str = "kHash";       break;
-        case 2: packing_type_str = "kKeyRange";   break;
-        case 3: packing_type_str = "kIndexFilter";   break;
-        default: packing_type_str = "UNKNOWN";    break;
-    }
-#endif
-    pr_info("========== SSD Config ==========");
-    pr_info("RUNTYPE        = %d (%s)", RUNTYPE, runtype_str);
-    pr_info("ENABLE_DISK    = %d (%s)", ENABLE_DISK, enable_disk_str);
-    pr_info("NVME_DRIVER    = %d (%s)", NVME_DRIVER, nvme_driver_str);
-    pr_info("SELECT_POLICY  = %d (%s)", SELECT_POLICY, select_policy_str);
-#ifdef PACKING_TYPE
-    pr_info("PACKING_TYPE   = %d (%s)", PACKING_TYPE, packing_type_str);
-#endif
+
+#if RUNTYPE == 0
+    #ifdef PACKING_TYPE
+        switch (PACKING_TYPE) {
+            case 0: packing_type_str = "kKeyPerPage"; break;
+            case 1: packing_type_str = "kHash";       break;
+            case 2: packing_type_str = "kKeyRange";   break;
+            case 3: packing_type_str = "kIndexFilter";   break;
+            default: packing_type_str = "UNKNOWN";    break;
+        }
+    #endif
+        pr_info("========== SSD Config ==========");
+        pr_info("RUNTYPE        = %d (%s)", RUNTYPE, runtype_str);
+        pr_info("ENABLE_DISK    = %d (%s)", ENABLE_DISK, enable_disk_str);
+        pr_info("NVME_DRIVER    = %d (%s)", NVME_DRIVER, nvme_driver_str);
+        pr_info("SELECT_POLICY  = %d (%s)", SELECT_POLICY, select_policy_str);
+    #ifdef PACKING_TYPE
+        pr_info("PACKING_TYPE   = %d (%s)", PACKING_TYPE, packing_type_str);
+    #endif
     // ---- SSD / IMS 幾何資訊 ----
         // ---- SSD / IMS 幾何資訊 ----
     pr_info("---------- IMS / SSD Geometry ----------");
@@ -112,6 +114,57 @@ void PrintBuildConfig() {
             (unsigned long long)total_bytes);
 
     pr_info("========================================");
+#else
+    #ifdef PACKING_TYPE
+        switch (PACKING_TYPE) {
+            case 0: packing_type_str = "kKeyPerPage"; break;
+            case 1: packing_type_str = "kHash";       break;
+            case 2: packing_type_str = "kKeyRange";   break;
+            case 3: packing_type_str = "kIndexFilter";   break;
+            default: packing_type_str = "UNKNOWN";    break;
+        }
+    #endif
+        MYDB_LOG("========== SSD Config ==========");
+        MYDB_LOG("RUNTYPE        = %d (%s)", RUNTYPE, runtype_str);
+        MYDB_LOG("ENABLE_DISK    = %d (%s)", ENABLE_DISK, enable_disk_str);
+        MYDB_LOG("NVME_DRIVER    = %d (%s)", NVME_DRIVER, nvme_driver_str);
+        MYDB_LOG("SELECT_POLICY  = %d (%s)", SELECT_POLICY, select_policy_str);
+    #ifdef PACKING_TYPE
+        MYDB_LOG("PACKING_TYPE   = %d (%s)", PACKING_TYPE, packing_type_str);
+    #endif
+    MYDB_LOG("---------- IMS / SSD Geometry ----------");
+    MYDB_LOG("CHANNEL_NUM    = %d (bits=%d)", CHANNEL_NUM, CHANNEL_BITS);
+    MYDB_LOG("PACKAGE_NUM    = %d (bits=%d)", PACKAGE_NUM, PACKAGE_BITS);
+    MYDB_LOG("DIE_NUM        = %d (bits=%d)", DIE_NUM,     DIE_BITS);
+    MYDB_LOG("PLANE_NUM      = %d (bits=%d)", PLANE_NUM,   PLANE_BITS);
+    MYDB_LOG("BLOCK_NUM      = %d (bits=%d)", BLOCK_NUM,   BLOCK_BITS);
+
+    // 換成 K / M 單位
+    const int page_kb  = IMS_PAGE_SIZE / 1024;
+    const int block_mb = BLOCK_SIZE    / (1024 * 1024);
+    
+
+    MYDB_LOG("IMS_PAGE_NUM   = %d", IMS_PAGE_NUM);
+    MYDB_LOG("IMS_PAGE_SIZE  = %d KB", page_kb);
+    MYDB_LOG("BLOCK_SIZE     = %d MB", block_mb);
+
+    // int lbn_num = (int)((double)LBN_NUM* (1-SSD_PROVISION_RATIO));
+    MYDB_LOG("SSD SUPER PROVISION RATIO = %f",SSD_PROVISION_RATIO);
+    MYDB_LOG("LBN_NUM        = %d", LBN_NUM);
+    MYDB_LOG("LBN_SIZE       = %d MB", LBN_SIZE / (1024 * 1024));
+    MYDB_LOG("LPN_NUM        = %d", LPN_NUM);
+
+    // SSD 總容量，用 G 表示
+    unsigned long long total_bytes =
+        (unsigned long long)LBN_NUM * (unsigned long long)BLOCK_SIZE;
+    double total_gib = (double)total_bytes / (1024.0 * 1024.0 * 1024.0);
+
+    MYDB_LOG("SSD capacity   = %.2f GiB (%llu bytes)",
+            total_gib,
+            (unsigned long long)total_bytes);
+
+    MYDB_LOG("========================================");
+#endif
 
 }
 
@@ -278,6 +331,7 @@ int IMS_interface::write_sstable(uint64_t &lbn) {
                 break;
             case static_cast<int>(SelectT::MYPOLICY):
                 selectLBN = lbnPool_->my_policyL0(relateList);
+                // selectLBN = lbnPool_->RRpolicy();
                 break;
             default:
                 pr_error("The type of policy is invalid ,check your pass parameter");

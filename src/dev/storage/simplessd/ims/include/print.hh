@@ -88,4 +88,12 @@ inline void statf(const char* fmt, Args... args) {
   #define pr_debug(...) ((void)0)
 #endif
 
+#define MYDB_LOG(fmt, ...)                                                   \
+  do {                                                                       \
+    std::fprintf(stderr, "[MYDB-STAT] " fmt "\n", ##__VA_ARGS__);            \
+    std::fflush(stderr);                                                     \
+  } while (0)
+
+
+
 #endif // __PRINT_HH__
