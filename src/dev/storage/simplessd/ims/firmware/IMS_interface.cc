@@ -124,14 +124,17 @@ void PrintBuildConfig() {
             default: packing_type_str = "UNKNOWN";    break;
         }
     #endif
-        MYDB_LOG("========== SSD Config ==========");
-        MYDB_LOG("RUNTYPE        = %d (%s)", RUNTYPE, runtype_str);
-        MYDB_LOG("ENABLE_DISK    = %d (%s)", ENABLE_DISK, enable_disk_str);
-        MYDB_LOG("NVME_DRIVER    = %d (%s)", NVME_DRIVER, nvme_driver_str);
-        MYDB_LOG("SELECT_POLICY  = %d (%s)", SELECT_POLICY, select_policy_str);
+
+    MYDB_LOG("========== SSD Config ==========");
+    MYDB_LOG("RUNTYPE        = %d (%s)", RUNTYPE, runtype_str);
+    MYDB_LOG("ENABLE_DISK    = %d (%s)", ENABLE_DISK, enable_disk_str);
+    MYDB_LOG("NVME_DRIVER    = %d (%s)", NVME_DRIVER, nvme_driver_str);
+    MYDB_LOG("SELECT_POLICY  = %d (%s)", SELECT_POLICY, select_policy_str);
+
     #ifdef PACKING_TYPE
         MYDB_LOG("PACKING_TYPE   = %d (%s)", PACKING_TYPE, packing_type_str);
     #endif
+    
     MYDB_LOG("---------- IMS / SSD Geometry ----------");
     MYDB_LOG("CHANNEL_NUM    = %d (bits=%d)", CHANNEL_NUM, CHANNEL_BITS);
     MYDB_LOG("PACKAGE_NUM    = %d (bits=%d)", PACKAGE_NUM, PACKAGE_BITS);
