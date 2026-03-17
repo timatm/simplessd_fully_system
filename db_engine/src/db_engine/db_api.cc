@@ -22,6 +22,37 @@
 #include <array>
 #include <sstream>
 
+static void DumpCompactionShape(
+    int src_level,
+    const std::vector<std::shared_ptr<TreeNode>>& srcNodes,
+    const std::vector<std::shared_ptr<TreeNode>>& dstNodes) {
+
+    std::array<uint32_t, CHANNEL_NUM> per_ch{};
+    for (const auto& n : srcNodes) {
+        if (n && n->channelInfo >= 0 && n->channelInfo < CHANNEL_NUM) {
+            per_ch[n->channelInfo]++;
+        }
+    }
+    for (const auto& n : dstNodes) {
+        if (n && n->channelInfo >= 0 && n->channelInfo < CHANNEL_NUM) {
+            per_ch[n->channelInfo]++;
+        }
+    }
+
+    uint32_t max_ch_files = 0;
+    std::ostringstream oss;
+    for (int ch = 0; ch < CHANNEL_NUM; ++ch) {
+        max_ch_files = std::max(max_ch_files, per_ch[ch]);
+        if (ch) oss << ",";
+        oss << per_ch[ch];
+    }
+
+    pr_stat("[CMP-SHAPE] L%d->L%d src=%zu dst=%zu per_ch=[%s] max_ch_files=%u",
+            src_level, src_level + 1,
+            srcNodes.size(), dstNodes.size(),
+            oss.str().c_str(), max_ch_files);
+}
+
 namespace {
 using Clock = std::chrono::steady_clock;
 using Ns    = std::chrono::nanoseconds;
@@ -1941,7 +1972,12 @@ void API::compaction() {
 
 
         auto dstNodes = getLSMTree()->search_one_level(1, srcMin, srcMax);
-        SimulateDeviceIOIfNeeded(srcNodes,dstNodes);
+
+        DumpCompactionShape(0, srcNodes, dstNodes);
+        const auto io_s = Clock::now();
+        SimulateDeviceIOIfNeeded(srcNodes, dstNodes);
+        pr_stat("[CMP-DEV] L0->L1 dev_read_ms=%.3f",static_cast<double>(ToNs(Clock::now() - io_s)) / 1e6);
+
         pr_debug("Dump source nodes info:");
         // for(auto srcNode : srcNodes){
             
@@ -2020,7 +2056,12 @@ void API::compaction() {
 
         InternalKey srcMinKey = LowerSentinel(srcNode->rangeMin.toString());
         InternalKey srcMaxKey = UpperSentinel(srcNode->rangeMax.toString());
-        SimulateDeviceIOIfNeeded(srcNodes,dstNodes);
+
+        DumpCompactionShape(level, srcNodes, dstNodes);
+        const auto io_s = Clock::now();
+        SimulateDeviceIOIfNeeded(srcNodes, dstNodes);
+        pr_stat("[CMP-DEV] L%d->L%d dev_read_ms=%.3f",level, level + 1,static_cast<double>(ToNs(Clock::now() - io_s)) / 1e6);
+
         Key dstMinUser = srcNode->rangeMin, dstMaxUser = srcNode->rangeMax;
         bool hasDst = false;
         for (const auto& sp : dstNodes) {

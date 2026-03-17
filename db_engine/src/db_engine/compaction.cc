@@ -3,6 +3,22 @@
 #include <limits>
 #include <cstring>
 
+#include <chrono>
+
+thread_local bool     g_comp_trace_on       = false;
+thread_local uint64_t g_comp_materialize_ns = 0;
+thread_local uint64_t g_comp_write_ns       = 0;
+
+namespace {
+using Clock = std::chrono::steady_clock;
+using Ns    = std::chrono::nanoseconds;
+
+static inline uint64_t ToNs(Clock::duration d) {
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<Ns>(d).count());
+}
+}
+
 static inline bool DecodeInternal(std::string_view s, InternalKey& out) {
     if (s.size() != sizeof(InternalKey)) {
         pr_error("DecodeInternal: bad size=%zu (expect=%zu)", s.size(), sizeof(InternalKey));
@@ -154,19 +170,224 @@ bool CompactionRunner::memTableIsFull() {
 }
 
 
+// Status CompactionRunner::Run() {
+//     if (!srcLevelIter_ || !dstLevelIter_) return Status::IOError("iterators not ready");
+//     auto s = srcLevelIter_->Init();
+//     if (!s.ok())
+//     {
+//         pr_error("Source level iterator initialization is failed");
+//         return s;
+//     } 
+//     auto t = dstLevelIter_->Init();
+//     if (!t.ok()){
+//         pr_error("Destination level iterator initialization is failed");
+//         return t;
+//     } 
+
+//     auto equal_internal = [&](const InternalKey& a, const InternalKey& b)->bool {
+//         return std::memcmp(&a, &b, sizeof(InternalKey)) == 0;
+//     };
+
+//     auto flush = [&]() -> Status {
+//         if (sortedList_.empty()) return Status::OK();
+//         sstable_write_count_compaction++;
+//         if (sortedList_.front().size() != sizeof(InternalKey) ||
+//             sortedList_.back().size()  != sizeof(InternalKey)) {
+//             pr_error("flush: bad internal key size (front/back)");
+//             return Status::IOError("flush: bad internal key size");
+//         }
+//         InternalKey minK = InternalKey::Decode(sortedList_.front());
+//         InternalKey maxK = InternalKey::Decode(sortedList_.back());
+        
+//         auto buffer = smgr_->packingTable(sortedList_);
+//         // pr_debug("Compaction write SStable info");
+//         // minK.dump();
+//         // maxK.dump();
+//         smgr_->writeSSTable( static_cast<uint8_t>(srcLevel_ + 1), minK, maxK, std::move(buffer), /*clearImmuteTable=*/false);
+        
+
+//         while (!sortedList_.empty()) sortedList_.pop();
+//         nums_ = 0;
+//         if (packType_ == PackingType::kHash) std::fill(hash_num_.begin(), hash_num_.end(), 0);
+//         return Status::OK();
+//     };
+
+//     auto emit = [&](std::string_view k) -> Status {
+//         InternalKey a = InternalKey::Decode(std::string(k.data(),k.size()));
+//         if(a.key.key_size == 0){
+//             pr_error("Compation sorted list insert a error internal key");
+//             a.dump();
+//             return Status::OK();
+//         }
+//         sortedList_.emplace(k.data(), k.size());
+
+//         if (packType_ == PackingType::kHash) {
+//             InternalKey key{};
+//             if (!DecodeInternal(k, key)) return Status::IOError("emit: bad internal key (hash)");
+//             auto idx = HashModN(key, SLOT_NUM_PER_PAGE);
+//             if (idx >= hash_num_.size()) return Status::IOError("hash_num_ not initialized");
+//             hash_num_[idx]++;
+//         } else {
+//             ++nums_;
+//         }
+
+//         if (memTableIsFull()) {
+//             return flush();
+//         }
+//         return Status::OK();
+//     };
+
+//     bool l_valid = srcLevelIter_->Valid();
+//     bool r_valid = dstLevelIter_->Valid();
+
+//     std::string last_user_key;
+//     bool have_last = false;
+
+
+//     bool has_prev = false;
+//     InternalKey prev_internal{};
+
+//     while (l_valid || r_valid) {
+//         bool take_left = false;
+//         if (!r_valid) {
+//             take_left = true;
+//         } else if (!l_valid) {
+//             take_left = false;
+//         } else {
+//             InternalKey lk{}, rk{};
+//             bool ld = DecodeInternal(srcLevelIter_->key(), lk);
+//             bool rd = DecodeInternal(dstLevelIter_->key(), rk);
+//             if (!rd && !ld) {
+//                 pr_error("both keys decode failed; default take_left");
+//                 take_left = true;
+//             } else if (!rd) {
+//                 take_left = true;
+//             } else if (!ld) {
+//                 take_left = false;
+//             } else {
+//                 take_left = (*icmp_)(lk, rk); // 正常比較（internal 升序）
+//             }
+//         }
+
+//         std::string cur_owned;
+//         if (take_left) {
+//             std::string_view sv = srcLevelIter_->key();
+//             cur_owned.assign(sv.data(), sv.size());
+//             srcLevelIter_->Next();
+//             l_valid = srcLevelIter_->Valid();
+//         } else {
+//             std::string_view sv = dstLevelIter_->key();
+//             cur_owned.assign(sv.data(), sv.size());
+//             dstLevelIter_->Next();
+//             r_valid = dstLevelIter_->Valid();
+//         }
+//         std::string_view cur_key(cur_owned.data(), cur_owned.size());
+
+        
+//         InternalKey cur_internal{};
+//         if (DecodeInternal(cur_key, cur_internal)) {
+//             if (has_prev && !(*icmp_)(prev_internal, cur_internal) && !equal_internal(prev_internal, cur_internal)) {
+//                 pr_error("Compaction non-monotonic: previous > current (internal order broken)");
+//             }
+//             if(cur_internal.key.key_size == 0){
+//                 pr_error("Internal key is error");
+//                 continue;
+//             }
+//             prev_internal = cur_internal;
+//             has_prev = true;
+//         }
+
+//         // 版本折疊（同 user 只留第一個 = 最新）
+//         std::string cur_user;
+//         if (!ExtractUserKey(cur_key, cur_user)) {
+//             pr_error("extract_user_key failed, skip");
+//             continue;
+//         }
+//         if (!have_last || cur_user != last_user_key) {
+//             last_user_key = std::move(cur_user);
+//             have_last = true;
+//             auto es = emit(cur_key);
+//             if (!es.ok()){
+//                 pr_error("Comaption error 0");
+//                 return es;
+//             } 
+//             else {
+//                 continue; // 同 user 舊版本丟棄
+//             }
+//         }
+//     }
+
+//     if (!sortedList_.empty()) {
+//         auto fs = flush();
+//         if (!fs.ok()){
+//             pr_error("Comaption error 1");
+//             return fs;
+//         }
+//     }
+
+//     smgr_->waitAllTasksDone();
+//     return Status::OK();
+// }
+
+
 Status CompactionRunner::Run() {
-    if (!srcLevelIter_ || !dstLevelIter_) return Status::IOError("iterators not ready");
+    if (!srcLevelIter_ || !dstLevelIter_) {
+        return Status::IOError("iterators not ready");
+    }
+
+    const auto run_begin = Clock::now();
+
+    g_comp_trace_on       = true;
+    g_comp_materialize_ns = 0;
+    g_comp_write_ns       = 0;
+
+    uint64_t pack_ns = 0;
+    uint64_t wait_ns = 0;
+    uint64_t flush_cnt = 0;
+    uint64_t emitted_keys = 0;
+    uint64_t dropped_old_versions = 0;
+
+    auto finish = [&](Status st) -> Status {
+        const uint64_t total_ns       = ToNs(Clock::now() - run_begin);
+        const uint64_t materialize_ns = g_comp_materialize_ns;
+        const uint64_t write_ns       = g_comp_write_ns;
+
+        uint64_t merge_cpu_ns = 0;
+        if (total_ns > materialize_ns + pack_ns + write_ns + wait_ns) {
+            merge_cpu_ns = total_ns - materialize_ns - pack_ns - write_ns - wait_ns;
+        }
+
+        pr_stat("[CMP-RUN] L%d->L%d total_ms=%.3f materialize_read_ms=%.3f "
+                "merge_cpu_ms=%.3f pack_ms=%.3f write_ms=%.3f wait_ms=%.3f "
+                "flush_cnt=%llu emit_keys=%llu drop_old=%llu",
+                srcLevel_, srcLevel_ + 1,
+                static_cast<double>(total_ns) / 1e6,
+                static_cast<double>(materialize_ns) / 1e6,
+                static_cast<double>(merge_cpu_ns) / 1e6,
+                static_cast<double>(pack_ns) / 1e6,
+                static_cast<double>(write_ns) / 1e6,
+                static_cast<double>(wait_ns) / 1e6,
+                (unsigned long long)flush_cnt,
+                (unsigned long long)emitted_keys,
+                (unsigned long long)dropped_old_versions);
+
+        g_comp_trace_on       = false;
+        g_comp_materialize_ns = 0;
+        g_comp_write_ns       = 0;
+        return st;
+    };
+
     auto s = srcLevelIter_->Init();
-    if (!s.ok())
-    {
+    if (!s.ok()) {
         pr_error("Source level iterator initialization is failed");
-        return s;
-    } 
+        return finish(s);
+    }
+
     auto t = dstLevelIter_->Init();
-    if (!t.ok()){
+    if (!t.ok()) {
         pr_error("Destination level iterator initialization is failed");
-        return t;
-    } 
+        return finish(t);
+    }
 
     auto equal_internal = [&](const InternalKey& a, const InternalKey& b)->bool {
         return std::memcmp(&a, &b, sizeof(InternalKey)) == 0;
@@ -174,42 +395,54 @@ Status CompactionRunner::Run() {
 
     auto flush = [&]() -> Status {
         if (sortedList_.empty()) return Status::OK();
+
+        flush_cnt++;
         sstable_write_count_compaction++;
+
         if (sortedList_.front().size() != sizeof(InternalKey) ||
             sortedList_.back().size()  != sizeof(InternalKey)) {
             pr_error("flush: bad internal key size (front/back)");
             return Status::IOError("flush: bad internal key size");
         }
+
         InternalKey minK = InternalKey::Decode(sortedList_.front());
         InternalKey maxK = InternalKey::Decode(sortedList_.back());
-        
+
+        const auto pack_begin = Clock::now();
         auto buffer = smgr_->packingTable(sortedList_);
-        // pr_debug("Compaction write SStable info");
-        // minK.dump();
-        // maxK.dump();
-        smgr_->writeSSTable( static_cast<uint8_t>(srcLevel_ + 1), minK, maxK, std::move(buffer), /*clearImmuteTable=*/false);
-        
+        pack_ns += ToNs(Clock::now() - pack_begin);
+
+        smgr_->writeSSTable(static_cast<uint8_t>(srcLevel_ + 1),
+                            minK, maxK, std::move(buffer),
+                            /*clearImmuteTable=*/false);
 
         while (!sortedList_.empty()) sortedList_.pop();
         nums_ = 0;
-        if (packType_ == PackingType::kHash) std::fill(hash_num_.begin(), hash_num_.end(), 0);
+        if (packType_ == PackingType::kHash) {
+            std::fill(hash_num_.begin(), hash_num_.end(), 0);
+        }
         return Status::OK();
     };
 
     auto emit = [&](std::string_view k) -> Status {
-        InternalKey a = InternalKey::Decode(std::string(k.data(),k.size()));
-        if(a.key.key_size == 0){
-            pr_error("Compation sorted list insert a error internal key");
+        InternalKey a = InternalKey::Decode(std::string(k.data(), k.size()));
+        if (a.key.key_size == 0) {
+            pr_error("Compaction sorted list insert a error internal key");
             a.dump();
             return Status::OK();
         }
+
         sortedList_.emplace(k.data(), k.size());
 
         if (packType_ == PackingType::kHash) {
             InternalKey key{};
-            if (!DecodeInternal(k, key)) return Status::IOError("emit: bad internal key (hash)");
+            if (!DecodeInternal(k, key)) {
+                return Status::IOError("emit: bad internal key (hash)");
+            }
             auto idx = HashModN(key, SLOT_NUM_PER_PAGE);
-            if (idx >= hash_num_.size()) return Status::IOError("hash_num_ not initialized");
+            if (idx >= hash_num_.size()) {
+                return Status::IOError("hash_num_ not initialized");
+            }
             hash_num_[idx]++;
         } else {
             ++nums_;
@@ -227,12 +460,12 @@ Status CompactionRunner::Run() {
     std::string last_user_key;
     bool have_last = false;
 
-
     bool has_prev = false;
     InternalKey prev_internal{};
 
     while (l_valid || r_valid) {
         bool take_left = false;
+
         if (!r_valid) {
             take_left = true;
         } else if (!l_valid) {
@@ -241,6 +474,7 @@ Status CompactionRunner::Run() {
             InternalKey lk{}, rk{};
             bool ld = DecodeInternal(srcLevelIter_->key(), lk);
             bool rd = DecodeInternal(dstLevelIter_->key(), rk);
+
             if (!rd && !ld) {
                 pr_error("both keys decode failed; default take_left");
                 take_left = true;
@@ -249,7 +483,7 @@ Status CompactionRunner::Run() {
             } else if (!ld) {
                 take_left = false;
             } else {
-                take_left = (*icmp_)(lk, rk); // 正常比較（internal 升序）
+                take_left = (*icmp_)(lk, rk);
             }
         }
 
@@ -265,15 +499,17 @@ Status CompactionRunner::Run() {
             dstLevelIter_->Next();
             r_valid = dstLevelIter_->Valid();
         }
+
         std::string_view cur_key(cur_owned.data(), cur_owned.size());
 
-        
         InternalKey cur_internal{};
         if (DecodeInternal(cur_key, cur_internal)) {
-            if (has_prev && !(*icmp_)(prev_internal, cur_internal) && !equal_internal(prev_internal, cur_internal)) {
+            if (has_prev &&
+                !(*icmp_)(prev_internal, cur_internal) &&
+                !equal_internal(prev_internal, cur_internal)) {
                 pr_error("Compaction non-monotonic: previous > current (internal order broken)");
             }
-            if(cur_internal.key.key_size == 0){
+            if (cur_internal.key.key_size == 0) {
                 pr_error("Internal key is error");
                 continue;
             }
@@ -281,34 +517,38 @@ Status CompactionRunner::Run() {
             has_prev = true;
         }
 
-        // 版本折疊（同 user 只留第一個 = 最新）
         std::string cur_user;
         if (!ExtractUserKey(cur_key, cur_user)) {
             pr_error("extract_user_key failed, skip");
             continue;
         }
+
         if (!have_last || cur_user != last_user_key) {
             last_user_key = std::move(cur_user);
             have_last = true;
+            emitted_keys++;
+
             auto es = emit(cur_key);
-            if (!es.ok()){
-                pr_error("Comaption error 0");
-                return es;
-            } 
-            else {
-                continue; // 同 user 舊版本丟棄
+            if (!es.ok()) {
+                pr_error("Compaction error 0");
+                return finish(es);
             }
+        } else {
+            dropped_old_versions++;
         }
     }
 
     if (!sortedList_.empty()) {
         auto fs = flush();
-        if (!fs.ok()){
-            pr_error("Comaption error 1");
-            return fs;
+        if (!fs.ok()) {
+            pr_error("Compaction error 1");
+            return finish(fs);
         }
     }
 
+    const auto wait_begin = Clock::now();
     smgr_->waitAllTasksDone();
-    return Status::OK();
+    wait_ns += ToNs(Clock::now() - wait_begin);
+
+    return finish(Status::OK());
 }

@@ -17,6 +17,22 @@ static std::atomic<int> g_inflight_write(0);
 
 #include "sstable_format_idxbf.hh"
 
+#include <chrono>
+
+extern thread_local bool     g_comp_trace_on;
+extern thread_local uint64_t g_comp_materialize_ns;
+extern thread_local uint64_t g_comp_write_ns;
+
+namespace {
+using Clock = std::chrono::steady_clock;
+using Ns    = std::chrono::nanoseconds;
+
+static inline uint64_t ToNs(Clock::duration d) {
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<Ns>(d).count());
+}
+}
+
 
 static inline uint64_t FNV1aHash64(const void* ptr, size_t len) {
     const auto* p = static_cast<const unsigned char*>(ptr);
@@ -679,13 +695,20 @@ void SstableManager::readSSTable(const std::string& filename,char *buffer) {
     //     }
     //     std::cout << "[Thread] Read success: " << filename << std::endl;
     // });
+    const auto t0 = Clock::now();
+
     int err = nvme_.nvme_read_sstable(filename, buffer);
+
+    const uint64_t ns = ToNs(Clock::now() - t0);
+    if (g_comp_trace_on) {
+        g_comp_materialize_ns += ns;
+    }
+
     if (err == COMMAND_FAILED) {
-        pr_error("[Thread] Failed to read SSTable: %s",filename.c_str());
-        // std::free(buffer);
+        pr_error("[Thread] Failed to read SSTable: %s", filename.c_str());
         return;
     }
-    pr_debug("[Thread] Read success: %s",filename.c_str());
+    pr_debug("[Thread] Read success: %s", filename.c_str());
     pr_debug("[Main] Async read dispatched.");
 }
 
@@ -736,9 +759,17 @@ void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey
     //     pr_info("[Thread] [LEAVE] tid:%zu inflight:%d",static_cast<size_t>(tid_hash),now_inflight);
     //     pr_debug("SStable( %s ) written successfully.",info.filename);
     // });
-    int err = nvme_.nvme_write_sstable(info,sstable_buffer.data());
+
+    const auto t0 = Clock::now();
+    int err = nvme_.nvme_write_sstable(info, sstable_buffer.data());
+    const uint64_t ns = ToNs(Clock::now() - t0);
+
+    if (g_comp_trace_on) {
+        g_comp_write_ns += ns;
+    }
+
     if (err == COMMAND_FAILED) {
-        pr_error("Failed to write SSTable: %s",info.filename.c_str());
+        pr_error("Failed to write SSTable: %s", info.filename.c_str());
         return;
     }
     pr_debug("Write success: %s",info.filename.c_str());
