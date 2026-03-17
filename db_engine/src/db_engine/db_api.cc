@@ -17,7 +17,57 @@
 #include <limits>
 #include <cstring>
 
+#include <atomic>
+#include <chrono>
+#include <array>
+#include <sstream>
 
+namespace {
+using Clock = std::chrono::steady_clock;
+using Ns    = std::chrono::nanoseconds;
+
+static inline uint64_t ToNs(Clock::duration d) {
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<Ns>(d).count());
+}
+
+struct PutOpTiming {
+    uint64_t total_ns = 0;
+    uint64_t flush_ns = 0;
+    uint64_t compaction_ns = 0;
+    uint64_t log_write_ns = 0;
+    uint64_t memtable_put_ns = 0;
+    uint64_t log_gc_ns = 0;
+
+    uint32_t compaction_runs = 0;
+    bool flush_triggered = false;
+    bool compaction_triggered = false;
+    bool log_gc_triggered = false;
+};
+
+struct PutAggTiming {
+    std::atomic<uint64_t> ops{0};
+    std::atomic<uint64_t> total_ns{0};
+    std::atomic<uint64_t> flush_ns{0};
+    std::atomic<uint64_t> compaction_ns{0};
+    std::atomic<uint64_t> log_write_ns{0};
+    std::atomic<uint64_t> memtable_put_ns{0};
+    std::atomic<uint64_t> log_gc_ns{0};
+
+    std::atomic<uint64_t> flush_ops{0};
+    std::atomic<uint64_t> compaction_ops{0};
+    std::atomic<uint64_t> compaction_runs{0};
+    std::atomic<uint64_t> log_gc_ops{0};
+};
+
+static PutAggTiming g_put_timing;
+
+// 每個 thread 保留自己最近一次 put/update 的 breakdown
+thread_local PutOpTiming g_last_put_timing;
+
+thread_local bool g_compaction_triggered = false;
+thread_local uint32_t g_compaction_runs = 0;
+}
 
 namespace {
 using namespace sst_v2;
@@ -677,6 +727,38 @@ void API::print_result() {
     pr_stat("Write SStable count trigger by immutable: %u",sstable_write_count_immtable);
     pr_stat("Search hit in memory count: %u",search_hit_in_memory);
     pr_info("==========================================================");
+
+    auto ns_to_ms = [](uint64_t ns) {
+    return static_cast<double>(ns) / 1e6;
+    };
+
+    const uint64_t total_ns      = g_put_timing.total_ns.load(std::memory_order_relaxed);
+    const uint64_t flush_ns      = g_put_timing.flush_ns.load(std::memory_order_relaxed);
+    const uint64_t compaction_ns = g_put_timing.compaction_ns.load(std::memory_order_relaxed);
+    const uint64_t log_write_ns  = g_put_timing.log_write_ns.load(std::memory_order_relaxed);
+    const uint64_t memtable_ns   = g_put_timing.memtable_put_ns.load(std::memory_order_relaxed);
+    const uint64_t log_gc_ns     = g_put_timing.log_gc_ns.load(std::memory_order_relaxed);
+
+    pr_stat("put_internal_total_ms=%.3f", ns_to_ms(total_ns));
+    pr_stat("put_flush_ms=%.3f", ns_to_ms(flush_ns));
+    pr_stat("put_compaction_ms=%.3f", ns_to_ms(compaction_ns));
+    pr_stat("put_log_write_ms=%.3f", ns_to_ms(log_write_ns));
+    pr_stat("put_memtable_put_ms=%.3f", ns_to_ms(memtable_ns));
+    pr_stat("put_log_gc_ms=%.3f", ns_to_ms(log_gc_ns));
+
+    pr_stat("put_user_write_ms(log+memtable)=%.3f",
+            ns_to_ms(log_write_ns + memtable_ns));
+    pr_stat("put_maintenance_ms(flush+compaction+log_gc)=%.3f",
+            ns_to_ms(flush_ns + compaction_ns + log_gc_ns));
+
+    pr_stat("put_trigger_flush_count=%llu",
+            (unsigned long long)g_put_timing.flush_ops.load(std::memory_order_relaxed));
+    pr_stat("put_trigger_compaction_count=%llu",
+            (unsigned long long)g_put_timing.compaction_ops.load(std::memory_order_relaxed));
+    pr_stat("put_compaction_run_count=%llu",
+            (unsigned long long)g_put_timing.compaction_runs.load(std::memory_order_relaxed));
+    pr_stat("put_trigger_log_gc_count=%llu",
+            (unsigned long long)g_put_timing.log_gc_ops.load(std::memory_order_relaxed));
 }
 
 
@@ -761,6 +843,9 @@ Status API::put_from_gc(std::string key, std::string value) {
 
 
 Status API::put_impl(std::string key ,std::string value,PutType t){
+    PutOpTiming op;
+    const auto put_begin = Clock::now();
+
     std::shared_ptr<MemTable> imm_hold;
     InternalKey minK, maxK;
     bool need_flush = false;
@@ -781,26 +866,78 @@ Status API::put_impl(std::string key ,std::string value,PutType t){
     }
 
     if (need_flush) {
+        const auto s = Clock::now();
         sstable_write_count_immtable++;
-        const auto& list_ref = imm_hold->GetSkipList(); 
+        const auto& list_ref = imm_hold->GetSkipList();
         auto buffer = sstableManager_->packingTable(list_ref);
-        if ( buffer.data() == nullptr || buffer.size != BLOCK_SIZE) return Status::IOError("Packing failed");
+        if (buffer.data() == nullptr || buffer.size != BLOCK_SIZE) {
+            return Status::IOError("Packing failed");
+        }
         sstableManager_->writeSSTable(0, minK, maxK, std::move(buffer), /*clearImmuteTable=*/true);
         immutable_memtable_.reset();
+
+        op.flush_ns = ToNs(Clock::now() - s);
+        op.flush_triggered = true;
     }
-    compaction();
+    {
+        g_compaction_triggered = false;
+        g_compaction_runs = 0;
+
+        const auto s = Clock::now();
+        compaction();
+        const uint64_t ns = ToNs(Clock::now() - s);
+
+        if (g_compaction_triggered) {
+            op.compaction_ns = ns;
+            op.compaction_triggered = true;
+            op.compaction_runs = g_compaction_runs;
+        }
+    }
     uint32_t lpn = 0;
     uint32_t offset = 0;
     getLogManager()->getLPN(lpn, offset);
     uint64_t seq = global_seq_.fetch_add(1); 
     InternalKey internal_key(key,lpn,offset,seq,ValueType::kTypeValue);
     Record internal_value(internal_key,value);
-    logManager_->writeLog(internal_value);
-    memtable_->Put(internal_value);
+    {
+        const auto s = Clock::now();
+        logManager_->writeLog(internal_value);
+        op.log_write_ns = ToNs(Clock::now() - s);
+    }
+    {
+        const auto s = Clock::now();
+        memtable_->Put(internal_value);
+        op.memtable_put_ns = ToNs(Clock::now() - s);
+    }
+
     // if(logManager_->get_log_block_num() >= LOG_GC_THRESHOLD && t == PutType::kPutByUser){
     //     pr_error("GC running");
     //     log_garbage_collection();
     // }
+    op.total_ns = ToNs(Clock::now() - put_begin);
+    g_last_put_timing = op;
+
+    // 只統計 user put，不把 GC 內部回寫算進來
+    if (t == PutType::kPutByUser) {
+        g_put_timing.ops.fetch_add(1, std::memory_order_relaxed);
+        g_put_timing.total_ns.fetch_add(op.total_ns, std::memory_order_relaxed);
+        g_put_timing.flush_ns.fetch_add(op.flush_ns, std::memory_order_relaxed);
+        g_put_timing.compaction_ns.fetch_add(op.compaction_ns, std::memory_order_relaxed);
+        g_put_timing.log_write_ns.fetch_add(op.log_write_ns, std::memory_order_relaxed);
+        g_put_timing.memtable_put_ns.fetch_add(op.memtable_put_ns, std::memory_order_relaxed);
+        g_put_timing.log_gc_ns.fetch_add(op.log_gc_ns, std::memory_order_relaxed);
+
+        if (op.flush_triggered) {
+            g_put_timing.flush_ops.fetch_add(1, std::memory_order_relaxed);
+        }
+        if (op.compaction_triggered) {
+            g_put_timing.compaction_ops.fetch_add(1, std::memory_order_relaxed);
+            g_put_timing.compaction_runs.fetch_add(op.compaction_runs, std::memory_order_relaxed);
+        }
+        if (op.log_gc_triggered) {
+            g_put_timing.log_gc_ops.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
     return Status::OK();
 }
 
@@ -1758,6 +1895,8 @@ void API::SimulateDeviceIOIfNeeded(const std::vector<std::shared_ptr<TreeNode>> 
 
 
 void API::compaction() {
+    g_compaction_triggered = false;
+    g_compaction_runs = 0;
     auto LowerSentinel = [](const std::string& uk) {
         return InternalKey(uk, UINT64_MAX, ValueType::kTypeMin);
     };
@@ -1768,6 +1907,8 @@ void API::compaction() {
     bool compaction = false;
     // ---------- L0 -> L1 ----------
     if (getLSMTree()->get_level_num(0) >= LEVEL0_MAX) {
+        g_compaction_triggered = true;
+        ++g_compaction_runs;
         compaction_count++;
         pr_debug("Compaction start tree info:");
         // lsmTree_->dump_lsmtere();
@@ -1850,6 +1991,8 @@ void API::compaction() {
     // ---------- Lk -> Lk+1 ----------
     for (int level = 1; level < MAX_LEVEL; ++level) {
         if (!compactionTrigger(level)) continue;
+        g_compaction_triggered = true;
+        ++g_compaction_runs;
         compaction_count++;
         pr_debug("Compaction triggered at Level %d", level);
         pr_debug("Compaction start tree info:");

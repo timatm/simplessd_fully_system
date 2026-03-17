@@ -9,7 +9,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <type_traits>
-
+#include <def.hh>
 
 // #define MYDB_DEBUG 1
 namespace logger {
@@ -77,22 +77,29 @@ inline void statf(const char* fmt, Args... args) {
 
 } // namespace logger
 
+#define MYDB_LOG(fmt, ...)                                                   \
+  do {                                                                       \
+    std::fprintf(stderr, "[MYDB-STAT] " fmt "\n", ##__VA_ARGS__);            \
+    std::fflush(stderr);                                                     \
+  } while (0)
+
+
+
 // ────────────── 使用者介面 ──────────────
 #define pr_info(...)  logger::infof(__VA_ARGS__)
 #define pr_error(...) logger::errorf(__VA_ARGS__)
-#define pr_stat(...) logger::statf(__VA_ARGS__)
+
+#if RUNTYPE == 1
+    #define pr_stat(...) MYDB_LOG(__VA_ARGS__)
+#else
+    #define pr_stat(...) logger::statf(__VA_ARGS__)
+#endif
 
 #ifdef MYDB_DEBUG
   #define pr_debug(...) logger::debugf(__VA_ARGS__)
 #else
   #define pr_debug(...) ((void)0)
 #endif
-
-#define MYDB_LOG(fmt, ...)                                                   \
-  do {                                                                       \
-    std::fprintf(stderr, "[MYDB-STAT] " fmt "\n", ##__VA_ARGS__);            \
-    std::fflush(stderr);                                                     \
-  } while (0)
 
 
 
