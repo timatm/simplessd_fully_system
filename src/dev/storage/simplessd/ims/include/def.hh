@@ -7,6 +7,14 @@
 #include <cstring>
 #include <string>
 #include <memory>
+#include <iostream>
+#include <chrono>
+#include <iomanip>
+#include <sstream>
+#include <string>
+#include <cstdarg>
+#include <cstdio>
+#include <type_traits>
 // [SSD setting start]
 
 #define CHANNEL_NUM         8

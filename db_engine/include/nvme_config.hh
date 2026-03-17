@@ -7,6 +7,7 @@
 #include <iostream>
 #include <iomanip>
 #include "def.hh"
+#include "print.hh"
 typedef struct
 {
     // host info
