@@ -22,6 +22,17 @@
 #include <array>
 #include <sstream>
 
+extern std::atomic<uint64_t> g_cmp_sim_nand_ns;
+extern std::atomic<uint64_t> g_cmp_sim_nand_calls;
+extern std::atomic<uint64_t> g_cmp_run_count;
+extern std::atomic<uint64_t> g_cmp_run_total_ns;
+extern std::atomic<uint64_t> g_cmp_read_sstable_ns;
+extern std::atomic<uint64_t> g_cmp_merge_core_ns;
+extern std::atomic<uint64_t> g_cmp_pack_ns;
+extern std::atomic<uint64_t> g_cmp_write_submit_ns;
+extern std::atomic<uint64_t> g_cmp_write_stage_ns;
+extern std::atomic<uint64_t> g_cmp_wait_ns;
+
 static void DumpCompactionShape(
     int src_level,
     const std::vector<std::shared_ptr<TreeNode>>& srcNodes,
@@ -98,6 +109,30 @@ thread_local PutOpTiming g_last_put_timing;
 
 thread_local bool g_compaction_triggered = false;
 thread_local uint32_t g_compaction_runs = 0;
+
+struct SearchAggTiming {
+    std::atomic<uint64_t> total_ops{0};
+    std::atomic<uint64_t> total_ns{0};
+    std::atomic<uint64_t> mem_hit_ops{0};
+
+    std::atomic<uint64_t> idxbf_ops{0};
+    std::atomic<uint64_t> idxbf_total_ns{0};
+    std::atomic<uint64_t> idxbf_bloom_ns{0};
+    std::atomic<uint64_t> idxbf_meta_read_ns{0};
+    std::atomic<uint64_t> idxbf_data_page_read_ns{0};
+    std::atomic<uint64_t> idxbf_page_read_ns{0};
+
+    std::atomic<uint64_t> pattern_ops{0};
+    std::atomic<uint64_t> pattern_total_ns{0};
+    std::atomic<uint64_t> pattern_gen_ns{0};
+    std::atomic<uint64_t> pattern_submit_ns{0};
+};
+
+static SearchAggTiming g_search_timing;
+thread_local bool     g_search_trace_on = false;
+thread_local uint64_t g_search_bloom_ns_tls = 0;
+thread_local uint64_t g_search_meta_read_ns_tls = 0;
+
 }
 
 namespace {
@@ -125,8 +160,17 @@ static inline bool BloomMayContain(const uint8_t* bloom,
                                   uint32_t bloom_bytes,
                                   const std::string& user_key,
                                   uint8_t k) {
+    const bool trace_on = g_search_trace_on;
+    const auto t0 = trace_on ? Clock::now() : Clock::time_point{};
+    auto finish = [&](bool ret) {
+        if (trace_on) {
+            g_search_bloom_ns_tls += ToNs(Clock::now() - t0);
+        }
+        return ret;
+    };
+
     // bloom 不可用：保守回 true（當作“可能有”）
-    if (bloom_bytes == 0 || k == 0) return true;
+    if (bloom_bytes == 0 || k == 0) return finish(true);
 
     const uint64_t m = static_cast<uint64_t>(bloom_bytes) * 8ull;
     const uint64_t h1 = FNV1aHash64(user_key.data(), user_key.size());
@@ -137,12 +181,11 @@ static inline bool BloomMayContain(const uint8_t* bloom,
         const uint64_t bit = (h1 + static_cast<uint64_t>(i) * h2) % m;
         const uint32_t byte_i = static_cast<uint32_t>(bit >> 3);
         const uint32_t bit_i  = static_cast<uint32_t>(bit & 7);
-        if ((bloom[byte_i] & static_cast<uint8_t>(1u << bit_i)) == 0) return false;
+        if ((bloom[byte_i] & static_cast<uint8_t>(1u << bit_i)) == 0) {
+            return finish(false);
+        }
     }
-    return true;
-
-
-    
+    return finish(true);
 }
 
 // 用 index 找到可能的 page，再用 bloom slice 檢查，最後掃那一頁找 key
@@ -345,7 +388,7 @@ static bool IdxBloomScanDataPage(const char* page_buf,
     found = best;                                                             
     return true;                                                              
 }
-
+}
 // =========================
 // Idx/Bloom Meta Cache
 // SSTableID (filename) -> meta bytes
@@ -545,9 +588,18 @@ static inline bool ReadIdxBloomMetaWithCache(NVMEPtr& nvme,
         return false;
     }
 
+    auto timedMetaRead = [&](char* out_buf) -> bool {
+        const auto t0 = Clock::now();
+        const bool ok = ((*nvme).nvme_read_sstable_page(sstable_id, 0, meta_pages, out_buf) == COMMAND_SUCCESS);
+        if (g_search_trace_on) {
+            g_search_meta_read_ns_tls += ToNs(Clock::now() - t0);
+        }
+        return ok;
+    };
+
 #if IDXBF_META_CACHE_MODE == 0
     // Cache disabled: always read from device.
-    return (*nvme).nvme_read_sstable_page(sstable_id, 0, meta_pages, meta_buf) == COMMAND_SUCCESS;
+    return timedMetaRead(meta_buf);
 
 #else
     const bool hit = g_idxbf_meta_cache.GetCopy(sstable_id, meta_buf, meta_bytes);
@@ -560,7 +612,7 @@ static inline bool ReadIdxBloomMetaWithCache(NVMEPtr& nvme,
     (void)hit;
 #endif
 
-    if ((*nvme).nvme_read_sstable_page(sstable_id, 0, meta_pages, meta_buf) != COMMAND_SUCCESS) {
+    if (!timedMetaRead(meta_buf)) {
         return false;
     }
 
@@ -571,14 +623,56 @@ static inline bool ReadIdxBloomMetaWithCache(NVMEPtr& nvme,
 
 } // anonymous namespace
 
-
-
-
-} // namespace
-
-
 API::API(){
     pr_info("API initailizing ...");
+
+    auto reset_atomic = [](std::atomic<uint64_t>& v) {
+        v.store(0, std::memory_order_relaxed);
+    };
+
+    reset_atomic(g_put_timing.ops);
+    reset_atomic(g_put_timing.total_ns);
+    reset_atomic(g_put_timing.flush_ns);
+    reset_atomic(g_put_timing.compaction_ns);
+    reset_atomic(g_put_timing.log_write_ns);
+    reset_atomic(g_put_timing.memtable_put_ns);
+    reset_atomic(g_put_timing.log_gc_ns);
+    reset_atomic(g_put_timing.flush_ops);
+    reset_atomic(g_put_timing.compaction_ops);
+    reset_atomic(g_put_timing.compaction_runs);
+    reset_atomic(g_put_timing.log_gc_ops);
+
+    reset_atomic(g_search_timing.total_ops);
+    reset_atomic(g_search_timing.total_ns);
+    reset_atomic(g_search_timing.mem_hit_ops);
+    reset_atomic(g_search_timing.idxbf_ops);
+    reset_atomic(g_search_timing.idxbf_total_ns);
+    reset_atomic(g_search_timing.idxbf_bloom_ns);
+    reset_atomic(g_search_timing.idxbf_meta_read_ns);
+    reset_atomic(g_search_timing.idxbf_data_page_read_ns);
+    reset_atomic(g_search_timing.idxbf_page_read_ns);
+    reset_atomic(g_search_timing.pattern_ops);
+    reset_atomic(g_search_timing.pattern_total_ns);
+    reset_atomic(g_search_timing.pattern_gen_ns);
+    reset_atomic(g_search_timing.pattern_submit_ns);
+
+    reset_atomic(g_cmp_sim_nand_ns);
+    reset_atomic(g_cmp_sim_nand_calls);
+    reset_atomic(g_cmp_run_count);
+    reset_atomic(g_cmp_run_total_ns);
+    reset_atomic(g_cmp_read_sstable_ns);
+    reset_atomic(g_cmp_merge_core_ns);
+    reset_atomic(g_cmp_pack_ns);
+    reset_atomic(g_cmp_write_submit_ns);
+    reset_atomic(g_cmp_write_stage_ns);
+    reset_atomic(g_cmp_wait_ns);
+
+    g_search_trace_on = false;
+    g_search_bloom_ns_tls = 0;
+    g_search_meta_read_ns_tls = 0;
+    g_compaction_triggered = false;
+    g_compaction_runs = 0;
+
     tree_ = std::make_shared<Tree>();
     lsmTree_ = std::make_unique<LSMTree>(tree_);
 #if RUNTYPE == 1
@@ -790,6 +884,112 @@ void API::print_result() {
             (unsigned long long)g_put_timing.compaction_runs.load(std::memory_order_relaxed));
     pr_stat("put_trigger_log_gc_count=%llu",
             (unsigned long long)g_put_timing.log_gc_ops.load(std::memory_order_relaxed));
+
+    const uint64_t comp_sim_nand_ns     = g_cmp_sim_nand_ns.load(std::memory_order_relaxed);
+    const uint64_t comp_sim_nand_calls  = g_cmp_sim_nand_calls.load(std::memory_order_relaxed);
+    const uint64_t comp_run_ns          = g_cmp_run_total_ns.load(std::memory_order_relaxed);
+    const uint64_t comp_run_count       = g_cmp_run_count.load(std::memory_order_relaxed);
+    const uint64_t comp_read_ns         = g_cmp_read_sstable_ns.load(std::memory_order_relaxed);
+    const uint64_t comp_merge_ns        = g_cmp_merge_core_ns.load(std::memory_order_relaxed);
+    const uint64_t comp_pack_ns         = g_cmp_pack_ns.load(std::memory_order_relaxed);
+    const uint64_t comp_write_submit_ns = g_cmp_write_submit_ns.load(std::memory_order_relaxed);
+    const uint64_t comp_write_stage_ns  = g_cmp_write_stage_ns.load(std::memory_order_relaxed);
+    const uint64_t comp_wait_ns         = g_cmp_wait_ns.load(std::memory_order_relaxed);
+    const uint64_t comp_measured_total_ns = comp_sim_nand_ns + comp_run_ns;
+
+    pr_stat("comp_sim_nand_ms=%.3f", ns_to_ms(comp_sim_nand_ns));
+    pr_stat("comp_read_sstable_ms=%.3f", ns_to_ms(comp_read_ns));
+    pr_stat("comp_merge_core_ms=%.3f", ns_to_ms(comp_merge_ns));
+    pr_stat("comp_pack_ms=%.3f", ns_to_ms(comp_pack_ns));
+    pr_stat("comp_write_submit_ms=%.3f", ns_to_ms(comp_write_submit_ns));
+    pr_stat("comp_write_stage_ms(pack+write)=%.3f", ns_to_ms(comp_write_stage_ns));
+    pr_stat("comp_wait_ms=%.3f", ns_to_ms(comp_wait_ns));
+    pr_stat("comp_stage_measured_total_ms=%.3f", ns_to_ms(comp_measured_total_ns));
+    pr_stat("comp_stage_run_count=%llu", (unsigned long long)comp_run_count);
+    pr_stat("comp_sim_nand_calls=%llu", (unsigned long long)comp_sim_nand_calls);
+
+    if (comp_measured_total_ns > 0) {
+        pr_stat("comp_stage_share(sim_nand/read/merge/write_stage/wait)=%.2f/%.2f/%.2f/%.2f/%.2f",
+                100.0 * static_cast<double>(comp_sim_nand_ns)    / static_cast<double>(comp_measured_total_ns),
+                100.0 * static_cast<double>(comp_read_ns)        / static_cast<double>(comp_measured_total_ns),
+                100.0 * static_cast<double>(comp_merge_ns)       / static_cast<double>(comp_measured_total_ns),
+                100.0 * static_cast<double>(comp_write_stage_ns) / static_cast<double>(comp_measured_total_ns),
+                100.0 * static_cast<double>(comp_wait_ns)        / static_cast<double>(comp_measured_total_ns));
+    }
+
+    if (comp_run_count > 0) {
+        pr_stat("comp_avg_sim_nand_ms_per_run=%.3f",
+                ns_to_ms(comp_sim_nand_ns) / static_cast<double>(comp_run_count));
+        pr_stat("comp_avg_read_sstable_ms_per_run=%.3f",
+                ns_to_ms(comp_read_ns) / static_cast<double>(comp_run_count));
+        pr_stat("comp_avg_merge_core_ms_per_run=%.3f",
+                ns_to_ms(comp_merge_ns) / static_cast<double>(comp_run_count));
+        pr_stat("comp_avg_write_stage_ms_per_run=%.3f",
+                ns_to_ms(comp_write_stage_ns) / static_cast<double>(comp_run_count));
+    }
+
+    const uint64_t search_total_ops   = g_search_timing.total_ops.load(std::memory_order_relaxed);
+    const uint64_t search_total_ns    = g_search_timing.total_ns.load(std::memory_order_relaxed);
+    const uint64_t search_mem_hits    = g_search_timing.mem_hit_ops.load(std::memory_order_relaxed);
+
+    pr_stat("search_total_count=%llu", (unsigned long long)search_total_ops);
+    pr_stat("search_total_ms=%.3f", ns_to_ms(search_total_ns));
+    pr_stat("search_mem_hit_count=%llu", (unsigned long long)search_mem_hits);
+
+    if (packing_ == PackingType::kIdxBloomData) {
+        const uint64_t idxbf_ops          = g_search_timing.idxbf_ops.load(std::memory_order_relaxed);
+        const uint64_t idxbf_total_ns     = g_search_timing.idxbf_total_ns.load(std::memory_order_relaxed);
+        const uint64_t idxbf_bloom_ns     = g_search_timing.idxbf_bloom_ns.load(std::memory_order_relaxed);
+        const uint64_t idxbf_meta_ns      = g_search_timing.idxbf_meta_read_ns.load(std::memory_order_relaxed);
+        const uint64_t idxbf_data_ns      = g_search_timing.idxbf_data_page_read_ns.load(std::memory_order_relaxed);
+        const uint64_t idxbf_page_ns      = g_search_timing.idxbf_page_read_ns.load(std::memory_order_relaxed);
+
+        pr_stat("search_idxbf_count=%llu", (unsigned long long)idxbf_ops);
+        pr_stat("search_idxbf_total_ms=%.3f", ns_to_ms(idxbf_total_ns));
+        pr_stat("search_idxbf_bloom_calc_ms=%.3f", ns_to_ms(idxbf_bloom_ns));
+        pr_stat("search_idxbf_meta_read_ms=%.3f", ns_to_ms(idxbf_meta_ns));
+        pr_stat("search_idxbf_data_page_read_ms=%.3f", ns_to_ms(idxbf_data_ns));
+        pr_stat("search_idxbf_page_read_ms=%.3f", ns_to_ms(idxbf_page_ns));
+
+        if (idxbf_total_ns > 0) {
+            pr_stat("search_idxbf_share(bloom/meta_read/data_read)=%.2f/%.2f/%.2f",
+                    100.0 * static_cast<double>(idxbf_bloom_ns) / static_cast<double>(idxbf_total_ns),
+                    100.0 * static_cast<double>(idxbf_meta_ns)  / static_cast<double>(idxbf_total_ns),
+                    100.0 * static_cast<double>(idxbf_data_ns)  / static_cast<double>(idxbf_total_ns));
+        }
+
+        if (idxbf_ops > 0) {
+            pr_stat("search_idxbf_avg_total_ms=%.3f",
+                    ns_to_ms(idxbf_total_ns) / static_cast<double>(idxbf_ops));
+            pr_stat("search_idxbf_avg_bloom_calc_ms=%.3f",
+                    ns_to_ms(idxbf_bloom_ns) / static_cast<double>(idxbf_ops));
+            pr_stat("search_idxbf_avg_page_read_ms=%.3f",
+                    ns_to_ms(idxbf_page_ns) / static_cast<double>(idxbf_ops));
+        }
+    } else {
+        const uint64_t pattern_ops       = g_search_timing.pattern_ops.load(std::memory_order_relaxed);
+        const uint64_t pattern_total_ns  = g_search_timing.pattern_total_ns.load(std::memory_order_relaxed);
+        const uint64_t pattern_gen_ns    = g_search_timing.pattern_gen_ns.load(std::memory_order_relaxed);
+        const uint64_t pattern_submit_ns = g_search_timing.pattern_submit_ns.load(std::memory_order_relaxed);
+
+        pr_stat("search_pattern_count=%llu", (unsigned long long)pattern_ops);
+        pr_stat("search_pattern_total_ms=%.3f", ns_to_ms(pattern_total_ns));
+        pr_stat("search_pattern_gen_ms=%.3f", ns_to_ms(pattern_gen_ns));
+        pr_stat("search_submit_ms=%.3f", ns_to_ms(pattern_submit_ns));
+
+        if (pattern_total_ns > 0) {
+            pr_stat("search_pattern_share(gen/submit)=%.2f/%.2f",
+                    100.0 * static_cast<double>(pattern_gen_ns) / static_cast<double>(pattern_total_ns),
+                    100.0 * static_cast<double>(pattern_submit_ns) / static_cast<double>(pattern_total_ns));
+        }
+
+        if (pattern_ops > 0) {
+            pr_stat("search_pattern_avg_total_ms=%.3f",
+                    ns_to_ms(pattern_total_ns) / static_cast<double>(pattern_ops));
+            pr_stat("search_pattern_avg_gen_ms=%.3f",
+                    ns_to_ms(pattern_gen_ns) / static_cast<double>(pattern_ops));
+        }
+    }
 }
 
 
@@ -1524,52 +1724,85 @@ std::set<InternalKey ,SetComparator> API::parse_sstable_page(char* buffer) {
 #if (SEARCH_PATTERN == 0)
 Status API::search(std::string key ,std::string& value){
     total_get_count++;
-    if(key.empty()){
-        return Status::IOError("Key string is empty");
+
+    const auto search_begin = Clock::now();
+    const bool is_idxbf = (packing_ == PackingType::kIdxBloomData);
+    bool mem_hit = false;
+    uint64_t pattern_gen_ns = 0;
+    uint64_t submit_ns = 0;
+    uint64_t data_page_read_ns = 0;
+
+    g_search_trace_on = is_idxbf;
+    g_search_bloom_ns_tls = 0;
+    g_search_meta_read_ns_tls = 0;
+
+    auto finish_search = [&](Status st) -> Status {
+        const uint64_t total_ns = ToNs(Clock::now() - search_begin);
+        g_search_timing.total_ops.fetch_add(1, std::memory_order_relaxed);
+        g_search_timing.total_ns.fetch_add(total_ns, std::memory_order_relaxed);
+        if (mem_hit) {
+            g_search_timing.mem_hit_ops.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        if (is_idxbf) {
+            const uint64_t meta_read_ns = g_search_meta_read_ns_tls;
+            const uint64_t bloom_ns = g_search_bloom_ns_tls;
+            g_search_timing.idxbf_ops.fetch_add(1, std::memory_order_relaxed);
+            g_search_timing.idxbf_total_ns.fetch_add(total_ns, std::memory_order_relaxed);
+            g_search_timing.idxbf_bloom_ns.fetch_add(bloom_ns, std::memory_order_relaxed);
+            g_search_timing.idxbf_meta_read_ns.fetch_add(meta_read_ns, std::memory_order_relaxed);
+            g_search_timing.idxbf_data_page_read_ns.fetch_add(data_page_read_ns, std::memory_order_relaxed);
+            g_search_timing.idxbf_page_read_ns.fetch_add(meta_read_ns + data_page_read_ns,
+                                                         std::memory_order_relaxed);
+        } else {
+            g_search_timing.pattern_ops.fetch_add(1, std::memory_order_relaxed);
+            g_search_timing.pattern_total_ns.fetch_add(total_ns, std::memory_order_relaxed);
+            g_search_timing.pattern_gen_ns.fetch_add(pattern_gen_ns, std::memory_order_relaxed);
+            g_search_timing.pattern_submit_ns.fetch_add(submit_ns, std::memory_order_relaxed);
+        }
+
+        g_search_trace_on = false;
+        g_search_bloom_ns_tls = 0;
+        g_search_meta_read_ns_tls = 0;
+        return st;
+    };
+
+    if (key.empty()) {
+        return finish_search(Status::IOError("Key string is empty"));
     }
+
     pr_debug("Search key: %s", key.c_str());
     Key userKey(key);
     InternalKey internalKey(key);
-    // if (memtable_) {
-    //     auto result = memtable_->Get(key);
-    //     if (!result.has_value() && immutable_memtable_) {
-    //         result = immutable_memtable_->Get(key);
-    //     }
-    //     if (result.has_value()) {
-    //         value = *result;
-    //         return Status::OK();
-    //     }
-    // }
+
     if (memtable_) {
         auto r = memtable_->get_record(key);
         if (r.has_value()) {
             search_hit_in_memory++;
+            mem_hit = true;
             if (r->internal_key.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion))
-                return Status::OK();
-            return Status::OK();
+                return finish_search(Status::OK());
+            return finish_search(Status::OK());
         }
     }
     if (immutable_memtable_) {
-        search_hit_in_memory++;
         auto r = immutable_memtable_->get_record(key);
         if (r.has_value()) {
+            search_hit_in_memory++;
+            mem_hit = true;
             if (r->internal_key.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion))
-                return Status::OK();
-            return Status::OK();
+                return finish_search(Status::OK());
+            return finish_search(Status::OK());
         }
     }
 
     auto sstables = lsmTree_->search_key(userKey);
-    
-    
-    if (sstables.empty()){
+    if (sstables.empty()) {
         pr_debug("No candidate SSTables found for key: %s", key.c_str());
-        return Status::OK();
+        return finish_search(Status::OK());
     }
-    SearchPackageD search_package;
-    if(packing_ == PackingType::kIdxBloomData){
-        auto sstables = lsmTree_->search_key(Key(key));
-        // char* buffer = (char*)allocateAligned(BLOCK_SIZE);
+
+    if (is_idxbf) {
         const uint32_t meta_pages = static_cast<uint32_t>(IDX_BLOOM_META_PAGES);
         const uint32_t meta_bytes = meta_pages * IMS_PAGE_SIZE;
 
@@ -1580,13 +1813,10 @@ Status API::search(std::string key ,std::string& value){
             auto sstable = sstables.front();
             sstables.pop();
 
-            // sstableManager_->readSSTable(sstable->filename, buffer);
-            // getSSTable()->waitAllTasksDone();
-
-            if (!ReadIdxBloomMetaWithCache(nvme_, sstable->filename, meta_pages, meta_buf, meta_bytes)) { 
+            if (!ReadIdxBloomMetaWithCache(nvme_, sstable->filename, meta_pages, meta_buf, meta_bytes)) {
                 free(meta_buf);
                 free(page_buf);
-                return Status::IOError("Failed to read SSTable meta");
+                return finish_search(Status::IOError("Failed to read SSTable meta"));
             }
 
             uint32_t page_off = 0;
@@ -1596,11 +1826,14 @@ Status API::search(std::string key ,std::string& value){
                 continue;
             }
 
-            if (nvme_->nvme_read_sstable_page(sstable->filename, page_off,1, page_buf) != COMMAND_SUCCESS) {
+            const auto page_read_begin = Clock::now();
+            if (nvme_->nvme_read_sstable_page(sstable->filename, page_off, 1, page_buf) != COMMAND_SUCCESS) {
+                data_page_read_ns += ToNs(Clock::now() - page_read_begin);
                 free(meta_buf);
                 free(page_buf);
-                return Status::IOError("Failed to read SSTable data page");
+                return finish_search(Status::IOError("Failed to read SSTable data page"));
             }
+            data_page_read_ns += ToNs(Clock::now() - page_read_begin);
 
             InternalKey ik{};
             if (!IdxBloomScanDataPage(page_buf, page_size, valid_slots, key, ik)) {
@@ -1610,195 +1843,326 @@ Status API::search(std::string key ,std::string& value){
             if (ik.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion)) {
                 free(meta_buf);
                 free(page_buf);
-                return Status::NotFound("The key has been deleted");
+                return finish_search(Status::NotFound("The key has been deleted"));
             }
+
             free(meta_buf);
             free(page_buf);
-            return Status::OK();
+            return finish_search(Status::OK());
         }
+
         free(meta_buf);
         free(page_buf);
-        // free(buffer);
+        return finish_search(Status::OK());
     }
-    else{
-        uint32_t index = HashModN(internalKey, SLOT_NUM_PER_PAGE);
-        pr_debug("Search key: %s", key.c_str());
-        // pr_info("This search run has %d candidate",sstables.size());
-        while( !sstables.empty() ){
-            auto sstable = sstables.front();
-            // pr_error("Search SStable: %s  Level:%d Key range[ %s ~ %s ]",sstable->filename.c_str(),sstable->levelInfo,sstable->rangeMin.toString().c_str(),sstable->rangeMax.toString().c_str());
 
-            sstables.pop();
-            SearchPatternD pattern_info;
-            switch (packing_){
-                case PackingType::kKeyPerPage:{
-                    pattern_info.slot_index = 0;
-                    break;
-                }
-                case PackingType::kHash:{
-                    pattern_info.slot_index = index;
-                    break;
-                }
-                case PackingType::kKeyRange: {
-                    try {
-                        auto key_range = keyRangeCache_->get(sstable->filename);
-                        total_cache_read_count++;
-                        if (!key_range.has_value() || key_range->empty()) {
-                            total_cache_read_miss_count++;
-                            auto fresh = read_key_range(sstable->filename);
-                            if (!fresh.has_value() || fresh->empty()) {
-                                pr_error("KeyRange is empty after read: %s", sstable->filename.c_str());
-                                return Status::Corruption("KeyRange empty: " + sstable->filename);
-                            }
+    SearchPackageD search_package;
+    const auto pattern_begin = Clock::now();
+    uint32_t index = HashModN(internalKey, SLOT_NUM_PER_PAGE);
 
-                            keyRangeCache_->put(sstable->filename, *fresh);
-                            key_range = std::move(fresh);
+    while (!sstables.empty()) {
+        auto sstable = sstables.front();
+        sstables.pop();
+
+        SearchPatternD pattern_info;
+        switch (packing_) {
+            case PackingType::kKeyPerPage: {
+                pattern_info.slot_index = 0;
+                break;
+            }
+            case PackingType::kHash: {
+                pattern_info.slot_index = index;
+                break;
+            }
+            case PackingType::kKeyRange: {
+                try {
+                    auto key_range = keyRangeCache_->get(sstable->filename);
+                    total_cache_read_count++;
+                    if (!key_range.has_value() || key_range->empty()) {
+                        total_cache_read_miss_count++;
+                        auto fresh = read_key_range(sstable->filename);
+                        if (!fresh.has_value() || fresh->empty()) {
+                            pattern_gen_ns += ToNs(Clock::now() - pattern_begin);
+                            pr_error("KeyRange is empty after read: %s", sstable->filename.c_str());
+                            return finish_search(Status::Corruption(std::string("KeyRange empty: ") + sstable->filename));
                         }
 
-                        pattern_info = generate_SearchPatternD(sstable->filename, userKey, *key_range);
-                    } catch (const std::exception& e) {
-                        pr_error("Build KeyRange pattern failed for %s: %s",
-                                sstable->filename.c_str(), e.what());
-                        return Status::IOError(std::string("Build KeyRange pattern failed: ") + e.what());
+                        keyRangeCache_->put(sstable->filename, *fresh);
+                        key_range = std::move(fresh);
                     }
-                    break;
-                }
-                default:
-                    return Status::NotFound("Unknown packing type");
-            }
-            pattern_info.sstable_name = sstable->filename;
-            search_package.searchPatterns.emplace_back(pattern_info);
-        }
-        if (search_package.searchPatterns.empty()) {
-            return Status::NotFound("No valid SSTable patterns");
-        }
-        search_package.search_key = userKey.toString();
-        search_package.header.pattern_num = static_cast<uint32_t>(search_package.searchPatterns.size());
-        const std::string encoded_package = search_package.encode();
-        if (encoded_package.empty()) {
-            return Status::IOError("Encoded search package is empty");
-        }
-        search_pattern_io += encoded_package.size();
-        // search_package.dump();
-        void *buffer;
-        int rc = posix_memalign(&buffer, 4096, encoded_package.size());
-        if (rc != 0) {
-            pr_error("posix_memalign failed in API::search, rc=%d", rc);
-            return Status::IOError("posix_memalign failed");
-        }
-        memcpy(buffer, encoded_package.data(), encoded_package.size());
 
-        int err = nvme_->nvme_search(reinterpret_cast<char*>(buffer), encoded_package.size());
-        if(err != OPERATION_SUCCESS){
-            pr_error("nvme_search failed in API");
+                    pattern_info = generate_SearchPatternD(sstable->filename, userKey, *key_range);
+                } catch (const std::exception& e) {
+                    pattern_gen_ns += ToNs(Clock::now() - pattern_begin);
+                    pr_error("Build KeyRange pattern failed for %s: %s",
+                             sstable->filename.c_str(), e.what());
+                    return finish_search(Status::IOError(std::string("Build KeyRange pattern failed: ") + e.what()));
+                }
+                break;
+            }
+            default:
+                pattern_gen_ns += ToNs(Clock::now() - pattern_begin);
+                return finish_search(Status::NotFound("Unknown packing type"));
         }
-        free(buffer);
+        pattern_info.sstable_name = sstable->filename;
+        search_package.searchPatterns.emplace_back(pattern_info);
     }
-    return Status::OK();
+
+    if (search_package.searchPatterns.empty()) {
+        pattern_gen_ns += ToNs(Clock::now() - pattern_begin);
+        return finish_search(Status::NotFound("No valid SSTable patterns"));
+    }
+
+    search_package.search_key = userKey.toString();
+    search_package.header.pattern_num = static_cast<uint32_t>(search_package.searchPatterns.size());
+    const std::string encoded_package = search_package.encode();
+    pattern_gen_ns += ToNs(Clock::now() - pattern_begin);
+
+    if (encoded_package.empty()) {
+        return finish_search(Status::IOError("Encoded search package is empty"));
+    }
+
+    search_pattern_io += encoded_package.size();
+
+    void *buffer = nullptr;
+    int rc = posix_memalign(&buffer, 4096, encoded_package.size());
+    if (rc != 0) {
+        pr_error("posix_memalign failed in API::search, rc=%d", rc);
+        return finish_search(Status::IOError("posix_memalign failed"));
+    }
+    memcpy(buffer, encoded_package.data(), encoded_package.size());
+
+    const auto submit_begin = Clock::now();
+    int err = nvme_->nvme_search(reinterpret_cast<char*>(buffer), encoded_package.size());
+    submit_ns += ToNs(Clock::now() - submit_begin);
+    if (err != OPERATION_SUCCESS) {
+        pr_error("nvme_search failed in API");
+    }
+    free(buffer);
+
+    return finish_search(Status::OK());
 }
 #elif (SEARCH_PATTERN == 1)
 Status API::search(std::string key ,std::string& value){
-    if(key.empty()){
-        return Status::IOError("Key string is empty");
+    total_get_count++;
+
+    const auto search_begin = Clock::now();
+    const bool is_idxbf = (packing_ == PackingType::kIdxBloomData);
+    bool mem_hit = false;
+    uint64_t pattern_gen_ns = 0;
+    uint64_t submit_ns = 0;
+    uint64_t data_page_read_ns = 0;
+
+    g_search_trace_on = is_idxbf;
+    g_search_bloom_ns_tls = 0;
+    g_search_meta_read_ns_tls = 0;
+
+    auto finish_search = [&](Status st) -> Status {
+        const uint64_t total_ns = ToNs(Clock::now() - search_begin);
+        g_search_timing.total_ops.fetch_add(1, std::memory_order_relaxed);
+        g_search_timing.total_ns.fetch_add(total_ns, std::memory_order_relaxed);
+        if (mem_hit) {
+            g_search_timing.mem_hit_ops.fetch_add(1, std::memory_order_relaxed);
+        }
+
+        if (is_idxbf) {
+            const uint64_t meta_read_ns = g_search_meta_read_ns_tls;
+            const uint64_t bloom_ns = g_search_bloom_ns_tls;
+            g_search_timing.idxbf_ops.fetch_add(1, std::memory_order_relaxed);
+            g_search_timing.idxbf_total_ns.fetch_add(total_ns, std::memory_order_relaxed);
+            g_search_timing.idxbf_bloom_ns.fetch_add(bloom_ns, std::memory_order_relaxed);
+            g_search_timing.idxbf_meta_read_ns.fetch_add(meta_read_ns, std::memory_order_relaxed);
+            g_search_timing.idxbf_data_page_read_ns.fetch_add(data_page_read_ns, std::memory_order_relaxed);
+            g_search_timing.idxbf_page_read_ns.fetch_add(meta_read_ns + data_page_read_ns,
+                                                         std::memory_order_relaxed);
+        } else {
+            g_search_timing.pattern_ops.fetch_add(1, std::memory_order_relaxed);
+            g_search_timing.pattern_total_ns.fetch_add(total_ns, std::memory_order_relaxed);
+            g_search_timing.pattern_gen_ns.fetch_add(pattern_gen_ns, std::memory_order_relaxed);
+            g_search_timing.pattern_submit_ns.fetch_add(submit_ns, std::memory_order_relaxed);
+        }
+
+        g_search_trace_on = false;
+        g_search_bloom_ns_tls = 0;
+        g_search_meta_read_ns_tls = 0;
+        return st;
+    };
+
+    if (key.empty()) {
+        return finish_search(Status::IOError("Key string is empty"));
     }
+
     pr_debug("Search key: %s", key.c_str());
     Key userKey(key);
     InternalKey internalKey(key);
+
     if (memtable_) {
         auto result = memtable_->Get(key);
         if (!result.has_value() && immutable_memtable_) {
             result = immutable_memtable_->Get(key);
         }
         if (result.has_value()) {
+            mem_hit = true;
+            search_hit_in_memory++;
             value = *result;
-            return Status::OK();
+            return finish_search(Status::OK());
         }
     }
 
     auto sstables = lsmTree_->search_key(userKey);
-    if (sstables.empty()){
+    if (sstables.empty()) {
         pr_error("No candidate SSTables found for key: %s", key.c_str());
-        return Status::OK();
+        return finish_search(Status::OK());
     }
+
+    if (is_idxbf) {
+        const uint32_t meta_pages = static_cast<uint32_t>(IDX_BLOOM_META_PAGES);
+        const uint32_t meta_bytes = meta_pages * IMS_PAGE_SIZE;
+
+        char* meta_buf = (char*)allocateAligned(meta_bytes);
+        char* page_buf = (char*)allocateAligned(IMS_PAGE_SIZE);
+
+        while (!sstables.empty()) {
+            auto sstable = sstables.front();
+            sstables.pop();
+
+            if (!ReadIdxBloomMetaWithCache(nvme_, sstable->filename, meta_pages, meta_buf, meta_bytes)) {
+                free(meta_buf);
+                free(page_buf);
+                return finish_search(Status::IOError("Failed to read SSTable meta"));
+            }
+
+            uint32_t page_off = 0;
+            uint16_t valid_slots = 0;
+            uint32_t page_size = 0;
+            if (!IdxBloomLocateInMeta(meta_buf, meta_bytes, key, page_off, valid_slots, page_size)) {
+                continue;
+            }
+
+            const auto page_read_begin = Clock::now();
+            if (nvme_->nvme_read_sstable_page(sstable->filename, page_off, 1, page_buf) != COMMAND_SUCCESS) {
+                data_page_read_ns += ToNs(Clock::now() - page_read_begin);
+                free(meta_buf);
+                free(page_buf);
+                return finish_search(Status::IOError("Failed to read SSTable data page"));
+            }
+            data_page_read_ns += ToNs(Clock::now() - page_read_begin);
+
+            InternalKey ik{};
+            if (!IdxBloomScanDataPage(page_buf, page_size, valid_slots, key, ik)) {
+                continue;
+            }
+
+            if (ik.info.type == static_cast<uint8_t>(ValueType::kTypeDeletion)) {
+                free(meta_buf);
+                free(page_buf);
+                return finish_search(Status::NotFound("The key has been deleted"));
+            }
+
+            free(meta_buf);
+            free(page_buf);
+            return finish_search(Status::OK());
+        }
+
+        free(meta_buf);
+        free(page_buf);
+        return finish_search(Status::OK());
+    }
+
     SearchPackageH search_package;
+    const auto pattern_begin = Clock::now();
 
-
-    while( !sstables.empty() ){
+    while (!sstables.empty()) {
         auto sstable = sstables.front();
-        pr_debug("Find SStable: %s  Key range [ %s ~ %s ]",sstable->filename.c_str(),sstable->rangeMin.toString().c_str(),sstable->rangeMax.toString().c_str());
+        pr_debug("Find SStable: %s  Key range [ %s ~ %s ]",
+                 sstable->filename.c_str(),
+                 sstable->rangeMin.toString().c_str(),
+                 sstable->rangeMax.toString().c_str());
         sstables.pop();
+
         SearchPatternH pattern_info;
-        switch (packing_){
-            case PackingType::kKeyPerPage:{
+        switch (packing_) {
+            case PackingType::kKeyPerPage: {
                 std::string enc = userKey.encode();
                 pattern_info.search_pattern = std::string(IMS_PAGE_SIZE, static_cast<char>(0xFF));
                 memcpy(pattern_info.search_pattern.data(), enc.data(), enc.size());
                 break;
             }
-            case PackingType::kHash:{
+            case PackingType::kHash: {
                 std::string enc = userKey.encode();
                 pattern_info.search_pattern = std::string(IMS_PAGE_SIZE, static_cast<char>(0xFF));
-                size_t slot_index = HashModN(internalKey, SLOT_NUM_PER_PAGE); 
-                memcpy(pattern_info.search_pattern.data() + slot_index*SLOT_SIZE, enc.data(), enc.size());
+                size_t slot_index = HashModN(internalKey, SLOT_NUM_PER_PAGE);
+                memcpy(pattern_info.search_pattern.data() + slot_index * SLOT_SIZE, enc.data(), enc.size());
                 break;
             }
-                
             case PackingType::kKeyRange: {
                 try {
                     auto key_range = keyRangeCache_->get(sstable->filename);
-
+                    total_cache_read_count++;
                     if (!key_range.has_value() || key_range->empty()) {
-                        std::set<std::string> fresh = read_key_range(sstable->filename);
-                        if (fresh.empty()) {
+                        total_cache_read_miss_count++;
+                        auto fresh = read_key_range(sstable->filename);
+                        if (!fresh.has_value() || fresh->empty()) {
+                            pattern_gen_ns += ToNs(Clock::now() - pattern_begin);
                             pr_error("KeyRange is empty after read: %s", sstable->filename.c_str());
-                            return Status::Corruption("KeyRange empty: " + sstable->filename);
+                            return finish_search(Status::Corruption(std::string("KeyRange empty: ") + sstable->filename));
                         }
 
-                        keyRangeCache_->put(sstable->filename, fresh);
+                        keyRangeCache_->put(sstable->filename, *fresh);
                         key_range = std::move(fresh);
                     }
 
-                    pattern_info = generate_SearchPatternD(sstable->filename, userKey, *key_range);
+                    pattern_info = generate_SearchPatternH(sstable->filename, userKey, *key_range);
                 } catch (const std::exception& e) {
+                    pattern_gen_ns += ToNs(Clock::now() - pattern_begin);
                     pr_error("Build KeyRange pattern failed for %s: %s",
-                            sstable->filename.c_str(), e.what());
-                    return Status::IOError(std::string("Build KeyRange pattern failed: ") + e.what());
+                             sstable->filename.c_str(), e.what());
+                    return finish_search(Status::IOError(std::string("Build KeyRange pattern failed: ") + e.what()));
                 }
                 break;
             }
             default:
-                return Status::NotFound("Unknown packing type");
+                pattern_gen_ns += ToNs(Clock::now() - pattern_begin);
+                return finish_search(Status::NotFound("Unknown packing type"));
         }
         pattern_info.sstable_name = sstable->filename;
         search_package.searchPatterns.emplace_back(pattern_info);
     }
+
     if (search_package.searchPatterns.empty()) {
-        return Status::NotFound("No valid SSTable patterns");
+        pattern_gen_ns += ToNs(Clock::now() - pattern_begin);
+        return finish_search(Status::NotFound("No valid SSTable patterns"));
     }
+
     search_package.search_key = userKey.toString();
     search_package.header.pattern_num = static_cast<uint32_t>(search_package.searchPatterns.size());
     const std::string encoded_package = search_package.encode();
+    pattern_gen_ns += ToNs(Clock::now() - pattern_begin);
 
     if (encoded_package.empty()) {
-        return Status::IOError("Encoded search package is empty");
+        return finish_search(Status::IOError("Encoded search package is empty"));
     }
+
     search_pattern_io += encoded_package.size();
-    void *buffer;
+
+    void *buffer = nullptr;
     int rc = posix_memalign(&buffer, 4096, encoded_package.size());
     if (rc != 0) {
         pr_error("posix_memalign failed in API::search, rc=%d", rc);
-        return Status::IOError("posix_memalign failed");
+        return finish_search(Status::IOError("posix_memalign failed"));
     }
     memcpy(buffer, encoded_package.data(), encoded_package.size());
 
-    nvme_->nvme_search(reinterpret_cast<char*>(buffer), encoded_package.size());
-
+    const auto submit_begin = Clock::now();
+    int err = nvme_->nvme_search(reinterpret_cast<char*>(buffer), encoded_package.size());
+    submit_ns += ToNs(Clock::now() - submit_begin);
+    if (err != OPERATION_SUCCESS) {
+        pr_error("nvme_search failed in API");
+    }
 
     free(buffer);
-    
-    return Status::OK();
+    return finish_search(Status::OK());
 }
-
 #endif
 
 Status API::range_query(std::string start_key,
@@ -1918,7 +2282,14 @@ void API::SimulateDeviceIOIfNeeded(const std::vector<std::shared_ptr<TreeNode>> 
     for (const auto& n : dstNodes) {
         meta.dst_files.push_back(n->filename);
     }
+
+    const auto t0 = Clock::now();
     int rc = nvme_->nvme_compaction_io(meta);
+    const uint64_t ns = ToNs(Clock::now() - t0);
+
+    g_cmp_sim_nand_ns.fetch_add(ns, std::memory_order_relaxed);
+    g_cmp_sim_nand_calls.fetch_add(1, std::memory_order_relaxed);
+
     if (rc != COMMAND_SUCCESS) {
         pr_error("SimulateDeviceIOIfNeeded: nvme_compaction_io failed (%d)", rc);
     }
@@ -1941,10 +2312,9 @@ void API::compaction() {
         g_compaction_triggered = true;
         ++g_compaction_runs;
         compaction_count++;
-        pr_debug("Compaction start tree info:");
+        pr_stat("Compaction start tree info:");
         // lsmTree_->dump_lsmtere();
         compaction = true;
-        pr_debug("Compaction triggered at Level 0");
         auto node = getLSMTree()->findLevel0Older();
         if (!node) return;
 
@@ -1973,16 +2343,14 @@ void API::compaction() {
 
         auto dstNodes = getLSMTree()->search_one_level(1, srcMin, srcMax);
 
-        DumpCompactionShape(0, srcNodes, dstNodes);
+        // DumpCompactionShape(0, srcNodes, dstNodes);
         const auto io_s = Clock::now();
         SimulateDeviceIOIfNeeded(srcNodes, dstNodes);
         pr_stat("[CMP-DEV] L0->L1 dev_read_ms=%.3f",static_cast<double>(ToNs(Clock::now() - io_s)) / 1e6);
-
         pr_debug("Dump source nodes info:");
-        // for(auto srcNode : srcNodes){
-            
-        //     srcNode->dump();
-        // }
+        for(auto srcNode : srcNodes){
+            srcNode->dump();
+        }
         pr_debug("Dump source nodes end");
         pr_debug("Dump destination nodes info:");
         // for(auto dstNode : dstNodes){
@@ -2030,7 +2398,7 @@ void API::compaction() {
         g_compaction_triggered = true;
         ++g_compaction_runs;
         compaction_count++;
-        pr_debug("Compaction triggered at Level %d", level);
+        pr_stat("Compaction triggered at Level %d", level);
         pr_debug("Compaction start tree info:");
         // lsmTree_->dump_lsmtere();
         compaction = true;
@@ -2049,15 +2417,15 @@ void API::compaction() {
         }
         std::vector<std::shared_ptr<TreeNode>> srcNodes;
         srcNodes.push_back(srcNode);
-        pr_debug("Dump compaction source info:");
-        // srcNode->dump();
+        pr_stat("Dump compaction source info:");
+        srcNode->dump();
 
         auto dstNodes = getLSMTree()->search_one_level(level + 1, srcNode->rangeMin, srcNode->rangeMax);
 
         InternalKey srcMinKey = LowerSentinel(srcNode->rangeMin.toString());
         InternalKey srcMaxKey = UpperSentinel(srcNode->rangeMax.toString());
 
-        DumpCompactionShape(level, srcNodes, dstNodes);
+        // DumpCompactionShape(level, srcNodes, dstNodes);
         const auto io_s = Clock::now();
         SimulateDeviceIOIfNeeded(srcNodes, dstNodes);
         pr_stat("[CMP-DEV] L%d->L%d dev_read_ms=%.3f",level, level + 1,static_cast<double>(ToNs(Clock::now() - io_s)) / 1e6);

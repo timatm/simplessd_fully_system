@@ -772,6 +772,7 @@ void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey
         pr_error("Failed to write SSTable: %s", info.filename.c_str());
         return;
     }
+
     pr_debug("Write success: %s",info.filename.c_str());
 
     auto node = std::make_shared<TreeNode>(info.filename,
