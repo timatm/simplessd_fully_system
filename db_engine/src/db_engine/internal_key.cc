@@ -194,3 +194,35 @@ bool InternalKey::IsValid() const {
     return true;
 }
 
+InternalKey InternalKey::Decode(const char* buf) {
+    InternalKey ik{};
+    size_t off = 0;
+
+    ik.key.key_size = static_cast<uint8_t>(buf[off++]);
+    std::memcpy(ik.key.key, buf + off, 40); off += 40;
+
+    std::memcpy(&ik.value_ptr.lpn,    buf + off, 4); off += 4;
+    std::memcpy(&ik.value_ptr.offset, buf + off, 4); off += 4;
+    std::memcpy( ik.value_ptr.reserve,buf + off, 7); off += 7;
+
+    uint64_t meta;
+    std::memcpy(&meta, buf + off, sizeof(meta));
+
+    ik.info.seq  = meta >> 8;
+    ik.info.type = static_cast<uint8_t>(meta & 0xFF);
+    return ik;
+}
+
+void InternalKey::EncodeTo(char* dst) const {
+    size_t off = 0;
+    dst[off++] = static_cast<char>(key.key_size);
+    std::memcpy(dst + off, key.key, 40); off += 40;
+
+    std::memcpy(dst + off, &value_ptr.lpn, 4); off += 4;
+    std::memcpy(dst + off, &value_ptr.offset, 4); off += 4;
+    std::memcpy(dst + off, value_ptr.reserve, 7); off += 7;
+
+    uint64_t meta = (static_cast<uint64_t>(info.seq) << 8) |
+                    static_cast<uint8_t>(info.type);
+    std::memcpy(dst + off, &meta, sizeof(meta));
+}

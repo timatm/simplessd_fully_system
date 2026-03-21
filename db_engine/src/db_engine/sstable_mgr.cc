@@ -73,6 +73,10 @@ static inline void BloomAdd(uint8_t* bloom, uint32_t bloom_bytes, const std::str
 }
 
 
+static inline InternalKey DecodeInternalAt(const char* p) {
+    return InternalKey::Decode(p);
+}
+
 AlignedBuf SstableManager::packingTable(const SkipList<Record, RecordComparator>& skiplist) const {
     switch (packing_type_) {
         case PackingType::kKeyPerPage:
@@ -207,16 +211,236 @@ AlignedBuf SstableManager::keyRangePacking(const SkipList<Record, RecordComparat
 
 
 
-
-AlignedBuf SstableManager::packingTable(std::queue<std::string> sortedList){
-    
+AlignedBuf SstableManager::packingTable(const std::vector<InternalKey>& keys) {
     switch (packing_type_) {
         case PackingType::kKeyPerPage:
-            return keyPerPagePacking(sortedList);
+            return keyPerPagePacking(keys);
         case PackingType::kHash:
-            return keyHashPacking(sortedList);
+            return keyHashPacking(keys);
         case PackingType::kKeyRange:
-            return keyRangePacking(sortedList);
+            return keyRangePacking(keys);
+        case PackingType::kIdxBloomData:
+            return idxBloomDataPacking(keys);
+        default:
+            pr_error("PackingTable type is error");
+            return {};
+    }
+}
+
+AlignedBuf SstableManager::keyPerPagePacking(const std::vector<InternalKey>& keys) const {
+    if (IMS_PAGE_SIZE < sizeof(InternalKey)) {
+        throw std::runtime_error("IMS_PAGE_SIZE is smaller than InternalKey size (64B)");
+    }
+    if (keys.size() > IMS_PAGE_NUM) {
+        throw std::runtime_error("Too many records for fixed page count (IMS_PAGE_NUM)");
+    }
+
+    AlignedBuf out = MakeAlignedBlockSize();
+    for (size_t page = 0; page < keys.size(); ++page) {
+        const size_t page_off = page * IMS_PAGE_SIZE;
+        keys[page].EncodeTo(out.data() + page_off);
+    }
+    return out;
+}
+
+AlignedBuf SstableManager::keyHashPacking(const std::vector<InternalKey>& keys) const {
+    const size_t slots_per_page = IMS_PAGE_SIZE / sizeof(InternalKey);
+    if (slots_per_page == 0) {
+        throw std::runtime_error("IMS_PAGE_SIZE too small for at least one InternalKey slot");
+    }
+    const size_t total_slots = IMS_PAGE_NUM * slots_per_page;
+
+    AlignedBuf out = MakeAlignedBlockSize();
+    for (const auto& key : keys) {
+        const size_t slot_idx = HashModN(key, slots_per_page);
+        bool placed = false;
+
+        for (size_t pg = 0; pg < IMS_PAGE_NUM; ++pg) {
+            const size_t idx = pg * slots_per_page + slot_idx;
+            const size_t offset = idx * sizeof(InternalKey);
+            if (idx >= total_slots || offset + sizeof(InternalKey) > out.size) {
+                throw std::runtime_error("Index overflow in keyHashPacking(vector)");
+            }
+
+            InternalKey cell = DecodeInternalAt(out.data() + offset);
+            if (!cell.IsValid()) {
+                key.EncodeTo(out.data() + offset);
+                placed = true;
+                break;
+            }
+        }
+
+        if (!placed) {
+            pr_error("Hash key is out of slot");
+            key.dump();
+            throw std::runtime_error("Hash block full, cannot place key");
+        }
+    }
+
+    return out;
+}
+
+AlignedBuf SstableManager::keyRangePacking(const std::vector<InternalKey>& keys) const {
+    const size_t slots_per_page = IMS_PAGE_SIZE / sizeof(InternalKey);
+    if (slots_per_page == 0) {
+        throw std::runtime_error("IMS_PAGE_SIZE too small for at least one InternalKey slot");
+    }
+    const size_t total_slots = IMS_PAGE_NUM * slots_per_page;
+
+    AlignedBuf out = MakeAlignedBlockSize();
+    size_t i = 0;
+    for (size_t slot = 0; slot < slots_per_page && i < keys.size(); ++slot) {
+        for (size_t page = 0; page < IMS_PAGE_NUM && i < keys.size(); ++page) {
+            const size_t flat_index = page * slots_per_page + slot;
+            const size_t offset = flat_index * sizeof(InternalKey);
+            if (flat_index >= total_slots || offset + sizeof(InternalKey) > out.size) {
+                throw std::runtime_error("Index overflow in keyRangePacking(vector)");
+            }
+            keys[i].EncodeTo(out.data() + offset);
+            ++i;
+        }
+    }
+
+    if (i != keys.size()) {
+        throw std::runtime_error("Too many records for fixed page count in keyRangePacking(vector)");
+    }
+    return out;
+}
+
+AlignedBuf SstableManager::idxBloomDataPacking(const std::vector<InternalKey>& keys) const {
+    using namespace sst_v2;
+
+    static_assert(sizeof(InternalKey) == 64, "InternalKey must be 64 bytes");
+
+    constexpr uint8_t  kBloomK    = static_cast<uint8_t>(IDX_BLOOM_HASH_K);
+    constexpr uint32_t meta_pages = static_cast<uint32_t>(IDX_BLOOM_META_PAGES);
+
+    const uint32_t page_size      = IMS_PAGE_SIZE;
+    const uint32_t block_size     = BLOCK_SIZE;
+    const uint32_t slot_size      = static_cast<uint32_t>(sizeof(InternalKey));
+    const uint32_t slots_per_page = page_size / slot_size;
+
+    if (meta_pages < 1 || meta_pages >= IMS_PAGE_NUM) {
+        throw std::runtime_error("idxBloomDataPacking(vector): IDX_BLOOM_META_PAGES invalid");
+    }
+    if (slots_per_page == 0) {
+        throw std::runtime_error("idxBloomDataPacking(vector): IMS_PAGE_SIZE too small");
+    }
+
+    const uint32_t meta_bytes     = meta_pages * page_size;
+    const uint32_t data_off       = meta_bytes;
+    const uint32_t data_pages_cap = IMS_PAGE_NUM - meta_pages;
+    const uint32_t max_entries    = data_pages_cap * slots_per_page;
+    const uint32_t entry_count    = static_cast<uint32_t>(keys.size());
+
+    if (entry_count > max_entries) {
+        throw std::runtime_error("idxBloomDataPacking(vector): too many entries for fixed 2MB SSTable");
+    }
+
+    const uint32_t data_pages_used   = (entry_count == 0) ? 0 : (entry_count + slots_per_page - 1) / slots_per_page;
+    const uint32_t index_entry_count = data_pages_used;
+
+    const uint32_t index_off   = static_cast<uint32_t>(sizeof(SSTableSuperBlockV1));
+    const uint32_t index_bytes = index_entry_count * static_cast<uint32_t>(sizeof(SSTableIndexEntryV1));
+    const uint32_t bloom_off   = AlignUp(index_off + index_bytes, 8);
+    if (bloom_off > meta_bytes) {
+        throw std::runtime_error("idxBloomDataPacking(vector): meta region too small (index overflow)");
+    }
+    const uint32_t bloom_bytes = meta_bytes - bloom_off;
+
+    uint16_t filter_bytes_per_page = 0;
+    if (index_entry_count > 0 && bloom_bytes > 0) {
+        filter_bytes_per_page = static_cast<uint16_t>(bloom_bytes / index_entry_count);
+    }
+
+    AlignedBuf out = MakeAlignedBlockSize();
+    if (bloom_bytes > 0) {
+        std::memset(out.data() + bloom_off, 0, bloom_bytes);
+    }
+
+    uint32_t i = 0;
+    uint16_t page_id = 0;
+    uint16_t slot_in_page = 0;
+    std::string page_max_user_key;
+
+    for (const auto& key : keys) {
+        const uint32_t off = data_off + i * slot_size;
+        if (off + slot_size > block_size) {
+            throw std::runtime_error("idxBloomDataPacking(vector): data write OOB");
+        }
+        key.EncodeTo(out.data() + off);
+        page_max_user_key = key.UserKey();
+
+        if (filter_bytes_per_page > 0) {
+            const uint32_t slice_off = bloom_off + static_cast<uint32_t>(page_id) * filter_bytes_per_page;
+            const uint32_t slice_end = slice_off + filter_bytes_per_page;
+            if (slice_end <= bloom_off + bloom_bytes) {
+                BloomAdd(reinterpret_cast<uint8_t*>(out.data() + slice_off),
+                         filter_bytes_per_page,
+                         page_max_user_key,
+                         kBloomK);
+            }
+        }
+
+        ++i;
+        ++slot_in_page;
+
+        const bool end_of_page  = (slot_in_page == slots_per_page);
+        const bool end_of_table = (i == entry_count);
+        if (end_of_page || end_of_table) {
+            SSTableIndexEntryV1 ie{};
+            if (page_max_user_key.size() > sizeof(ie.key)) {
+                throw std::runtime_error("idxBloomDataPacking(vector): user key > 40, cannot store in index");
+            }
+            ie.key_size = static_cast<uint8_t>(page_max_user_key.size());
+            std::memset(ie.key, 0, sizeof(ie.key));
+            std::memcpy(ie.key, page_max_user_key.data(), ie.key_size);
+            ie.page_id = page_id;
+            ie.valid_slots = slot_in_page;
+
+            const uint32_t ie_off = index_off + static_cast<uint32_t>(page_id) * sizeof(SSTableIndexEntryV1);
+            if (ie_off + sizeof(SSTableIndexEntryV1) > bloom_off) {
+                throw std::runtime_error("idxBloomDataPacking(vector): index overlaps bloom region");
+            }
+            std::memcpy(out.data() + ie_off, &ie, sizeof(ie));
+
+            ++page_id;
+            slot_in_page = 0;
+        }
+    }
+
+    SSTableSuperBlockV1 sb{};
+    std::memcpy(sb.magic, "SSTB", 4);
+    sb.version    = 1;
+    sb.format     = kFormatIdxBloomData;
+    sb.meta_pages = static_cast<uint8_t>(meta_pages);
+    sb.page_size  = page_size;
+    sb.block_size = block_size;
+    sb.index_off  = index_off;
+    sb.index_bytes = index_bytes;
+    sb.bloom_off  = bloom_off;
+    sb.bloom_bytes = bloom_bytes;
+    sb.data_off   = data_off;
+    sb.entry_count = entry_count;
+    sb.index_entry_count = static_cast<uint16_t>(index_entry_count);
+    sb.bloom_k = kBloomK;
+    sb.filter_bytes_per_page = filter_bytes_per_page;
+    sb.crc32 = 0;
+
+    std::memcpy(out.data(), &sb, sizeof(sb));
+    return out;
+}
+
+
+
+AlignedBuf SstableManager::packingTable(std::queue<std::string> sortedList){
+    switch (packing_type_) {
+        case PackingType::kKeyPerPage:
+            return keyPerPagePacking(std::move(sortedList));
+        case PackingType::kHash:
+            return keyHashPacking(std::move(sortedList));
+        case PackingType::kKeyRange:
+            return keyRangePacking(std::move(sortedList));
         case PackingType::kIdxBloomData:
             return idxBloomDataPacking(std::move(sortedList));
         default:
@@ -224,7 +448,6 @@ AlignedBuf SstableManager::packingTable(std::queue<std::string> sortedList){
             return {};
     }
 }
-
 
 
 
@@ -828,12 +1051,12 @@ void SstableIterator::Seek(std::string_view internal_target) {
         pos_ = -1;
         return;
     }
-    InternalKey target = InternalKey::Decode(std::string(internal_target.data(), internal_target.size()));
+    InternalKey target = DecodeInternalAt(internal_target.data());
 
     auto less_entry_than_target = [&](const EntryRef& e)->bool {
-        if (e.key_off + kIKeySize > BLOCK_SIZE) return true; // 越界视为无效（排左）
-        InternalKey ik = InternalKey::Decode(std::string(buf_.data() + e.key_off, kIKeySize));
-        return (*icmp_)(ik, target); // ik < target ?
+        if (e.key_off + kIKeySize > BLOCK_SIZE) return true;
+        InternalKey ik = DecodeInternalAt(buf_.data() + e.key_off);
+        return (*icmp_)(ik, target);
     };
 
     int l = 0, r = static_cast<int>(entries_.size()) - 1, ans = entries_.size();
@@ -851,7 +1074,7 @@ Status SstableIterator::ReadValue(std::string& out) const {
     const auto& e = entries_[pos_];
     if (e.key_off + kIKeySize > BLOCK_SIZE) return Status::Corruption("ikey OOB");
 
-    InternalKey ik = InternalKey::Decode(std::string(buf_.data() + e.key_off, kIKeySize));
+    InternalKey ik = DecodeInternalAt(buf_.data() + e.key_off);
     // pr_debug("Read LPN: %lu  ,Offset: %lu",ik.value_ptr.lpn, ik.value_ptr.offset);
     auto rec = log_mgr_->readLog(ik.value_ptr.lpn, ik.value_ptr.offset);
     if (!rec) {
@@ -870,9 +1093,7 @@ std::vector<SstableIterator::EntryRef> SstableIterator::gen_sorted_view() {
 
     auto is_valid_at = [&](size_t off)->bool {
         if (off + kIKeySize > BLOCK_SIZE) return false;
-        InternalKey ik;
-        // std::memcpy(&ik, buf_.data() + off, kIKeySize);
-        ik = InternalKey::Decode(std::string(buf_.data() + off,kIKeySize));
+        InternalKey ik = DecodeInternalAt(buf_.data() + off);
         return ik.IsValid();
     };
 
@@ -902,7 +1123,6 @@ std::vector<SstableIterator::EntryRef> SstableIterator::gen_sorted_view() {
             break;
         }
         case static_cast<int>(PackingType::kHash): {
-            // 先按 bucket 收集（column-major）
             for (int bucket = 0; bucket < slots_per_page; ++bucket) {
                 for (int row = 0; row < IMS_PAGE_NUM; ++row) {
                     size_t off = static_cast<size_t>(row) * IMS_PAGE_SIZE
@@ -912,15 +1132,21 @@ std::vector<SstableIterator::EntryRef> SstableIterator::gen_sorted_view() {
                     v.push_back(EntryRef{ static_cast<uint32_t>(off) });
                 }
             }
-            // Hash 版式：收集后做一次全局排序
-            std::sort(v.begin(), v.end(), [&](const EntryRef& a, const EntryRef& b) {
-                InternalKey ka, kb;
-                ka = InternalKey::Decode(std::string(buf_.data() + a.key_off,kIKeySize));
-                kb = InternalKey::Decode(std::string(buf_.data() + b.key_off, kIKeySize));
-                // std::memcpy(&ka, buf_.data() + a.key_off, kIKeySize);
-                // std::memcpy(&kb, buf_.data() + b.key_off, kIKeySize);
-                return (*icmp_)(ka, kb);
-            });
+            std::vector<std::pair<InternalKey, EntryRef>> keyed;
+            keyed.reserve(v.size());
+
+            for (const auto& e : v) {
+                keyed.push_back({ DecodeInternalAt(buf_.data() + e.key_off), e });
+            }
+
+            std::sort(keyed.begin(), keyed.end(),
+                    [&](const auto& a, const auto& b) {
+                        return (*icmp_)(a.first, b.first);
+                    });
+
+            for (size_t i = 0; i < keyed.size(); ++i) {
+                v[i] = keyed[i].second;
+            }
             break;
         }
         case static_cast<int>(PackingType::kIdxBloomData): {

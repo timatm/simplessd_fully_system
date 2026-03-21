@@ -2297,6 +2297,24 @@ void API::SimulateDeviceIOIfNeeded(const std::vector<std::shared_ptr<TreeNode>> 
 
 
 void API::compaction() {
+    auto TrivialMoveToNextLevel = [&](int level,
+                                  const std::shared_ptr<TreeNode>& srcNode,
+                                  const InternalKey& srcMaxKey) {
+        auto moved = std::make_shared<TreeNode>(
+            srcNode->filename,
+            level + 1,
+            srcNode->channelInfo,
+            srcNode->rangeMin,
+            srcNode->rangeMax);
+
+        getLSMTree()->remove_sstable(srcNode);
+        getLSMTree()->insert_sstable(moved);
+
+        set_compaction_key_list(srcMaxKey, level);
+
+        pr_stat("[CMP-TRIVIAL] L%d->L%d move file=%s",
+                level, level + 1, srcNode->filename.c_str());
+    };
     g_compaction_triggered = false;
     g_compaction_runs = 0;
     auto LowerSentinel = [](const std::string& uk) {
@@ -2337,8 +2355,8 @@ void API::compaction() {
                 srcMax = srcNode->rangeMax;
             }
         }
-        InternalKey srcMinKey = UpperSentinel(srcMin.toString());
-        InternalKey srcMaxKey = LowerSentinel(srcMax.toString());
+        InternalKey srcMinKey = LowerSentinel(srcMin.toString());
+        InternalKey srcMaxKey = UpperSentinel(srcMax.toString());
 
 
         auto dstNodes = getLSMTree()->search_one_level(1, srcMin, srcMax);
@@ -2393,7 +2411,7 @@ void API::compaction() {
     }
 
     // ---------- Lk -> Lk+1 ----------
-    for (int level = 1; level < MAX_LEVEL; ++level) {
+    for (int level = 1; level < MAX_LEVEL - 1; ++level) {
         if (!compactionTrigger(level)) continue;
         g_compaction_triggered = true;
         ++g_compaction_runs;
@@ -2420,10 +2438,17 @@ void API::compaction() {
         pr_stat("Dump compaction source info:");
         srcNode->dump();
 
-        auto dstNodes = getLSMTree()->search_one_level(level + 1, srcNode->rangeMin, srcNode->rangeMax);
+        auto dstNodes = getLSMTree()->search_one_level(level + 1,
+                                               srcNode->rangeMin,
+                                               srcNode->rangeMax);
 
         InternalKey srcMinKey = LowerSentinel(srcNode->rangeMin.toString());
         InternalKey srcMaxKey = UpperSentinel(srcNode->rangeMax.toString());
+
+        if (level > 0 && dstNodes.empty()) {
+            TrivialMoveToNextLevel(level, srcNode, srcMaxKey);
+            continue;
+        }
 
         // DumpCompactionShape(level, srcNodes, dstNodes);
         const auto io_s = Clock::now();

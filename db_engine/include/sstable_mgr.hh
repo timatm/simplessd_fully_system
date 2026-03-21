@@ -9,6 +9,10 @@
 #include <set>
 #include <memory>
 #include <string_view>
+#include <atomic>
+#include <mutex>
+#include <functional>
+#include <queue>
 
 #include "def.hh"
 #include "internal_key.hh"
@@ -64,6 +68,13 @@ public:
     // 主要 API：回傳「對齊且固定 2MB」的打包結果
     AlignedBuf packingTable(const SkipList<Record, RecordComparator>& skiplist) const;
 
+
+    AlignedBuf packingTable(const std::vector<InternalKey>& keys);
+
+    AlignedBuf keyPerPagePacking(const std::vector<InternalKey>& keys) const;
+    AlignedBuf keyHashPacking(const std::vector<InternalKey>& keys) const;
+    AlignedBuf keyRangePacking(const std::vector<InternalKey>& keys) const;
+    AlignedBuf idxBloomDataPacking(const std::vector<InternalKey>& keys) const;
     void init();
     void readSSTable(const std::string& filename,char *buffer);
     void writeSSTable(uint8_t level,InternalKey minKey ,InternalKey maxKey,AlignedBuf sstable_buffer,bool);
