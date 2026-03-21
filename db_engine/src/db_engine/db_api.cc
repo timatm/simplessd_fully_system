@@ -2366,9 +2366,9 @@ void API::compaction() {
         SimulateDeviceIOIfNeeded(srcNodes, dstNodes);
         pr_stat("[CMP-DEV] L0->L1 dev_read_ms=%.3f",static_cast<double>(ToNs(Clock::now() - io_s)) / 1e6);
         pr_debug("Dump source nodes info:");
-        for(auto srcNode : srcNodes){
-            srcNode->dump();
-        }
+        // for(auto srcNode : srcNodes){
+        //     srcNode->dump();
+        // }
         pr_debug("Dump source nodes end");
         pr_debug("Dump destination nodes info:");
         // for(auto dstNode : dstNodes){
@@ -2436,7 +2436,7 @@ void API::compaction() {
         std::vector<std::shared_ptr<TreeNode>> srcNodes;
         srcNodes.push_back(srcNode);
         pr_stat("Dump compaction source info:");
-        srcNode->dump();
+        // srcNode->dump();
 
         auto dstNodes = getLSMTree()->search_one_level(level + 1,
                                                srcNode->rangeMin,
