@@ -82,7 +82,7 @@ public:
 
     int set_sstable_info(uint32_t *size);
     int set_log_info(uint32_t *size);
-
+    int trivial_move();
     int simulate_compaction_io(std::vector<uint64_t> &pbn_list);
     int close_DB(uint8_t *host_buffer, size_t size);
     int open_DB(uint32_t *datalen);

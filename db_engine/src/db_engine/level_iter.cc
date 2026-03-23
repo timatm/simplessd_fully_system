@@ -22,6 +22,21 @@ uint64_t to_u64_stoull(const std::string& s, int base = 10) {
     return v;
 }
 
+static inline uint64_t SafeFileIdFromName(const std::string& filename,
+                                          uint64_t fallback = 0) {
+    try {
+        return to_u64_stoull(filename);
+    } catch (const std::exception& e) {
+        pr_error("Sstable filename parse failed: %s (%s)",
+                 filename.c_str(), e.what());
+        return fallback;
+    } catch (...) {
+        pr_error("Sstable filename parse failed: %s (unknown)",
+                 filename.c_str());
+        return fallback;
+    }
+}
+
 // ---- ctor ----
 Level0Iterator::Level0Iterator( SstableManager* smgr,
                                 LogManager*    lmgr,
@@ -451,10 +466,31 @@ LevelNIterator::LevelNIterator( SstableManager* smgr,
             if (meta.min_key.size() != kIKeySize || meta.max_key.size() != kIKeySize){
                 pr_error("Internal key size is error");
             }
-            meta.file_id = std::stoull(sstable->filename);
+            meta.file_id = SafeFileIdFromName(sstable->filename,
+                                              static_cast<uint64_t>(metas_.size()));
             metas_.push_back(std::move(meta));
         }
     }
+
+
+// Status LevelNIterator::Init() {
+//     st_ = Status::OK();
+//     children_.clear();
+//     open_lru_.clear();
+//     reset_view_();
+
+//     build_bounds_from_opts_();
+//     if(metas_.empty()){
+//         if (!LoadLevelMetas_()) {
+//             st_ = Status::IOError("LoadLevelMetas failed");
+//             return st_;
+//         }
+//     }
+//     children_.resize(metas_.size());
+//     for (size_t i = 0; i < metas_.size(); ++i) children_[i].meta = metas_[i];
+//     SeekToFirst();
+//     return st_;
+// }
 
 
 Status LevelNIterator::Init() {
@@ -464,19 +500,29 @@ Status LevelNIterator::Init() {
     reset_view_();
 
     build_bounds_from_opts_();
-    if(metas_.empty()){
+
+    if (metas_.empty()) {
         if (!LoadLevelMetas_()) {
             st_ = Status::IOError("LoadLevelMetas failed");
             return st_;
         }
     }
+
+    std::sort(metas_.begin(), metas_.end(),
+        [&](const L0FileMeta& a, const L0FileMeta& b) {
+            if (LessKey_(a.min_key, b.min_key)) return true;
+            if (LessKey_(b.min_key, a.min_key)) return false;
+            return a.file_id < b.file_id;
+        });
+
     children_.resize(metas_.size());
-    for (size_t i = 0; i < metas_.size(); ++i) children_[i].meta = metas_[i];
+    for (size_t i = 0; i < metas_.size(); ++i) {
+        children_[i].meta = metas_[i];
+    }
+
     SeekToFirst();
     return st_;
 }
-
-
 
 
 
@@ -671,10 +717,13 @@ bool LevelNIterator::LoadLevelMetas_() {
     for (auto sstable : sstables) {
         L0FileMeta meta;
         meta.filename = sstable->filename;
-        meta.min_key = InternalKey(sstable->rangeMin.toString(), 0ull,  kMinType).Encode();
-        meta.max_key = InternalKey(sstable->rangeMax.toString(), std::numeric_limits<uint64_t>::max(), kMaxType).Encode();
+        // meta.min_key = InternalKey(sstable->rangeMin.toString(), 0ull,  kMinType).Encode();
+        // meta.max_key = InternalKey(sstable->rangeMax.toString(), std::numeric_limits<uint64_t>::max(), kMaxType).Encode();
+        meta.min_key = LowerSentinel(sstable->rangeMin.toString()).Encode();
+        meta.max_key = UpperSentinel(sstable->rangeMax.toString()).Encode();
         if (meta.min_key.size() != kIKeySize || meta.max_key.size() != kIKeySize) return false;
-        meta.file_id = std::stoull(sstable->filename);
+        meta.file_id = SafeFileIdFromName(sstable->filename,
+                                          static_cast<uint64_t>(metas_.size()));
         metas_.push_back(std::move(meta));
     }
 

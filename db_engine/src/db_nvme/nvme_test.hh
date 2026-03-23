@@ -35,6 +35,7 @@ public:
     int nvme_read_block(uint32_t lbn, char* buffer) override;
     int nvme_search(char *buffer,size_t size) override;
     int nvme_read_sstable_page(std::string filename, uint32_t page_off,uint32_t page_nun ,char* buffer) override;
+    int nvme_trival_move(sstable_info) override;
 private:
     IMS_interface ims;
 };

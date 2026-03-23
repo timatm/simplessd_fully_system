@@ -21,6 +21,7 @@
 #include <chrono>
 #include <array>
 #include <sstream>
+#include <exception>
 
 extern std::atomic<uint64_t> g_cmp_sim_nand_ns;
 extern std::atomic<uint64_t> g_cmp_sim_nand_calls;
@@ -821,6 +822,8 @@ Status API::open() {
         pr_error("LSMTree decode failed");
         return Status::Corruption("LSMTree decode fail");
     }
+    getLSMTree()->rebuild_level_counts();
+    getLSMTree()->debug_check_level_counts("host-open-after-decode");
     info.dump();
     dump_all();
     pr_info("open DB done");
@@ -1019,7 +1022,15 @@ Status API::close(){
         if (!buffer.data() || buffer.size == 0) {
             return Status::IOError("Packing failed");
         }
-        sstableManager_->writeSSTable(0, minK, maxK, std::move(buffer), /*clearImmutableTable=*/true);
+        try {
+            sstableManager_->writeSSTable(0, minK, maxK, std::move(buffer), /*clearImmutableTable=*/true);
+        } catch (const std::exception& e) {
+            pr_error("close flush writeSSTable failed: %s", e.what());
+            return Status::IOError(std::string("writeSSTable failed: ") + e.what());
+        } catch (...) {
+            pr_error("close flush writeSSTable failed: unknown exception");
+            return Status::IOError("writeSSTable failed: unknown exception");
+        }
         sstable_write_count_immtable++;
     }
     sstableManager_->waitAllTasksDone();
@@ -1104,7 +1115,15 @@ Status API::put_impl(std::string key ,std::string value,PutType t){
         if (buffer.data() == nullptr || buffer.size != BLOCK_SIZE) {
             return Status::IOError("Packing failed");
         }
-        sstableManager_->writeSSTable(0, minK, maxK, std::move(buffer), /*clearImmuteTable=*/true);
+        try {
+            sstableManager_->writeSSTable(0, minK, maxK, std::move(buffer), /*clearImmuteTable=*/true);
+        } catch (const std::exception& e) {
+            pr_error("flush writeSSTable failed: %s", e.what());
+            return Status::IOError(std::string("writeSSTable failed: ") + e.what());
+        } catch (...) {
+            pr_error("flush writeSSTable failed: unknown exception");
+            return Status::IOError("writeSSTable failed: unknown exception");
+        }
         immutable_memtable_.reset();
 
         op.flush_ns = ToNs(Clock::now() - s);
@@ -1197,7 +1216,15 @@ Status API::delete_key(std::string key ,std::string value){
         const auto& list_ref = imm_hold->GetSkipList();  // 注意：是 const&，不是 shared_ptr
         auto buffer = sstableManager_->packingTable(list_ref);
         if ( buffer.data() == nullptr || buffer.size != BLOCK_SIZE) return Status::IOError("Packing failed");
-        sstableManager_->writeSSTable(0, minK, maxK, std::move(buffer), /*clearImmuteTable=*/true);
+        try {
+            sstableManager_->writeSSTable(0, minK, maxK, std::move(buffer), /*clearImmuteTable=*/true);
+        } catch (const std::exception& e) {
+            pr_error("delete flush writeSSTable failed: %s", e.what());
+            return Status::IOError(std::string("writeSSTable failed: ") + e.what());
+        } catch (...) {
+            pr_error("delete flush writeSSTable failed: unknown exception");
+            return Status::IOError("writeSSTable failed: unknown exception");
+        }
     }
     compaction();
     uint32_t lpn = 0;
@@ -2263,9 +2290,34 @@ Status API::scan(std::string start_key,
 }
 
 Status API::removeSSable(std::shared_ptr<TreeNode> rm){
-    std::string filename = rm->filename;
-    getSSTable()->eraseSSTable(filename);
-    getLSMTree()->remove_sstable(rm);
+    if (!rm) {
+        return Status::IOError("removeSSable got null node");
+    }
+
+    const std::string filename = rm->filename;
+    try {
+        getSSTable()->eraseSSTable(filename);
+    } catch (const std::exception& e) {
+        pr_error("removeSSable device erase failed for %s: %s",
+                 filename.c_str(), e.what());
+        return Status::IOError(std::string("eraseSSTable failed: ") + e.what());
+    } catch (...) {
+        pr_error("removeSSable device erase failed for %s: unknown exception",
+                 filename.c_str());
+        return Status::IOError("eraseSSTable failed: unknown exception");
+    }
+
+    auto current = getLSMTree()->find_node(filename,
+                                           rm->levelInfo,
+                                           rm->rangeMin,
+                                           rm->rangeMax);
+    if (!current) {
+        pr_error("removeSSable host tree missing node after device erase: %s",
+                 filename.c_str());
+        return Status::Corruption("host tree missing node during removeSSable");
+    }
+
+    getLSMTree()->remove_sstable(current);
     return Status::OK();
 }
 
@@ -2299,21 +2351,72 @@ void API::SimulateDeviceIOIfNeeded(const std::vector<std::shared_ptr<TreeNode>> 
 void API::compaction() {
     auto TrivialMoveToNextLevel = [&](int level,
                                   const std::shared_ptr<TreeNode>& srcNode,
-                                  const InternalKey& srcMaxKey) {
+                                  const InternalKey& srcMaxKey) -> Status {
+        if (!srcNode) {
+            return Status::IOError("trivial move got null src node");
+        }
+
+        sstable_info info(srcNode->filename,
+                          level + 1,
+                          srcNode->rangeMin,
+                          srcNode->rangeMax);
+        int err = nvme_->nvme_trival_move(info);
+        if (err != COMMAND_SUCCESS) {
+            pr_error("[CMP-TRIVIAL] device move failed file=%s err=%d",
+                     srcNode->filename.c_str(), err);
+            return Status::IOError("nvme_trival_move failed");
+        }
+
+        auto current = getLSMTree()->find_node(srcNode->filename,
+                                               srcNode->levelInfo,
+                                               srcNode->rangeMin,
+                                               srcNode->rangeMax);
+        if (!current) {
+            pr_error("[CMP-TRIVIAL] host source node missing after device move: %s",
+                     srcNode->filename.c_str());
+            return Status::Corruption("host source node missing after device trivial move");
+        }
+
+        auto existed_dst = getLSMTree()->find_node(current->filename,
+                                                   level + 1,
+                                                   current->rangeMin,
+                                                   current->rangeMax);
+        if (existed_dst) {
+            pr_error("[CMP-TRIVIAL] destination node already exists in host tree: %s",
+                     current->filename.c_str());
+            return Status::Corruption("host destination node already exists for trivial move");
+        }
+
         auto moved = std::make_shared<TreeNode>(
-            srcNode->filename,
+            current->filename,
             level + 1,
-            srcNode->channelInfo,
-            srcNode->rangeMin,
-            srcNode->rangeMax);
+            current->channelInfo,
+            current->rangeMin,
+            current->rangeMax);
 
-        getLSMTree()->remove_sstable(srcNode);
+        getLSMTree()->remove_sstable(current);
         getLSMTree()->insert_sstable(moved);
-
         set_compaction_key_list(srcMaxKey, level);
 
         pr_stat("[CMP-TRIVIAL] L%d->L%d move file=%s",
                 level, level + 1, srcNode->filename.c_str());
+        return Status::OK();
+    };
+
+    auto RemoveNodeList = [&](const std::vector<std::shared_ptr<TreeNode>>& nodes,
+                              const char* tag) -> Status {
+        for (const auto& sp : nodes) {
+            if (!sp) continue;
+            Status rs = removeSSable(sp);
+            if (!rs.ok()) {
+                pr_error("%s failed to remove %s : %s",
+                         tag ? tag : "remove",
+                         sp->filename.c_str(),
+                         rs.ToString().c_str());
+                return rs;
+            }
+        }
+        return Status::OK();
     };
     g_compaction_triggered = false;
     g_compaction_runs = 0;
@@ -2401,9 +2504,19 @@ void API::compaction() {
                                     srcNodes,dstNodes,sstable_write_count_compaction);
         Status s = compaction.Run();
         if (s.ok()) {
+            Status rm_dst = RemoveNodeList(dstNodes, "L0 compaction dst cleanup");
+            if (!rm_dst.ok()) {
+                pr_error("L0 compaction cleanup failed on dst nodes");
+                return;
+            }
+
+            Status rm_src = RemoveNodeList(srcNodes, "L0 compaction src cleanup");
+            if (!rm_src.ok()) {
+                pr_error("L0 compaction cleanup failed on src nodes");
+                return;
+            }
+
             set_compaction_key_list(srcMaxKey, 0);
-            for (const auto& sp : dstNodes) if (sp) removeSSable(sp);
-            for (const auto& sp : srcNodes) if (sp) removeSSable(sp);
         } else {
             pr_error("Compaction in level0 fail");
             return;
@@ -2446,7 +2559,12 @@ void API::compaction() {
         InternalKey srcMaxKey = UpperSentinel(srcNode->rangeMax.toString());
 
         if (level > 0 && dstNodes.empty()) {
-            TrivialMoveToNextLevel(level, srcNode, srcMaxKey);
+            Status tm = TrivialMoveToNextLevel(level, srcNode, srcMaxKey);
+            if (!tm.ok()) {
+                pr_error("Trivial move failed at level %d: %s",
+                         level, tm.ToString().c_str());
+                return;
+            }
             continue;
         }
 
@@ -2480,9 +2598,24 @@ void API::compaction() {
                                     srcNodes, dstNodes,sstable_write_count_compaction);
         Status s = compaction.Run();
         if (s.ok()) {
+            Status rm_dst = RemoveNodeList(dstNodes, "Ln compaction dst cleanup");
+            if (!rm_dst.ok()) {
+                pr_error("Compaction cleanup failed on dst nodes at level %d", level);
+                return;
+            }
+
+            Status rm_src = removeSSable(srcNode);
+            if (!rm_src.ok()) {
+                pr_error("Compaction cleanup failed on src node at level %d: %s",
+                         level, rm_src.ToString().c_str());
+                return;
+            }
+
             set_compaction_key_list(srcMaxKey, level);  // 更新進度（上界哨兵）
-            for (const auto& sp : dstNodes) if (sp) removeSSable(sp);
-            removeSSable(srcNode);
+        } else {
+            pr_error("Compaction in level %d fail: %s",
+                     level, s.ToString().c_str());
+            return;
         }
     }
     // if(compaction){

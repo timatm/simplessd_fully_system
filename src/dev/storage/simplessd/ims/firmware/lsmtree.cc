@@ -191,15 +191,54 @@ RelateChInfo LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
 
 
 void LSMTree::insert_sstable(std::shared_ptr<TreeNode> node) {
+    if (!node) {
+        pr_error("insert_sstable got null node");
+        return;
+    }
+
+    const int level = node->levelInfo;
+    if (level < 0 || level >= MAX_LEVEL) {
+        pr_error("insert_sstable invalid level=%d", level);
+        return;
+    }
+
+    auto existed = tree_->find_node(node->filename, level, node->rangeMin, node->rangeMax);
+    if (existed) {
+        pr_error("insert_sstable duplicate node: file=%s level=%d",
+                 node->filename.c_str(), level);
+        return;
+    }
+
     tree_->insert_node(node);
-    int level = node->levelInfo;
     level_num_[level]++;
 }
 
 void LSMTree::remove_sstable(std::shared_ptr<TreeNode> node) {
-    tree_->remove_node(node);
-    int level = node->levelInfo;
-    level_num_[level]--;
+    if (!node) {
+        pr_error("remove_sstable got null node");
+        return;
+    }
+
+    const int level = node->levelInfo;
+    if (level < 0 || level >= MAX_LEVEL) {
+        pr_error("remove_sstable invalid level=%d", level);
+        return;
+    }
+
+    auto existed = tree_->find_node(node->filename, level, node->rangeMin, node->rangeMax);
+    if (!existed) {
+        pr_error("remove_sstable target not found: file=%s level=%d",
+                 node->filename.c_str(), level);
+        return;
+    }
+
+    tree_->remove_node(existed);
+    if (level_num_[level] > 0) {
+        level_num_[level]--;
+    } else {
+        pr_error("remove_sstable level count underflow at level=%d", level);
+        level_num_[level] = 0;
+    }
 }
 
 std::shared_ptr<TreeNode> LSMTree::find_node(const std::string& filename, int level, const Key& min, const Key& max) {
@@ -270,7 +309,7 @@ std::shared_ptr<TreeNode> LSMTree::findLevel0Older(){
 std::vector<std::shared_ptr<TreeNode>> LSMTree::get_level_treeNode(int level){
 
     std::vector<std::shared_ptr<TreeNode>> result;
-    if(level < 0 || level > MAX_LEVEL){
+    if(level < 0 || level >= MAX_LEVEL){
         pr_debug("Error level in get_level_treeNode()");
         return result;
     }
@@ -279,4 +318,27 @@ std::vector<std::shared_ptr<TreeNode>> LSMTree::get_level_treeNode(int level){
         result.emplace_back(node);
     }
     return result;
+}
+
+void LSMTree::rebuild_level_counts() {
+    for (int lv = 0; lv < MAX_LEVEL; ++lv) {
+        level_num_[lv] = 0;
+    }
+    for (int lv = 0; lv < MAX_LEVEL; ++lv) {
+        level_num_[lv] = static_cast<int>(tree_->get_level_nodes(lv).size());
+    }
+}
+
+void LSMTree::debug_check_level_counts(const char* tag) const {
+    for (int lv = 0; lv < MAX_LEVEL; ++lv) {
+        const int actual = static_cast<int>(tree_->get_level_nodes(lv).size());
+        const int cached = level_num_[lv];
+        if (actual != cached) {
+            pr_error("[LEVEL-COUNT-MISMATCH][%s] level=%d actual=%d cached=%d",
+                     tag ? tag : "?", lv, actual, cached);
+        } else {
+            pr_info("[LEVEL-COUNT-OK][%s] level=%d count=%d",
+                    tag ? tag : "?", lv, actual);
+        }
+    }
 }

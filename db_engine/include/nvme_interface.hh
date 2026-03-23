@@ -63,6 +63,7 @@ public:
     virtual int nvme_read_block(uint32_t lbn, char* buffer) = 0;
     virtual int nvme_search(char* buffer, size_t size) = 0;
     virtual int nvme_read_sstable_page(std::string filename, uint32_t page_off,uint32_t page_nun ,char* buffer) = 0;
+    virtual int nvme_trival_move(sstable_info) = 0;
 };
 
 #endif

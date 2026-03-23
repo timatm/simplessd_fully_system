@@ -307,6 +307,12 @@ void Namespace::submitCommand(SQEntryWrapper &req, RequestFunction &func) {
                      req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
           erase_sstable(req, func);
           break;
+        case OPCODE_TRIVIL_MOVE:
+          debugprint(LOG_IMS,
+                     "IMS     | Trival Move | SQ %u:%u | CID %u | NSID %-5d",
+                     req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
+          trival_move(req, func);
+          break;
         default:
           debugprint(
             LOG_IMS,
@@ -2932,6 +2938,40 @@ void Namespace::compaction_io(SQEntryWrapper &req, RequestFunction &func) {
   execute(CPU::NVME__NAMESPACE, CPU::READ, doCompaction, pContext);
 }
 
+
+
+void Namespace::trival_move(SQEntryWrapper &req, RequestFunction &func) {
+  bool err = false;
+
+  CQEntryWrapper resp(req);
+
+  if (!attached) {
+    err = true;
+    resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_NAMESPACE_NOT_ATTACHED);
+  }
+
+  if (!err) {
+    int ret = ims.trivial_move();
+
+    if (ret != OPERATION_SUCCESS) {
+      err = true;
+      debugprint(LOG_IMS,
+                 "NVM     | TRIVAL_MOVE | IMS trival_move failed (ret=%d)",ret);
+      resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
+                      STATUS_COMMAND_FAILD);
+    }
+  }
+
+  if (err) {
+    func(resp);
+    return;
+  }
+  debugprint(LOG_IMS,
+             "NVM     | TRIVAL_MOVE | SQ %u:%u | CID %u | NSID %-5d",
+             req.sqID, req.sqUID, req.entry.dword0.commandID, nsid);
+  func(resp);
+}
 
 }  // namespace NVMe
 

@@ -81,7 +81,7 @@ void Tree::build_link(std::shared_ptr<TreeNode> node){
 
 void Tree::insert_node(std::shared_ptr<TreeNode> node){
     int level = node->levelInfo;
-    if(level < 0 || level > MAX_LEVEL) {
+    if(level < 0 || level >= MAX_LEVEL) {
         pr_debug("Invalid level: %d", level);
         return;
     }

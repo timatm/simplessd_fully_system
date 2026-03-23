@@ -140,6 +140,7 @@ struct sstable_info{
 /*                             NMC related configs                            */
 /* -------------------------------------------------------------------------- */
 
+#define OPCODE_TRIVAL_MOVE      0x79
 #define OPCODE_WRITE_SSTABLE    0x80
 #define OPCODE_READ_SSTABLE     0x81
 #define OPCODE_SEARCH           0x82

@@ -289,6 +289,7 @@ int MyNVMeDriver::nvme_compaction_io(const CompactionIOSimMeta& meta){
     }
     std::vector<uint64_t> lbn_list;
     err = ims.simulate_compaction_io(lbn_list);
+    
     if(err == OPERATION_FAILURE){
         pr_error("nvme_search fail");
     }
@@ -341,4 +342,34 @@ int MyNVMeDriver::nvme_read_sstable_page(std::string filename, uint32_t page_off
         }
     }
     return OPERATION_SUCCESS;
+}
+
+int MyNVMeDriver::nvme_trival_move(sstable_info info){
+    if(info.filename.size() == 0){
+        pr_error("Trival move failed ,file name is empty");
+        return COMMAND_FAILED;
+    }
+    int err = 0;
+    hostInfo req(info.filename,info.level,info.min,info.max);
+    // pr_debug("[HOST] sstable_info filename=%s level=%d", 
+    //          info.filename.c_str(), info.level);
+    // pr_debug("[HOST] rangeMin (string) = '%s'", info.min.toString().c_str());
+    // pr_debug("[HOST] rangeMax (string) = '%s'", info.max.toString().c_str());
+    // pr_debug("[HOST] rangeMin (hex):");
+    // info.min.dumpUint();
+    // pr_debug("[HOST] rangeMax (hex):");
+    // info.max.dumpUint();
+
+    std::string enc_hostinfo = req.encode();
+    err = ims.write_meta(reinterpret_cast<uint8_t*>(enc_hostinfo.data()), enc_hostinfo.size());
+    if(err != OPERATION_SUCCESS){
+        pr_error("Write hostInfo metadata failed in Trival move");
+        return COMMAND_FAILED;
+    }
+    err = ims.trivial_move();
+    if(err != OPERATION_SUCCESS){
+        pr_error("Trival move is fail");
+        return err;
+    }
+    return err;
 }

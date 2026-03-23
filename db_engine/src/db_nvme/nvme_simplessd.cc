@@ -769,3 +769,35 @@ int gem5Driver::nvme_read_sstable_page(std::string filename, uint32_t page_off,u
     pr_error("nvme_read_sstable_page failed, err=0x%x", err);
     return COMMAND_FAILED;
 }
+
+int gem5Driver::nvme_trival_move(sstable_info info){
+    if(info.filename.size() == 0){
+        pr_error("Trival move failed ,file name is empty");
+        return COMMAND_FAILED;
+    }
+    int err = 0;
+    hostInfo req(info.filename,info.level,info.min,info.max);
+    std::string enc_hostinfo = req.encode();
+    err = nvme_write_metadata(enc_hostinfo.data(),enc_hostinfo.size());
+    if(err != OPERATION_SUCCESS){
+        pr_error("Write hostInfo metadata failed in trival move");
+        return COMMAND_FAILED;
+    }
+    nmc_config_t config_obj;
+    nmc_config_t *config = &config_obj;
+    init_nmc_config(config); 
+
+    // config->dry = true;
+    config->OPCODE = OPCODE_TRIVAL_MOVE;
+    err = pass_io_command(config);
+    if(err == STATUS_OPERATION_SUCCESS){
+        pr_debug("NVMe trival move success");
+        err = COMMAND_SUCCESS;
+    }
+    else{
+        pr_error("NVMe trival move failed");
+        pr_error("error code: 0x%x", err);
+        err = COMMAND_FAILED;
+    }
+    return err;
+}

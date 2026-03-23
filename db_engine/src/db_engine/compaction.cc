@@ -215,11 +215,18 @@ Status CompactionRunner::Run() {
         }
         pack_ns += ToNs(Clock::now() - pack_begin);
 
-        smgr_->writeSSTable(static_cast<uint8_t>(srcLevel_ + 1),
-                            minK,
-                            maxK,
-                            std::move(buffer),
-                            /*clearImmuteTable=*/false);
+        try {
+            smgr_->writeSSTable(static_cast<uint8_t>(srcLevel_ + 1),
+                                minK,
+                                maxK,
+                                std::move(buffer),
+                                /*clearImmuteTable=*/false);
+        } catch (const std::exception& e) {
+            return Status::IOError(std::string("writeSSTable failed: ") + e.what());
+        } catch (...) {
+            return Status::IOError("writeSSTable failed: unknown exception");
+        }
+
 
         ++flush_cnt;
         ++sstable_write_count_compaction;

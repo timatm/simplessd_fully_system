@@ -382,6 +382,7 @@ int IMS_interface::write_sstable(uint64_t &lbn) {
     return OPERATION_SUCCESS;
 }
 
+
 int IMS_interface::read_sstable(uint64_t &lbn) {
     int err = OPERATION_SUCCESS;
     if (buffer_ == nullptr || buffer_valid_size_ == 0) {
@@ -461,9 +462,9 @@ int IMS_interface::erase_sstable(uint64_t &lbn) {
         return err;
     }
     mappingTable_->remove_mapping(filename);
-    auto node = tree_->find_node(filename);
+    auto node = lsmTree_->find_node(filename);
     if (node) {
-        tree_->remove_node(node);
+        lsmTree_->remove_sstable(node);
     }
     else {
         pr_error("erase_sstable: cannot find tree node for file %s", filename.c_str());
@@ -697,7 +698,8 @@ int IMS_interface::init_IMS() {
             free(buffer);
             return OPERATION_FAILURE;
         }
-
+        lsmTree_->rebuild_level_counts();
+        lsmTree_->debug_check_level_counts("device-init_IMS-after-mapping-recovery");
         pr_info("InitLogRecordList: logStoreLBN = %lu", sp_ptr_->log_store);
         err = logManager_->init_logRecordList(sp_ptr_->log_store, sp_ptr_->log_page_num);
         if (err != OPERATION_SUCCESS) {
@@ -1181,4 +1183,62 @@ void IMS_interface::print_result(){
     double block_per_search = (double)(total_search_parallel_block_num) / (double)(total_search_count);
     pr_stat("Avg. search parallel block per search =%04f",block_per_search);
     pr_stat("================= IMS experient end =================");
+}
+
+
+int IMS_interface::trivial_move(){
+    int err = OPERATION_SUCCESS;
+    if (buffer_ == nullptr || buffer_valid_size_ == 0) {
+        pr_error("read_sstable: buffer_ is null or buffer_valid_size_ == 0");
+        return OPERATION_FAILURE;
+    }
+    size_t hostInfo_len = buffer_valid_size_;
+    std::string buf(buffer_, buffer_ + hostInfo_len);
+    hostInfo request = hostInfo::decodeOrThrow(buf);
+    std::string filename = request.filename;
+
+    auto lsmtree = get_lsmTree();
+    auto node = lsmtree->find_node(filename);
+    if(node == nullptr){
+        pr_error("Can't find the SStable(%s) in LSM-tree",filename.c_str());
+        return OPERATION_FAILURE;
+    }
+    if( compareKey(node->rangeMin,request.rangeMin) != 0 ||
+        compareKey(node->rangeMax,request.rangeMax) != 0)
+    {
+        pr_error("SStable(%s) key range is mismatch whitch is in LSM-tree",filename.c_str());
+        pr_error("The key range in host: %s ~ %s",request.rangeMin.toString().c_str(),request.rangeMax.toString().c_str());
+        pr_error("The key range in device: %s ~ %s",node->rangeMin.toString().c_str(),node->rangeMax.toString().c_str());
+        return OPERATION_FAILURE;
+    }
+
+    if (request.levelInfo < 0 || request.levelInfo >= MAX_LEVEL) {
+        pr_error("trivial_move target level is invalid: %d", request.levelInfo);
+        return OPERATION_FAILURE;
+    }
+
+    if (node->levelInfo == request.levelInfo) {
+        pr_debug("trivial_move no-op for %s at level %d",
+                 filename.c_str(), request.levelInfo);
+        return OPERATION_SUCCESS;
+    }
+
+    auto existed_dst = lsmtree->find_node(filename,
+                                          request.levelInfo,
+                                          node->rangeMin,
+                                          node->rangeMax);
+    if (existed_dst) {
+        pr_error("trivial_move destination node already exists: %s", filename.c_str());
+        return OPERATION_FAILURE;
+    }
+
+    auto moved = std::make_shared<TreeNode>(filename,
+                                            request.levelInfo,
+                                            node->channelInfo,
+                                            node->rangeMin,
+                                            node->rangeMax);
+
+    lsmtree->remove_sstable(node);
+    lsmtree->insert_sstable(moved);
+    return err;
 }

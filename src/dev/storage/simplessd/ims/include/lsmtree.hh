@@ -54,6 +54,8 @@ public:
     std::shared_ptr<TreeNode> findLevel0Older();
     std::shared_ptr<TreeNode> getLevelFirstNode(int level) const ;
     std::shared_ptr<TreeNode> getNextNode(int level, Key input) const;
+    void rebuild_level_counts();
+    void debug_check_level_counts(const char* tag) const;
 private:
     std::shared_ptr<Tree> tree_;
     std::vector<uint32_t> level_num_;

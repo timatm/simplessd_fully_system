@@ -938,8 +938,7 @@ void SstableManager::readSSTable(const std::string& filename,char *buffer) {
 
 void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey maxKey, AlignedBuf sstable_buffer,bool clearImmuteTable) {
     if (sstable_buffer.ptr == nullptr) {
-        std::cerr << "SSTable buffer cannot be null" << std::endl;
-        return;
+        throw std::runtime_error("SSTable buffer cannot be null");
     }
 
     Key rangeMinKey = minKey.key;
@@ -991,20 +990,24 @@ void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey
         g_comp_write_ns += ns;
     }
 
-    if (err == COMMAND_FAILED) {
+    if (err != COMMAND_SUCCESS) {
         pr_error("Failed to write SSTable: %s", info.filename.c_str());
-        return;
+        notify_fail(info, err);
+        throw std::runtime_error("nvme_write_sstable failed for " + info.filename);
     }
 
     pr_debug("Write success: %s",info.filename.c_str());
 
     auto node = std::make_shared<TreeNode>(info.filename,
                                         info.level,
-                                        info.min, 
+                                        info.min,
                                         info.max);
     {
         std::unique_lock<std::mutex> lock(tree_mutex_);
         lsmTree_.insert_sstable(node);
+    }
+    if (clearImmuteTable) {
+        notify_done(info);
     }
     pr_debug("SStable( %s ) written successfully.",info.filename.c_str());
     pr_debug("[Main] Async write dispatched.");
@@ -1012,10 +1015,13 @@ void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey
 
 void SstableManager::eraseSSTable(const std::string& filename) {
     if(filename.empty()){
-        pr_error("DeleteSSTable filename is empty");
-        return;
+        throw std::runtime_error("DeleteSSTable filename is empty");
     }
     int err = nvme_.nvme_erase_sstable(filename);
+    if (err != COMMAND_SUCCESS) {
+        pr_error("DeleteSSTable failed: %s", filename.c_str());
+        throw std::runtime_error("nvme_erase_sstable failed for " + filename);
+    }
 }
 
 // ---------------- Init ----------------
