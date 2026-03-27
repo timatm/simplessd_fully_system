@@ -2355,7 +2355,64 @@ void API::compaction() {
         if (!srcNode) {
             return Status::IOError("trivial move got null src node");
         }
+#if (LCP_TRIVIAL_MOVE_MODE == LCP_TRIVIAL_MOVE_REWRITE)
+        if (SELECT_POLICY == static_cast<int>(SelectT::LEVEL2CH)) {
+            void* raw = nullptr;
+            const int memerr = posix_memalign(&raw, 4096, BLOCK_SIZE);
+            if (memerr != 0 || raw == nullptr) {
+                pr_error("[CMP-TRIVIAL-REWRITE] alloc failed for %s (ret=%d)",
+                         srcNode->filename.c_str(), memerr);
+                return Status::IOError("alloc failed for trivial-move rewrite");
+            }
 
+            AlignedBuf block;
+            block.ptr.reset(raw);
+            block.size  = BLOCK_SIZE;
+            block.align = 4096;
+
+            const auto rd_t0 = Clock::now();
+            int rd = nvme_->nvme_read_sstable(srcNode->filename, block.data());
+            const uint64_t rd_ns = ToNs(Clock::now() - rd_t0);
+            g_cmp_read_sstable_ns.fetch_add(rd_ns, std::memory_order_relaxed);
+
+            if (rd != COMMAND_SUCCESS) {
+                pr_error("[CMP-TRIVIAL-REWRITE] read failed file=%s err=%d",
+                         srcNode->filename.c_str(), rd);
+                return Status::IOError("nvme_read_sstable failed in trivial-move rewrite");
+            }
+
+            const InternalKey srcMinKey(
+                srcNode->rangeMin.toString(), UINT64_MAX, ValueType::kTypeMin);
+
+            try {
+                sstableManager_->writeSSTable(static_cast<uint8_t>(level + 1),
+                                              srcMinKey,
+                                              srcMaxKey,
+                                              std::move(block),
+                                              /*clearImmuteTable=*/false);
+            } catch (const std::exception& e) {
+                pr_error("[CMP-TRIVIAL-REWRITE] write failed file=%s err=%s",
+                         srcNode->filename.c_str(), e.what());
+                return Status::IOError(std::string("writeSSTable failed in trivial-move rewrite: ") + e.what());
+            } catch (...) {
+                pr_error("[CMP-TRIVIAL-REWRITE] write failed file=%s err=unknown",
+                         srcNode->filename.c_str());
+                return Status::IOError("writeSSTable failed in trivial-move rewrite: unknown");
+            }
+
+            Status rm_src = removeSSable(srcNode);
+            if (!rm_src.ok()) {
+                pr_error("[CMP-TRIVIAL-REWRITE] cleanup failed file=%s: %s",
+                         srcNode->filename.c_str(), rm_src.ToString().c_str());
+                return rm_src;
+            }
+
+            set_compaction_key_list(srcMaxKey, level);
+            pr_stat("[CMP-TRIVIAL-REWRITE] L%d->L%d rewrite file=%s",
+                    level, level + 1, srcNode->filename.c_str());
+            return Status::OK();
+        }
+#endif
         sstable_info info(srcNode->filename,
                           level + 1,
                           srcNode->rangeMin,

@@ -99,6 +99,18 @@ enum class SelectT {
     LEVEL2CH  = 2,
     MYPOLICY  = 3
 };
+
+// trivial move behavior for LCP / LEVEL2CH
+#define LCP_TRIVIAL_MOVE_METADATA_ONLY 0
+#define LCP_TRIVIAL_MOVE_REWRITE       1
+
+#define LCP_TRIVIAL_MOVE_MODE LCP_TRIVIAL_MOVE_REWRITE
+
+#ifndef LCP_TRIVIAL_MOVE_MODE
+#define LCP_TRIVIAL_MOVE_MODE LCP_TRIVIAL_MOVE_REWRITE
+#endif
+
+
 #ifndef SELECT_POLICY
 #define SELECT_POLICY 3
 #endif
