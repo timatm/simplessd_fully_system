@@ -993,6 +993,7 @@ int IMS_interface::close_DB(uint8_t *host_buffer, size_t size){
     if(err == OPERATION_FAILURE){
         pr_error("close IMS failed");
     }
+    print_result();
 #endif
     return 0;
 }
