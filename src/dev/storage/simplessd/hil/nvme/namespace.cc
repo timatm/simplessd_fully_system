@@ -154,12 +154,23 @@ Namespace::Namespace(Subsystem *p, ConfigData &c)
       allocated(false),
       formatFinishedAt(0) {}
 
+// Namespace::~Namespace() {
+//   if (pDisk) {
+//     delete pDisk;
+//   }
+// }
+
 Namespace::~Namespace() {
+#if RUNTYPE
+  ims.close_IMS();
+  ims.attachDisk(nullptr);
+#endif
+
   if (pDisk) {
     delete pDisk;
+    pDisk = nullptr;
   }
 }
-
 void Namespace::submitCommand(SQEntryWrapper &req, RequestFunction &func) {
   CQEntryWrapper resp(req);
   bool response = false;

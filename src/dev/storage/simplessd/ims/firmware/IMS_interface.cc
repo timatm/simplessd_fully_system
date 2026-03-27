@@ -236,15 +236,11 @@ IMS_interface::IMS_interface() {
 
 IMS_interface::~IMS_interface() {
     pr_info("IMS close in destructor");
-    try {
+    if (!closed_) {
         int err = close_IMS();
         if (err != OPERATION_SUCCESS) {
             pr_error("IMS close failed in destructor");
-        } else {
-            pr_info("IMS close is successful in destructor");
         }
-    } catch (const std::exception &e) {
-        pr_error("IMS destructor: close_IMS threw exception: %s", e.what());
     }
     dump_lsm_tree();
     print_result();
@@ -739,10 +735,14 @@ int IMS_interface::init_IMS() {
 }
 
 int IMS_interface::close_IMS() {
-    // if (closed_) {
-    //     pr_info("IMS_interface already closed, skip close_IMS");
-    //     return OPERATION_SUCCESS;
-    // }
+    if (closed_) return OPERATION_SUCCESS;
+#if RUNTYPE == 1
+    if (disk_ == nullptr) {
+        pr_error("close_IMS: disk_ is null");
+        closed_ = true;
+        return OPERATION_FAILURE;
+    }
+#endif
     int err = OPERATION_FAILURE;
     pr_info("Close IMS interface");
     auto mappingTable = mappingTable_->get_table();
@@ -822,6 +822,7 @@ int IMS_interface::close_IMS() {
     // logManager_->clear();        
     // reset_superPage(sp_ptr_);
     // closed_ = true;
+    closed_ = true;
     return OPERATION_SUCCESS;
 }
 int IMS_interface::init_DB(uint8_t *buffer){
