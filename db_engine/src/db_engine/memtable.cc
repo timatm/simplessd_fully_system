@@ -153,9 +153,19 @@ static inline uint64_t FNV1aHash64(const void* ptr, size_t len) {
 }
 
 // 你原本的 HashModN —— 修正生命期
+// size_t HashModN(const InternalKey& ikey, size_t n) {
+//     std::string encoded = ikey.Encode();                // 擁有者在此，活到函式末
+//     uint64_t hash_value = FNV1aHash64(encoded.data(), encoded.size());
+//     return static_cast<size_t>(hash_value % n);
+// }
+
 size_t HashModN(const InternalKey& ikey, size_t n) {
-    std::string encoded = ikey.Encode();                // 擁有者在此，活到函式末
-    uint64_t hash_value = FNV1aHash64(encoded.data(), encoded.size());
+    if (n == 0) return 0;
+
+    const void* key_ptr = static_cast<const void*>(ikey.key.key);
+    const size_t key_len = static_cast<size_t>(ikey.key.key_size);
+
+    uint64_t hash_value = FNV1aHash64(key_ptr, key_len);
     return static_cast<size_t>(hash_value % n);
 }
 
