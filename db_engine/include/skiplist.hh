@@ -20,7 +20,7 @@ public:
     explicit SkipList(Comparator cmp = Comparator());
     ~SkipList();
 
-    void Insert(const Record& record);
+    bool Insert(const Record& record);
     bool Contains(const Record& record) const;
 
     Iterator GetIterator() const;
@@ -126,7 +126,7 @@ SkipList<Record, Comparator>::FindGreaterOrEqual(const Record& r, Node** prev) c
 
 // ---------------- Insert ----------------
 template <typename Record, typename Comparator>
-void SkipList<Record, Comparator>::Insert(const Record& r) {
+bool SkipList<Record, Comparator>::Insert(const Record& r) {
     Node* prev[kMaxHeight];
     Node* x = FindGreaterOrEqual(r, prev);
 
@@ -135,7 +135,7 @@ void SkipList<Record, Comparator>::Insert(const Record& r) {
         if (r.internal_key.info.seq > x->record.internal_key.info.seq) {
             x->record = r;
         }
-        return;
+        return false;
     }
 
     int height = RandomHeight();
@@ -151,6 +151,7 @@ void SkipList<Record, Comparator>::Insert(const Record& r) {
         x->next[i] = prev[i]->next[i];
         prev[i]->next[i] = x;
     }
+    return true;
 }
 
 // ---------------- Contains ----------------

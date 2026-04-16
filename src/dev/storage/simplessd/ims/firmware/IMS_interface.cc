@@ -1132,10 +1132,6 @@ int IMS_interface::simulate_compaction_io(std::vector<uint64_t> &lbn_list) {
     total_compaction_count++;
     auto it = std::max_element(ch_list.begin(), ch_list.end());
     if (it != ch_list.end()) {
-        total_compaction_parallel_block_num += *it;
-    }
-    
-    if (it != ch_list.end()) {
         uint32_t max_load = *it;
         int max_ch = static_cast<int>(std::distance(ch_list.begin(), it));
         total_compaction_parallel_block_num += max_load;

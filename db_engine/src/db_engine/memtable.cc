@@ -11,10 +11,12 @@ MemTable::MemTable()
     : hash_num_(IMS_PAGE_SIZE / sizeof(InternalKey), 0) {}
 
 void MemTable::Put(const Record &rec) {
-    skiplist_.Insert(rec);
+    if(skiplist_.Insert(rec)){
+        ++node_count_;
+        hash_num_[HashModN(rec.internal_key, hash_num_.size())]++;
+    }
+    // skiplist_.Insert(rec);
     // size_ += sizeof(InternalKey);
-    ++node_count_;
-    hash_num_[HashModN(rec.internal_key, hash_num_.size())]++;
 }
 
 
