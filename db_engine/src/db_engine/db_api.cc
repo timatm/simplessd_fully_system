@@ -83,6 +83,10 @@ struct PutOpTiming {
     uint64_t log_gc_ns = 0;
 
     uint32_t compaction_runs = 0;
+    uint32_t compaction_trigger_events = 0;
+    uint32_t trivial_move_runs = 0;
+    uint32_t trivial_rewrite_runs = 0;
+
     bool flush_triggered = false;
     bool compaction_triggered = false;
     bool log_gc_triggered = false;
@@ -99,17 +103,86 @@ struct PutAggTiming {
 
     std::atomic<uint64_t> flush_ops{0};
     std::atomic<uint64_t> compaction_ops{0};
-    std::atomic<uint64_t> compaction_runs{0};
+
+    std::atomic<uint64_t> compaction_trigger_events{0};
+    std::atomic<uint64_t> compaction_runs{0};       // real CompactionRunner::Run()
+    std::atomic<uint64_t> trivial_move_runs{0};     // metadata-only trivial move
+    std::atomic<uint64_t> trivial_rewrite_runs{0};  // LCP trivial rewrite
+
     std::atomic<uint64_t> log_gc_ops{0};
 };
 
 static PutAggTiming g_put_timing;
 
+struct CompactionEventStats {
+    std::atomic<uint64_t> trigger_count{0};
+    std::atomic<uint64_t> real_count{0};
+    std::atomic<uint64_t> trivial_move_count{0};
+    std::atomic<uint64_t> trivial_rewrite_count{0};
+    std::atomic<uint64_t> skipped_count{0};
+
+    std::atomic<uint64_t> trivial_move_ns{0};
+    std::atomic<uint64_t> trivial_rewrite_total_ns{0};
+    std::atomic<uint64_t> trivial_rewrite_read_ns{0};
+    std::atomic<uint64_t> trivial_rewrite_write_ns{0};
+
+    std::array<std::atomic<uint64_t>, MAX_LEVEL> trigger_per_level{};
+    std::array<std::atomic<uint64_t>, MAX_LEVEL> real_per_level{};
+    std::array<std::atomic<uint64_t>, MAX_LEVEL> trivial_move_per_level{};
+    std::array<std::atomic<uint64_t>, MAX_LEVEL> trivial_rewrite_per_level{};
+    std::array<std::atomic<uint64_t>, MAX_LEVEL> skipped_per_level{};
+};
+
+static CompactionEventStats g_compaction_events;
+
+static inline void AddPerLevel(std::array<std::atomic<uint64_t>, MAX_LEVEL>& arr,
+                               int level,
+                               uint64_t delta = 1) {
+    if (level >= 0 && level < MAX_LEVEL) {
+        arr[level].fetch_add(delta, std::memory_order_relaxed);
+    }
+}
+
+static inline void RecordCompactionTrigger(int level) {
+    g_compaction_events.trigger_count.fetch_add(1, std::memory_order_relaxed);
+    AddPerLevel(g_compaction_events.trigger_per_level, level);
+}
+
+static inline void RecordRealCompaction(int level) {
+    g_compaction_events.real_count.fetch_add(1, std::memory_order_relaxed);
+    AddPerLevel(g_compaction_events.real_per_level, level);
+}
+
+static inline void RecordSkippedCompactionTrigger(int level) {
+    g_compaction_events.skipped_count.fetch_add(1, std::memory_order_relaxed);
+    AddPerLevel(g_compaction_events.skipped_per_level, level);
+}
+
+static inline void RecordTrivialMove(int level, uint64_t ns) {
+    g_compaction_events.trivial_move_count.fetch_add(1, std::memory_order_relaxed);
+    g_compaction_events.trivial_move_ns.fetch_add(ns, std::memory_order_relaxed);
+    AddPerLevel(g_compaction_events.trivial_move_per_level, level);
+}
+
+static inline void RecordTrivialRewrite(int level,
+                                        uint64_t total_ns,
+                                        uint64_t read_ns,
+                                        uint64_t write_ns) {
+    g_compaction_events.trivial_rewrite_count.fetch_add(1, std::memory_order_relaxed);
+    g_compaction_events.trivial_rewrite_total_ns.fetch_add(total_ns, std::memory_order_relaxed);
+    g_compaction_events.trivial_rewrite_read_ns.fetch_add(read_ns, std::memory_order_relaxed);
+    g_compaction_events.trivial_rewrite_write_ns.fetch_add(write_ns, std::memory_order_relaxed);
+    AddPerLevel(g_compaction_events.trivial_rewrite_per_level, level);
+}
+
 // 每個 thread 保留自己最近一次 put/update 的 breakdown
 thread_local PutOpTiming g_last_put_timing;
 
 thread_local bool g_compaction_triggered = false;
-thread_local uint32_t g_compaction_runs = 0;
+thread_local uint32_t g_compaction_runs = 0;  // real CompactionRunner::Run() count only
+thread_local uint32_t g_compaction_trigger_events = 0;
+thread_local uint32_t g_trivial_move_runs = 0;
+thread_local uint32_t g_trivial_rewrite_runs = 0;
 
 struct SearchAggTiming {
     std::atomic<uint64_t> total_ops{0};
@@ -640,7 +713,10 @@ API::API(){
     reset_atomic(g_put_timing.log_gc_ns);
     reset_atomic(g_put_timing.flush_ops);
     reset_atomic(g_put_timing.compaction_ops);
+    reset_atomic(g_put_timing.compaction_trigger_events);
     reset_atomic(g_put_timing.compaction_runs);
+    reset_atomic(g_put_timing.trivial_move_runs);
+    reset_atomic(g_put_timing.trivial_rewrite_runs);
     reset_atomic(g_put_timing.log_gc_ops);
 
     reset_atomic(g_search_timing.total_ops);
@@ -668,11 +744,33 @@ API::API(){
     reset_atomic(g_cmp_write_stage_ns);
     reset_atomic(g_cmp_wait_ns);
 
+    reset_atomic(g_compaction_events.trigger_count);
+    reset_atomic(g_compaction_events.real_count);
+    reset_atomic(g_compaction_events.trivial_move_count);
+    reset_atomic(g_compaction_events.trivial_rewrite_count);
+    reset_atomic(g_compaction_events.skipped_count);
+
+    reset_atomic(g_compaction_events.trivial_move_ns);
+    reset_atomic(g_compaction_events.trivial_rewrite_total_ns);
+    reset_atomic(g_compaction_events.trivial_rewrite_read_ns);
+    reset_atomic(g_compaction_events.trivial_rewrite_write_ns);
+
+    for (int i = 0; i < MAX_LEVEL; ++i) {
+        reset_atomic(g_compaction_events.trigger_per_level[i]);
+        reset_atomic(g_compaction_events.real_per_level[i]);
+        reset_atomic(g_compaction_events.trivial_move_per_level[i]);
+        reset_atomic(g_compaction_events.trivial_rewrite_per_level[i]);
+        reset_atomic(g_compaction_events.skipped_per_level[i]);
+    }
+
     g_search_trace_on = false;
     g_search_bloom_ns_tls = 0;
     g_search_meta_read_ns_tls = 0;
     g_compaction_triggered = false;
     g_compaction_runs = 0;
+    g_compaction_trigger_events = 0;
+    g_trivial_move_runs = 0;
+    g_trivial_rewrite_runs = 0;
 
     tree_ = std::make_shared<Tree>();
     lsmTree_ = std::make_unique<LSMTree>(tree_);
@@ -850,14 +948,46 @@ void API::print_result() {
         pr_stat("cache_miss_rate=%.4f", avg_util);
     }
     pr_stat("search_pattern_io=%.4fM", search_pattern_ioM);
-    pr_stat("compaction_count=%u", compaction_count);
+    pr_stat("compaction_count_legacy_real=%u", compaction_count);
+
+    const uint64_t cmp_trigger_count =
+        g_compaction_events.trigger_count.load(std::memory_order_relaxed);
+    const uint64_t cmp_real_count =
+        g_compaction_events.real_count.load(std::memory_order_relaxed);
+    const uint64_t cmp_trivial_move_count =
+        g_compaction_events.trivial_move_count.load(std::memory_order_relaxed);
+    const uint64_t cmp_trivial_rewrite_count =
+        g_compaction_events.trivial_rewrite_count.load(std::memory_order_relaxed);
+    const uint64_t cmp_skipped_count =
+        g_compaction_events.skipped_count.load(std::memory_order_relaxed);
+
+    pr_stat("compaction_trigger_count=%llu",
+            (unsigned long long)cmp_trigger_count);
+    pr_stat("compaction_real_count=%llu",
+            (unsigned long long)cmp_real_count);
+    pr_stat("trivial_move_count=%llu",
+            (unsigned long long)cmp_trivial_move_count);
+    pr_stat("trivial_rewrite_count=%llu",
+            (unsigned long long)cmp_trivial_rewrite_count);
+    pr_stat("compaction_skipped_trigger_count=%llu",
+            (unsigned long long)cmp_skipped_count);
+
+    for (int lv = 0; lv < MAX_LEVEL; ++lv) {
+        pr_stat("compaction_level[%d] trigger=%llu real=%llu trivial_move=%llu trivial_rewrite=%llu skipped=%llu",
+                lv,
+                (unsigned long long)g_compaction_events.trigger_per_level[lv].load(std::memory_order_relaxed),
+                (unsigned long long)g_compaction_events.real_per_level[lv].load(std::memory_order_relaxed),
+                (unsigned long long)g_compaction_events.trivial_move_per_level[lv].load(std::memory_order_relaxed),
+                (unsigned long long)g_compaction_events.trivial_rewrite_per_level[lv].load(std::memory_order_relaxed),
+                (unsigned long long)g_compaction_events.skipped_per_level[lv].load(std::memory_order_relaxed));
+    }
     pr_stat("Write SStable count trigger by compaction: %u",sstable_write_count_compaction);
     pr_stat("Write SStable count trigger by immutable: %u",sstable_write_count_immtable);
     pr_stat("Search hit in memory count: %u",search_hit_in_memory);
     pr_info("==========================================================");
 
     auto ns_to_ms = [](uint64_t ns) {
-    return static_cast<double>(ns) / 1e6;
+        return static_cast<double>(ns) / 1e6;
     };
 
     const uint64_t total_ns      = g_put_timing.total_ns.load(std::memory_order_relaxed);
@@ -882,9 +1012,19 @@ void API::print_result() {
     pr_stat("put_trigger_flush_count=%llu",
             (unsigned long long)g_put_timing.flush_ops.load(std::memory_order_relaxed));
     pr_stat("put_trigger_compaction_count=%llu",
-            (unsigned long long)g_put_timing.compaction_ops.load(std::memory_order_relaxed));
-    pr_stat("put_compaction_run_count=%llu",
+        (unsigned long long)g_put_timing.compaction_ops.load(std::memory_order_relaxed));
+
+    pr_stat("put_compaction_trigger_events=%llu",
+            (unsigned long long)g_put_timing.compaction_trigger_events.load(std::memory_order_relaxed));
+
+    pr_stat("put_real_compaction_run_count=%llu",
             (unsigned long long)g_put_timing.compaction_runs.load(std::memory_order_relaxed));
+
+    pr_stat("put_trivial_move_count=%llu",
+            (unsigned long long)g_put_timing.trivial_move_runs.load(std::memory_order_relaxed));
+
+    pr_stat("put_trivial_rewrite_count=%llu",
+            (unsigned long long)g_put_timing.trivial_rewrite_runs.load(std::memory_order_relaxed));
     pr_stat("put_trigger_log_gc_count=%llu",
             (unsigned long long)g_put_timing.log_gc_ops.load(std::memory_order_relaxed));
 
@@ -907,6 +1047,21 @@ void API::print_result() {
     pr_stat("comp_write_submit_ms=%.3f", ns_to_ms(comp_write_submit_ns));
     pr_stat("comp_write_stage_ms(pack+write)=%.3f", ns_to_ms(comp_write_stage_ns));
     pr_stat("comp_wait_ms=%.3f", ns_to_ms(comp_wait_ns));
+
+    const uint64_t trivial_move_ns =
+        g_compaction_events.trivial_move_ns.load(std::memory_order_relaxed);
+    const uint64_t trivial_rewrite_total_ns =
+        g_compaction_events.trivial_rewrite_total_ns.load(std::memory_order_relaxed);
+    const uint64_t trivial_rewrite_read_ns =
+        g_compaction_events.trivial_rewrite_read_ns.load(std::memory_order_relaxed);
+    const uint64_t trivial_rewrite_write_ns =
+        g_compaction_events.trivial_rewrite_write_ns.load(std::memory_order_relaxed);
+
+    pr_stat("trivial_move_ms=%.3f", ns_to_ms(trivial_move_ns));
+    pr_stat("trivial_rewrite_total_ms=%.3f", ns_to_ms(trivial_rewrite_total_ns));
+    pr_stat("trivial_rewrite_read_ms=%.3f", ns_to_ms(trivial_rewrite_read_ns));
+    pr_stat("trivial_rewrite_write_ms=%.3f", ns_to_ms(trivial_rewrite_write_ns));
+
     pr_stat("comp_stage_measured_total_ms=%.3f", ns_to_ms(comp_measured_total_ns));
     pr_stat("comp_stage_run_count=%llu", (unsigned long long)comp_run_count);
     pr_stat("comp_sim_nand_calls=%llu", (unsigned long long)comp_sim_nand_calls);
@@ -1132,6 +1287,9 @@ Status API::put_impl(std::string key ,std::string value,PutType t){
     {
         g_compaction_triggered = false;
         g_compaction_runs = 0;
+        g_compaction_trigger_events = 0;
+        g_trivial_move_runs = 0;
+        g_trivial_rewrite_runs = 0;
 
         const auto s = Clock::now();
         compaction();
@@ -1141,6 +1299,9 @@ Status API::put_impl(std::string key ,std::string value,PutType t){
             op.compaction_ns = ns;
             op.compaction_triggered = true;
             op.compaction_runs = g_compaction_runs;
+            op.compaction_trigger_events = g_compaction_trigger_events;
+            op.trivial_move_runs = g_trivial_move_runs;
+            op.trivial_rewrite_runs = g_trivial_rewrite_runs;
         }
     }
     uint32_t lpn = 0;
@@ -1182,7 +1343,10 @@ Status API::put_impl(std::string key ,std::string value,PutType t){
         }
         if (op.compaction_triggered) {
             g_put_timing.compaction_ops.fetch_add(1, std::memory_order_relaxed);
+            g_put_timing.compaction_trigger_events.fetch_add(op.compaction_trigger_events, std::memory_order_relaxed);
             g_put_timing.compaction_runs.fetch_add(op.compaction_runs, std::memory_order_relaxed);
+            g_put_timing.trivial_move_runs.fetch_add(op.trivial_move_runs, std::memory_order_relaxed);
+            g_put_timing.trivial_rewrite_runs.fetch_add(op.trivial_rewrite_runs, std::memory_order_relaxed);
         }
         if (op.log_gc_triggered) {
             g_put_timing.log_gc_ops.fetch_add(1, std::memory_order_relaxed);
@@ -2361,7 +2525,7 @@ void API::compaction() {
             const int memerr = posix_memalign(&raw, 4096, BLOCK_SIZE);
             if (memerr != 0 || raw == nullptr) {
                 pr_error("[CMP-TRIVIAL-REWRITE] alloc failed for %s (ret=%d)",
-                         srcNode->filename.c_str(), memerr);
+                        srcNode->filename.c_str(), memerr);
                 return Status::IOError("alloc failed for trivial-move rewrite");
             }
 
@@ -2370,49 +2534,67 @@ void API::compaction() {
             block.size  = BLOCK_SIZE;
             block.align = 4096;
 
+            const auto trivial_begin = Clock::now();
+
             const auto rd_t0 = Clock::now();
             int rd = nvme_->nvme_read_sstable(srcNode->filename, block.data());
             const uint64_t rd_ns = ToNs(Clock::now() - rd_t0);
-            g_cmp_read_sstable_ns.fetch_add(rd_ns, std::memory_order_relaxed);
 
             if (rd != COMMAND_SUCCESS) {
                 pr_error("[CMP-TRIVIAL-REWRITE] read failed file=%s err=%d",
-                         srcNode->filename.c_str(), rd);
+                        srcNode->filename.c_str(), rd);
                 return Status::IOError("nvme_read_sstable failed in trivial-move rewrite");
             }
 
             const InternalKey srcMinKey(
                 srcNode->rangeMin.toString(), UINT64_MAX, ValueType::kTypeMin);
 
+            uint64_t wr_ns = 0;
+
             try {
+                const auto wr_t0 = Clock::now();
+
                 sstableManager_->writeSSTable(static_cast<uint8_t>(level + 1),
-                                              srcMinKey,
-                                              srcMaxKey,
-                                              std::move(block),
-                                              /*clearImmuteTable=*/false);
+                                            srcMinKey,
+                                            srcMaxKey,
+                                            std::move(block),
+                                            /*clearImmuteTable=*/false);
+
+                wr_ns = ToNs(Clock::now() - wr_t0);
             } catch (const std::exception& e) {
                 pr_error("[CMP-TRIVIAL-REWRITE] write failed file=%s err=%s",
-                         srcNode->filename.c_str(), e.what());
+                        srcNode->filename.c_str(), e.what());
                 return Status::IOError(std::string("writeSSTable failed in trivial-move rewrite: ") + e.what());
             } catch (...) {
                 pr_error("[CMP-TRIVIAL-REWRITE] write failed file=%s err=unknown",
-                         srcNode->filename.c_str());
+                        srcNode->filename.c_str());
                 return Status::IOError("writeSSTable failed in trivial-move rewrite: unknown");
             }
 
             Status rm_src = removeSSable(srcNode);
             if (!rm_src.ok()) {
                 pr_error("[CMP-TRIVIAL-REWRITE] cleanup failed file=%s: %s",
-                         srcNode->filename.c_str(), rm_src.ToString().c_str());
+                        srcNode->filename.c_str(), rm_src.ToString().c_str());
                 return rm_src;
             }
 
             set_compaction_key_list(srcMaxKey, level);
-            pr_stat("[CMP-TRIVIAL-REWRITE] L%d->L%d rewrite file=%s",
-                    level, level + 1, srcNode->filename.c_str());
+
+            const uint64_t total_ns = ToNs(Clock::now() - trivial_begin);
+
+            RecordTrivialRewrite(level, total_ns, rd_ns, wr_ns);
+            ++g_trivial_rewrite_runs;
+
+            pr_stat("[CMP-TRIVIAL-REWRITE] L%d->L%d rewrite file=%s total_ms=%.3f read_ms=%.3f write_ms=%.3f",
+                    level, level + 1, srcNode->filename.c_str(),
+                    static_cast<double>(total_ns) / 1e6,
+                    static_cast<double>(rd_ns) / 1e6,
+                    static_cast<double>(wr_ns) / 1e6);
+
             return Status::OK();
         }
 #endif
+        const auto trivial_begin = Clock::now();
         sstable_info info(srcNode->filename,
                           level + 1,
                           srcNode->rangeMin,
@@ -2455,8 +2637,15 @@ void API::compaction() {
         getLSMTree()->insert_sstable(moved);
         set_compaction_key_list(srcMaxKey, level);
 
-        pr_stat("[CMP-TRIVIAL] L%d->L%d move file=%s",
-                level, level + 1, srcNode->filename.c_str());
+        const uint64_t total_ns = ToNs(Clock::now() - trivial_begin);
+
+        RecordTrivialMove(level, total_ns);
+        ++g_trivial_move_runs;
+
+        pr_stat("[CMP-TRIVIAL] L%d->L%d move file=%s total_ms=%.3f",
+                level, level + 1, srcNode->filename.c_str(),
+                static_cast<double>(total_ns) / 1e6);
+
         return Status::OK();
     };
 
@@ -2477,6 +2666,9 @@ void API::compaction() {
     };
     g_compaction_triggered = false;
     g_compaction_runs = 0;
+    g_compaction_trigger_events = 0;
+    g_trivial_move_runs = 0;
+    g_trivial_rewrite_runs = 0;
     auto LowerSentinel = [](const std::string& uk) {
         return InternalKey(uk, UINT64_MAX, ValueType::kTypeMin);
     };
@@ -2488,13 +2680,22 @@ void API::compaction() {
     // ---------- L0 -> L1 ----------
     if (getLSMTree()->get_level_num(0) >= LEVEL0_MAX) {
         g_compaction_triggered = true;
-        ++g_compaction_runs;
-        compaction_count++;
+        ++g_compaction_trigger_events;
+        RecordCompactionTrigger(0);
+
         pr_stat("Compaction start tree info:");
         // lsmTree_->dump_lsmtere();
         compaction = true;
+
         auto node = getLSMTree()->findLevel0Older();
-        if (!node) return;
+        if (!node) {
+            RecordSkippedCompactionTrigger(0);
+            return;
+        }
+
+        ++g_compaction_runs;
+        compaction_count++;
+        RecordRealCompaction(0);
 
         pr_debug("Dump compaction source info:");
         // node->dump();
@@ -2583,9 +2784,11 @@ void API::compaction() {
     // ---------- Lk -> Lk+1 ----------
     for (int level = 1; level < MAX_LEVEL - 1; ++level) {
         if (!compactionTrigger(level)) continue;
+
         g_compaction_triggered = true;
-        ++g_compaction_runs;
-        compaction_count++;
+        ++g_compaction_trigger_events;
+        RecordCompactionTrigger(level);
+
         pr_stat("Compaction triggered at Level %d", level);
         pr_debug("Compaction start tree info:");
         // lsmTree_->dump_lsmtere();
@@ -2594,13 +2797,17 @@ void API::compaction() {
         auto &optKey = compaction_key_list_[level];
         if (!optKey.has_value()) {
             auto firstNode = getLSMTree()->getLevelFirstNode(level);
-            if (!firstNode) continue;
+            if (!firstNode) {
+                RecordSkippedCompactionTrigger(level);
+                continue;
+            }
             optKey = LowerSentinel(firstNode->rangeMin.toString());
         }
         Key nextKey(optKey->UserKey());
         auto srcNode = getLSMTree()->getNextNode(level, nextKey);
         if (!srcNode) {
             pr_debug("No next node at level %d", level);
+            RecordSkippedCompactionTrigger(level);
             continue;
         }
         std::vector<std::shared_ptr<TreeNode>> srcNodes;
@@ -2619,11 +2826,17 @@ void API::compaction() {
             Status tm = TrivialMoveToNextLevel(level, srcNode, srcMaxKey);
             if (!tm.ok()) {
                 pr_error("Trivial move failed at level %d: %s",
-                         level, tm.ToString().c_str());
+                        level, tm.ToString().c_str());
                 return;
             }
             continue;
         }
+
+        // 走到這裡才是真的 real compaction。
+        // trivial move / trivial rewrite 不會進到這裡。
+        ++g_compaction_runs;
+        compaction_count++;
+        RecordRealCompaction(level);
 
         // DumpCompactionShape(level, srcNodes, dstNodes);
         const auto io_s = Clock::now();
