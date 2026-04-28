@@ -93,6 +93,17 @@ const std::string CoreWorkload::KEY_TRACE_FILE_DEFAULT  = "";       // 空字串
 const std::string CoreWorkload::KEY_TRACE_LOOP_PROPERTY = "keytraceloop";
 const std::string CoreWorkload::KEY_TRACE_LOOP_DEFAULT  = "false";
 
+const std::string CoreWorkload::LOAD_KEY_TRACE_FILE_PROPERTY = "loadkeytracefile";
+const std::string CoreWorkload::LOAD_KEY_TRACE_FILE_DEFAULT  = "";
+
+const std::string CoreWorkload::RUN_KEY_TRACE_FILE_PROPERTY = "runkeytracefile";
+const std::string CoreWorkload::RUN_KEY_TRACE_FILE_DEFAULT  = "";
+
+const std::string CoreWorkload::LOAD_KEY_TRACE_LOOP_PROPERTY = "loadkeytraceloop";
+const std::string CoreWorkload::LOAD_KEY_TRACE_LOOP_DEFAULT  = "false";
+
+const std::string CoreWorkload::RUN_KEY_TRACE_LOOP_PROPERTY = "runkeytraceloop";
+const std::string CoreWorkload::RUN_KEY_TRACE_LOOP_DEFAULT  = "false";
 
 namespace ycsbc {
 
@@ -137,12 +148,16 @@ class VectorTraceGenerator : public Generator<uint64_t> {
 
   uint64_t Next() override {
     uint64_t i = idx_.fetch_add(1, std::memory_order_relaxed);
-    uint64_t v;
-    if (loop_) {
-      v = (*keys_)[i % keys_->size()];
-    } else {
-      v = (i >= keys_->size()) ? keys_->back() : (*keys_)[i];
+
+    if (i >= keys_->size()) {
+      if (!loop_) {
+        throw utils::Exception(
+            "VectorTraceGenerator exhausted: keytracefile shorter than requested operations");
+      }
+      i %= keys_->size();
     }
+
+    const uint64_t v = (*keys_)[static_cast<size_t>(i)];
     last_.store(v, std::memory_order_relaxed);
     return v;
   }
@@ -160,9 +175,9 @@ class VectorTraceGenerator : public Generator<uint64_t> {
 
 } // namespace
 
-void CoreWorkload::LoadKeyTraceFile(const std::string &path) {
-  key_trace_.clear();
-  key_trace_pos_.store(0, std::memory_order_relaxed);
+void CoreWorkload::LoadKeyTraceFile(const std::string &path,
+                                    std::vector<uint64_t> &out) {
+  out.clear();
 
   // 先用 binary 模式打開
   std::ifstream in(path, std::ios::binary);
@@ -211,8 +226,8 @@ void CoreWorkload::LoadKeyTraceFile(const std::string &path) {
       throw std::runtime_error("LoadKeyTraceFile: KTRC truncated (size mismatch) path=" + path);
     }
 
-    key_trace_.resize(static_cast<size_t>(nkeys));
-    ReadFully(in, key_trace_.data(), static_cast<size_t>(nkeys) * sizeof(uint64_t), path);
+    out.resize(static_cast<size_t>(nkeys));
+    ReadFully(in, out.data(), static_cast<size_t>(nkeys) * sizeof(uint64_t), path);
     return;
   }
 
@@ -223,8 +238,8 @@ void CoreWorkload::LoadKeyTraceFile(const std::string &path) {
     if (nkeys == 0) {
       throw std::runtime_error("LoadKeyTraceFile: raw-binary has 0 keys: " + path);
     }
-    key_trace_.resize(nkeys);
-    ReadFully(in, key_trace_.data(), nkeys * sizeof(uint64_t), path);
+    out.resize(nkeys);
+    ReadFully(in, out.data(), nkeys * sizeof(uint64_t), path);
     return;
   }
 
@@ -254,10 +269,10 @@ void CoreWorkload::LoadKeyTraceFile(const std::string &path) {
     } catch (...) {
       throw std::runtime_error("LoadKeyTraceFile: invalid line: '" + line + "' in " + path);
     }
-    key_trace_.push_back(v);
+    out.push_back(v);
   }
 
-  if (key_trace_.empty()) {
+  if (out.empty()) {
     throw std::runtime_error("LoadKeyTraceFile: text trace empty: " + path);
   }
 }
@@ -354,18 +369,44 @@ void CoreWorkload::Init(const utils::Properties &p) {
     ordered_inserts_ = true;
   }
   
-  const std::string trace = p.GetProperty(KEY_TRACE_FILE_PROPERTY, KEY_TRACE_FILE_DEFAULT);
-  key_trace_loop_ = (p.GetProperty(KEY_TRACE_LOOP_PROPERTY, KEY_TRACE_LOOP_DEFAULT) == "true");
+  const std::string legacy_trace =
+    p.GetProperty(KEY_TRACE_FILE_PROPERTY, KEY_TRACE_FILE_DEFAULT);
 
-  if (!trace.empty() && trace != "none") {
-    LoadKeyTraceFile(trace);
-    use_key_trace_ = true;
-  } else {
-    use_key_trace_ = false;
+  const std::string legacy_loop =
+      p.GetProperty(KEY_TRACE_LOOP_PROPERTY, KEY_TRACE_LOOP_DEFAULT);
+
+  // 新 property 優先；如果沒寫 loadkeytracefile/runkeytracefile，才 fallback 到舊的 keytracefile
+  const std::string load_trace =
+      p.GetProperty(LOAD_KEY_TRACE_FILE_PROPERTY, legacy_trace);
+
+  const std::string run_trace =
+      p.GetProperty(RUN_KEY_TRACE_FILE_PROPERTY, legacy_trace);
+
+  load_key_trace_loop_ =
+      (p.GetProperty(LOAD_KEY_TRACE_LOOP_PROPERTY, legacy_loop) == "true");
+
+  run_key_trace_loop_ =
+      (p.GetProperty(RUN_KEY_TRACE_LOOP_PROPERTY, legacy_loop) == "true");
+
+  use_load_key_trace_ = false;
+  use_run_key_trace_ = false;
+
+  if (!load_trace.empty() && load_trace != "none") {
+    LoadKeyTraceFile(load_trace, load_key_trace_);
+    use_load_key_trace_ = true;
+  }
+
+  if (!run_trace.empty() && run_trace != "none") {
+    LoadKeyTraceFile(run_trace, run_key_trace_);
+    use_run_key_trace_ = true;
   }
 
 
-  key_generator_ = new CounterGenerator(insert_start);
+  if (use_load_key_trace_) {
+    key_generator_ = new VectorTraceGenerator(&load_key_trace_, load_key_trace_loop_);
+  } else {
+    key_generator_ = new CounterGenerator(insert_start);
+  }
   
   if (read_proportion > 0) {
     op_chooser_.AddValue(READ, read_proportion);
@@ -385,34 +426,51 @@ void CoreWorkload::Init(const utils::Properties &p) {
   
   insert_key_sequence_.Set(record_count_);
   
-  if (request_dist == "uniform") {
+  // if (request_dist == "uniform") {
+  //   key_chooser_ = new UniformGenerator(0, record_count_ - 1);
+    
+  // } else if (request_dist == "zipfian") {
+  //   if (use_key_trace_) {
+  //     key_chooser_ = new VectorTraceGenerator(&key_trace_, key_trace_loop_);
+  //   } else {
+  //     int op_count = std::stoi(p.GetProperty(OPERATION_COUNT_PROPERTY));
+  //     int new_keys = (int)(op_count * insert_proportion * 2);
+  //     key_chooser_ = new ScrambledZipfianGenerator(record_count_ + new_keys);
+  //   }
+
+  // } else if (request_dist == "latest") {
+  //   key_chooser_ = new SkewedLatestGenerator(insert_key_sequence_);
+    
+  // } else {
+  //   throw utils::Exception("Unknown request distribution: " + request_dist);
+  // }
+  
+  field_chooser_ = new UniformGenerator(0, field_count_ - 1);
+  
+  // if (scan_len_dist == "uniform") {
+  //   scan_len_chooser_ = new UniformGenerator(1, max_scan_len);
+  // } else if (scan_len_dist == "zipfian") {
+  //   scan_len_chooser_ = new ZipfianGenerator(1, max_scan_len);
+  // } else {
+  //   throw utils::Exception("Distribution not allowed for scan length: " +
+  //       scan_len_dist);
+  // }
+  if (use_run_key_trace_) {
+    key_chooser_ = new VectorTraceGenerator(&run_key_trace_, run_key_trace_loop_);
+
+  } else if (request_dist == "uniform") {
     key_chooser_ = new UniformGenerator(0, record_count_ - 1);
     
   } else if (request_dist == "zipfian") {
-    if (use_key_trace_) {
-      key_chooser_ = new VectorTraceGenerator(&key_trace_, key_trace_loop_);
-    } else {
-      int op_count = std::stoi(p.GetProperty(OPERATION_COUNT_PROPERTY));
-      int new_keys = (int)(op_count * insert_proportion * 2);
-      key_chooser_ = new ScrambledZipfianGenerator(record_count_ + new_keys);
-    }
+    int op_count = std::stoi(p.GetProperty(OPERATION_COUNT_PROPERTY));
+    int new_keys = static_cast<int>(op_count * insert_proportion * 2);
+    key_chooser_ = new ScrambledZipfianGenerator(record_count_ + new_keys);
 
   } else if (request_dist == "latest") {
     key_chooser_ = new SkewedLatestGenerator(insert_key_sequence_);
     
   } else {
     throw utils::Exception("Unknown request distribution: " + request_dist);
-  }
-  
-  field_chooser_ = new UniformGenerator(0, field_count_ - 1);
-  
-  if (scan_len_dist == "uniform") {
-    scan_len_chooser_ = new UniformGenerator(1, max_scan_len);
-  } else if (scan_len_dist == "zipfian") {
-    scan_len_chooser_ = new ZipfianGenerator(1, max_scan_len);
-  } else {
-    throw utils::Exception("Distribution not allowed for scan length: " +
-        scan_len_dist);
   }
 }
 

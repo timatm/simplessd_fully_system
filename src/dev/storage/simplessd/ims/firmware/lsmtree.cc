@@ -50,13 +50,17 @@ std::queue<std::shared_ptr<TreeNode>> LSMTree::search_key(const Key& key) {
     return result;
 }
 
-RelateChInfo LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
+RelateChInfo LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node,bool isCompaction) {
     // pr_info("Insert new SStable Name:%s Level->%d KeyRange: %s ~ %s",node->filename.c_str(),node->levelInfo,node->rangeMin.toString().c_str(),node->rangeMax.toString().c_str());
     RelateChInfo info;
     info.inter.assign(CHANNEL_NUM, std::vector<int>{});  // inter_impact[c]
     info.intra.assign(CHANNEL_NUM, 0);  // intra_impact[c]
     info.L0.assign(CHANNEL_NUM, 0);
     info.node_level = node->levelInfo;
+    int skipLevel = -1;
+    // if(isCompaction){
+    //     skipLevel = node->levelInfo-1;
+    // }
     if (!node) return info;
     // pr_info("node=%s level=%d parent_sz=%zu child_sz=%zu",
     //     node->filename.c_str(),
@@ -147,6 +151,7 @@ RelateChInfo LSMTree::get_relate_ch_info(std::shared_ptr<TreeNode> node) {
     // }
     for (int lv = 1; lv < MAX_LEVEL; ++lv) {
         if (lv == node->levelInfo) continue;
+        if (lv == skipLevel) continue;
         auto ov = tree_->search_overlap(lv, node->rangeMin, node->rangeMax);
         for (auto &x : ov) {
             if (!x || x.get() == node.get()) continue;

@@ -119,6 +119,7 @@ struct sstable_info{
     uint32_t level;
     Key min;
     Key max;
+    bool isCompaction;
     sstable_info(): filename(""), level(0), min(), max() {}
     sstable_info(std::string name,uint32_t l,Key min,Key max):
         filename(std::move(name)),

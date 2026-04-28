@@ -24,6 +24,7 @@
 
 #include "hil/nvme/controller.hh"
 #include "util/algorithm.hh"
+#include "util/layer_prof.hh"
 
 namespace SimpleSSD {
 

@@ -249,7 +249,7 @@ IMS_interface::~IMS_interface() {
 
 
 
-int IMS_interface::write_sstable(uint64_t &lbn) {
+int IMS_interface::write_sstable(uint64_t &lbn,bool isCompaction) {
     int err = OPERATION_SUCCESS;
     if (buffer_ == nullptr || buffer_valid_size_ == 0) {
         pr_error("write_sstable: buffer_ is null or buffer_valid_size_ == 0");
@@ -299,7 +299,7 @@ int IMS_interface::write_sstable(uint64_t &lbn) {
     }
 
     // 取得相關 channel 清單
-    RelateChInfo relateList = lsmTree_->get_relate_ch_info(node);
+    RelateChInfo relateList = lsmTree_->get_relate_ch_info(node,isCompaction);
     // 呼叫 my_policy()
     uint64_t selectLBN = INVALIDLBN;
     if(level > 0 && level <= MAX_LEVEL){

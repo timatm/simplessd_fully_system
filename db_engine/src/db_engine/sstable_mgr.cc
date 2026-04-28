@@ -946,6 +946,7 @@ void SstableManager::writeSSTable(uint8_t level, InternalKey minKey, InternalKey
     std::string filename = generateFilename(sequenceNumber_.fetch_add(1));
 
     sstable_info info(filename, level, rangeMinKey, rangeMaxKey);
+    info.isCompaction = false;
     pr_debug("Dispatching write for SSTable: %s",filename.c_str());
     // info.dump();
 

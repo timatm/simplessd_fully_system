@@ -19,6 +19,9 @@ scanproportion=0
 insertproportion=0
 
 requestdistribution=zipfian
-keytracefile=
-keytraceloop=false
 
+loadkeytracefile=./load.ktrc
+runkeytracefile=./zipfian.ktrc
+
+loadkeytraceloop=false
+runkeytraceloop=false

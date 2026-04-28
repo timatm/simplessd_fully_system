@@ -188,7 +188,13 @@ int gem5Driver::nvme_write_sstable(sstable_info info,char *buffer){
     // uint32_t filename_dwords[5] = {0};
     // fill_filename_to_dwords(info.filename,filename_dwords);
     // config->cdw11 = filename_dwords[0];
-    // config->cdw12 = filename_dwords[1];
+    if(info.isCompaction){
+        config->cdw12 = (uint32_t)1;
+    }
+    else{
+        config->cdw12 = (uint32_t)0;
+    }
+    
     // config->cdw13 = filename_dwords[2];
     // config->cdw14 = filename_dwords[3];
     // config->cdw15 = filename_dwords[4];

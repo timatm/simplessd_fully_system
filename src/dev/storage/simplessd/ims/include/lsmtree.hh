@@ -17,7 +17,7 @@ public:
         level_num_.resize(MAX_LEVEL, 0);
     }
     std::queue<std::shared_ptr<TreeNode>> search_key(const Key& key);
-    RelateChInfo get_relate_ch_info(std::shared_ptr<TreeNode> node);
+    RelateChInfo get_relate_ch_info(std::shared_ptr<TreeNode> node,bool isCompaction);
 
     void insert_sstable(std::shared_ptr<TreeNode> node); 
     void remove_sstable(std::shared_ptr<TreeNode> node);     

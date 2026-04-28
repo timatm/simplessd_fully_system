@@ -63,7 +63,7 @@ public:
     IMS_interface();
     ~IMS_interface();
     int rebuild_super_page();
-    int write_sstable(uint64_t &lbn);
+    int write_sstable(uint64_t &lbn,bool isCompaction);
     int read_sstable(uint64_t &lbn);
     int erase_sstable(uint64_t &lbn);
     int read_ssKeyRange(uint64_t &lpn);

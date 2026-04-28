@@ -933,6 +933,7 @@ void Namespace::write_sstable(SQEntryWrapper &req, RequestFunction &func) {
   CQEntryWrapper resp(req);  
   // uint64_t slba = ((uint64_t)req.entry.dword11 << 32) | req.entry.dword10;
   // uint16_t nlb = (req.entry.dword12 & 0xFFFF) + 1;
+  uint32_t isCompaction = req.entry.dword12;
 
   if (!attached) {
     err = true;
@@ -940,7 +941,13 @@ void Namespace::write_sstable(SQEntryWrapper &req, RequestFunction &func) {
                     STATUS_NAMESPACE_NOT_ATTACHED);
   }
   uint64_t lbn = INVALIDLBN;
-  err = ims.write_sstable(lbn);
+  if(isCompaction){
+    err = ims.write_sstable(lbn,true);
+  }
+  else{
+    err = ims.write_sstable(lbn,false);
+  }
+  
   if(lbn == INVALIDLBN){
     err = true;
     debugprint(LOG_IMS,

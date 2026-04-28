@@ -38,6 +38,17 @@ class CoreWorkload {
   static const std::string KEY_TRACE_LOOP_PROPERTY;
   static const std::string KEY_TRACE_LOOP_DEFAULT;
 
+  // 新增：load / run 分開
+  static const std::string LOAD_KEY_TRACE_FILE_PROPERTY;
+  static const std::string LOAD_KEY_TRACE_FILE_DEFAULT;
+  static const std::string RUN_KEY_TRACE_FILE_PROPERTY;
+  static const std::string RUN_KEY_TRACE_FILE_DEFAULT;
+
+  static const std::string LOAD_KEY_TRACE_LOOP_PROPERTY;
+  static const std::string LOAD_KEY_TRACE_LOOP_DEFAULT;
+  static const std::string RUN_KEY_TRACE_LOOP_PROPERTY;
+  static const std::string RUN_KEY_TRACE_LOOP_DEFAULT;
+
   /// 
   /// The name of the database table to run queries against.
   ///
@@ -177,9 +188,7 @@ class CoreWorkload {
     field_count_(0), read_all_fields_(false), write_all_fields_(false),
     field_len_generator_(NULL), key_generator_(NULL), key_chooser_(NULL),
     field_chooser_(NULL), scan_len_chooser_(NULL), insert_key_sequence_(3),
-    ordered_inserts_(true), record_count_(0),
-    use_key_trace_(false), key_trace_loop_(false),
-    key_trace_(), key_trace_pos_(0) {
+    ordered_inserts_(true), record_count_(0) {
 }
 
   
@@ -209,17 +218,21 @@ class CoreWorkload {
   bool ordered_inserts_;
   size_t record_count_;
   int zero_padding_;
-  void LoadKeyTraceFile(const std::string &path);
+  std::vector<uint64_t> load_key_trace_;
+  std::vector<uint64_t> run_key_trace_;
 
-  bool use_key_trace_;
-  bool key_trace_loop_;
-  std::vector<uint64_t> key_trace_;
-  std::atomic<uint64_t> key_trace_pos_;
+  bool use_load_key_trace_ = false;
+  bool use_run_key_trace_ = false;
+
+  bool load_key_trace_loop_ = false;
+  bool run_key_trace_loop_ = false;
+
+  void LoadKeyTraceFile(const std::string &path, std::vector<uint64_t> &out);
 
 };
 
 inline std::string CoreWorkload::NextSequenceKey() {
-  uint64_t key_num = key_generator_->Next();
+  const uint64_t key_num = key_generator_->Next();
   return BuildKeyName(key_num);
 }
 
@@ -232,21 +245,11 @@ inline std::string CoreWorkload::NextSequenceKey() {
 // }
 
 inline std::string CoreWorkload::NextTransactionKey() {
-  if (use_key_trace_ && !key_trace_.empty()) {
-    uint64_t idx = key_trace_pos_.fetch_add(1, std::memory_order_relaxed);
-    if (key_trace_loop_) {
-      idx %= key_trace_.size();
-    } else if (idx >= key_trace_.size()) {
-      idx = key_trace_.size() - 1;  // 不 loop：用最後一個 key（避免 out-of-range）
-    }
-    uint64_t key_num = key_trace_[idx];
-    return BuildKeyName(key_num);
-  }
-
   uint64_t key_num;
   do {
     key_num = key_chooser_->Next();
   } while (key_num > insert_key_sequence_.Last());
+
   return BuildKeyName(key_num);
 }
 

@@ -55,7 +55,13 @@ int MyNVMeDriver::nvme_write_sstable(sstable_info info,char *buffer){
         return COMMAND_FAILED;
     }
     uint64_t lbn = INVALIDLBN;
-    err = ims.write_sstable(lbn);
+    if(info.isCompaction){
+        err = ims.write_sstable(lbn,true);
+    }
+    else{
+        err = ims.write_sstable(lbn,false);
+    }
+    
     if(err != OPERATION_SUCCESS){
         pr_error("Write sstable is fail");
         return err;

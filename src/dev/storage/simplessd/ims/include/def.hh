@@ -80,7 +80,7 @@ static constexpr uint32_t INVALID_32 = 0xFFFFFFFFu;
 // [DB setting]
 
 constexpr int LEVEL_TIMES = 2;
-constexpr int LEVEL0_MAX = 8;
+constexpr int LEVEL0_MAX = 4;
 constexpr int LEVEL1_MAX = 10;
 constexpr int LEVEL2_MAX = LEVEL1_MAX * LEVEL_TIMES;
 constexpr int LEVEL3_MAX = LEVEL2_MAX * LEVEL_TIMES;
