@@ -22,7 +22,8 @@ readmodifywriteproportion=0.5
 requestdistribution=zipfian
 
 loadkeytracefile=./load.ktrc
-runkeytracefile=./zipfian.ktrc
+# runkeytracefile=./zipfian.ktrc
+runkeytracefile=./load.ktrc
 
 loadkeytraceloop=false
 runkeytraceloop=false
