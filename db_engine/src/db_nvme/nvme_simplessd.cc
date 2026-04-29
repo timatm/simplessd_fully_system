@@ -680,16 +680,20 @@ int gem5Driver::nvme_search(char* buffer, size_t size) {
     nmc_config_t config_obj{};
     nmc_config_t *config = &config_obj;
     init_nmc_config(config);
-
-    config->OPCODE = OPCODE_SEARCH_KEY; 
+    config->OPCODE = OPCODE_SEARCH_KEY;
 
     config->data = buffer;
     config->data_len = static_cast<uint32_t>(size);
 
+    config->PSDT = 0;  // use PRP
+    config->metadata = nullptr;
+    config->metadata_len = 0;
+    config->meta_addr = static_cast<uintptr_t>(0);
+    config->PRP1 = reinterpret_cast<uintptr_t>(config->data);
+
     config->cdw12 = static_cast<uint32_t>(size);
 
     int err = pass_io_command(config);
-
     if (err == STATUS_OPERATION_SUCCESS || err == 0) {
         pr_debug("nvme_search success, payload size=%zu", size);
         return COMMAND_SUCCESS;

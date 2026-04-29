@@ -29,6 +29,9 @@
 #include "ims/include/lbn_pool.hh"
 #include "ims/include/mapping_table.hh"
 #include "ims/include/tree.hh"
+#include <cinttypes>
+#include <limits>
+
 
 // extern Tree tree;
 // extern LBNPool lbnPoolManager; 
@@ -39,8 +42,10 @@
 #include <memory>
 #include <functional>
 #include <vector>
-
 #include <cstdio>
+#include <cinttypes>
+#include <limits>
+#include <utility>
 
 #define MYDB_LOG(fmt, ...)                                                   \
   do {                                                                       \
@@ -54,9 +59,9 @@ namespace HIL {
 namespace NVMe {
 
 struct SearchFlashStats {
-  uint64_t total_searches      = 0;
+  uint64_t total_searches = 0;
   uint64_t searches_with_flash = 0;
-  uint64_t searches_no_flash   = 0;
+  uint64_t searches_no_flash = 0;
 
   uint64_t sum_tflash = 0;
   std::vector<uint64_t> samples;
@@ -90,22 +95,30 @@ static uint64_t percentileNearestRank(const std::vector<uint64_t> &sorted,
   if (p <= 0.0) return sorted.front();
   if (p >= 1.0) return sorted.back();
 
-  const double rank = std::ceil(p * static_cast<double>(sorted.size()));  // 1..N
+  const double rank = std::ceil(p * static_cast<double>(sorted.size()));
   size_t idx = 0;
-  if (rank > 1.0) idx = static_cast<size_t>(rank - 1.0);
-  if (idx >= sorted.size()) idx = sorted.size() - 1;
+
+  if (rank > 1.0) {
+    idx = static_cast<size_t>(rank - 1.0);
+  }
+
+  if (idx >= sorted.size()) {
+    idx = sorted.size() - 1;
+  }
+
   return sorted[idx];
 }
 
 static void dumpSearchFlashStatsAndReset() {
-  MYDB_LOG(  "[MYDB-STAT] SEARCH_KEY count: total=%" PRIu64
-             " with_flash=%" PRIu64 " no_flash=%" PRIu64,
-             g_search_flash_stats.total_searches,
-             g_search_flash_stats.searches_with_flash,
-             g_search_flash_stats.searches_no_flash);
+  MYDB_LOG("SEARCH_KEY count: total=%" PRIu64
+           " with_flash=%" PRIu64
+           " no_flash=%" PRIu64,
+           g_search_flash_stats.total_searches,
+           g_search_flash_stats.searches_with_flash,
+           g_search_flash_stats.searches_no_flash);
 
   if (g_search_flash_stats.searches_with_flash == 0) {
-    MYDB_LOG("[MYDB-STAT] SEARCH_KEY flash-only ticks: (no samples)");
+    MYDB_LOG("SEARCH_KEY flash-only ticks: (no samples)");
     g_search_flash_stats.reset();
     return;
   }
@@ -115,63 +128,78 @@ static void dumpSearchFlashStatsAndReset() {
 
   const uint64_t p95 = percentileNearestRank(sorted, 0.95);
   const uint64_t p99 = percentileNearestRank(sorted, 0.99);
+
   const double avg =
       static_cast<double>(g_search_flash_stats.sum_tflash) /
       static_cast<double>(g_search_flash_stats.searches_with_flash);
 
-  MYDB_LOG(  "[MYDB-STAT] SEARCH_KEY flash-only ticks: avg=%.3f p95=%" PRIu64
-             " p99=%" PRIu64 " sum=%" PRIu64,
-             avg, p95, p99, g_search_flash_stats.sum_tflash);
+  MYDB_LOG("SEARCH_KEY flash-only ticks: avg=%.3f p95=%" PRIu64
+           " p99=%" PRIu64
+           " sum=%" PRIu64,
+           avg,
+           p95,
+           p99,
+           g_search_flash_stats.sum_tflash);
+
   g_search_flash_stats.reset();
 }
 
-// Per-command SEARCH_KEY state used to:
-//  1) measure flash-only latency T_flash = t_last_done - t_first_issue
-//  2) enforce "at most 1 outstanding read per channel" so the simulator behavior
-//     matches your rounds metric (max per-channel count).
 struct LayerTicks {
-    uint64_t hil = 0;
-    uint64_t icl = 0;
-    uint64_t ftl = 0;
-    uint64_t pal = 0;
+  uint64_t hil = 0;
+  uint64_t icl = 0;
+  uint64_t ftl = 0;
+  uint64_t pal = 0;
 
-    void add(const LayerTicks& o) {
-        hil += o.hil;
-        icl += o.icl;
-        ftl += o.ftl;
-        pal += o.pal;
-    }
+  void add(const LayerTicks &o) {
+    hil += o.hil;
+    icl += o.icl;
+    ftl += o.ftl;
+    pal += o.pal;
+  }
 
-    uint64_t sum() const {
-        return hil + icl + ftl + pal;
-    }
+  uint64_t sum() const {
+    return hil + icl + ftl + pal;
+  }
 };
+
+using ProfInterval = SimpleSSD::Prof::Interval;
 
 struct SearchKeyState {
-    IOContext *io = nullptr;
+  IOContext *io = nullptr;
 
-    uint64_t cmd_begin = 0;
-    uint64_t cmd_end = 0;
+  uint64_t cmd_begin = 0;
+  uint64_t cmd_end = 0;
 
-    uint64_t payload_dma_ticks = 0;
-    uint64_t ims_decode_ticks = 0;
+  uint64_t payload_dma_ticks = 0;
+  uint64_t ims_decode_ticks = 0;
 
-    uint64_t t_flash_first_issue = 0;
-    uint64_t t_flash_last_done   = 0;
-    bool     flash_issued        = false;
+  uint64_t t_flash_first_issue = 0;
+  uint64_t t_flash_last_done = 0;
+  bool flash_issued = false;
 
-    size_t total_reads = 0;
-    size_t completed   = 0;
-    size_t rounds      = 0;
+  size_t total_reads = 0;
+  size_t completed = 0;
+  size_t rounds = 0;
 
-    LayerTicks layer;
+  /*
+   * Work-sum.
+   * 這個會把 parallel overlap 重複加總。
+   * 只保留做 debug / resource work 觀察。
+   */
+  LayerTicks layer_work;
 
-    std::vector<std::vector<uint64_t>> per_ch_lpn;
-    std::vector<size_t> next_idx;
-    std::vector<uint8_t> outstanding;
+  /*
+   * Actual latency attribution 用這個。
+   * 每個 layer 收 interval，最後做 union / subtraction。
+   */
+  std::vector<ProfInterval> layer_intervals[SimpleSSD::Prof::L_COUNT];
+
+  std::vector<std::vector<uint64_t>> per_ch_lpn;
+  std::vector<size_t> next_idx;
+  std::vector<uint8_t> outstanding;
 };
 
-#define DUMP_EACH_SEARCH_AT_CLOSE 1
+#define DUMP_EACH_SEARCH_AT_CLOSE 0
 
 struct SearchLayerSample {
   uint64_t cmd_ticks = 0;
@@ -179,10 +207,14 @@ struct SearchLayerSample {
   uint64_t ims_decode_ticks = 0;
   uint64_t flash_wall_ticks = 0;
 
+  uint64_t pal_active_ticks = 0;
+  uint64_t pal_span_ticks = 0;
+
   uint64_t nreads = 0;
   uint64_t rounds = 0;
 
-  LayerTicks layer;
+  LayerTicks layer_work;
+  LayerTicks layer_actual;
 
   bool no_flash = false;
   bool failed = false;
@@ -199,7 +231,11 @@ struct SearchLayerStats {
   uint64_t sum_decode_ticks = 0;
   uint64_t sum_flash_wall_ticks = 0;
 
-  LayerTicks sum_layer;
+  uint64_t sum_pal_active_ticks = 0;
+  uint64_t sum_pal_span_ticks = 0;
+
+  LayerTicks sum_layer_work;
+  LayerTicks sum_layer_actual;
 
   std::vector<SearchLayerSample> samples;
 
@@ -214,12 +250,21 @@ struct SearchLayerStats {
     sum_decode_ticks = 0;
     sum_flash_wall_ticks = 0;
 
-    sum_layer = LayerTicks{};
+    sum_pal_active_ticks = 0;
+    sum_pal_span_ticks = 0;
+
+    sum_layer_work = LayerTicks{};
+    sum_layer_actual = LayerTicks{};
+
     samples.clear();
   }
 };
 
 static SearchLayerStats g_search_layer_stats;
+
+static uint64_t sat_sub_u64(uint64_t a, uint64_t b) {
+  return a > b ? a - b : 0;
+}
 
 static double pct_u64(uint64_t v, uint64_t total) {
   if (total == 0) {
@@ -227,6 +272,161 @@ static double pct_u64(uint64_t v, uint64_t total) {
   }
 
   return 100.0 * static_cast<double>(v) / static_cast<double>(total);
+}
+
+static std::vector<ProfInterval>
+normalizeIntervals(std::vector<ProfInterval> intervals) {
+  std::vector<ProfInterval> out;
+
+  if (intervals.empty()) {
+    return out;
+  }
+
+  std::sort(intervals.begin(),
+            intervals.end(),
+            [](const ProfInterval &a, const ProfInterval &b) {
+              if (a.begin != b.begin) {
+                return a.begin < b.begin;
+              }
+
+              return a.end < b.end;
+            });
+
+  for (const auto &iv : intervals) {
+    if (iv.end <= iv.begin) {
+      continue;
+    }
+
+    if (out.empty() || iv.begin > out.back().end) {
+      out.push_back(iv);
+    }
+    else if (iv.end > out.back().end) {
+      out.back().end = iv.end;
+    }
+  }
+
+  return out;
+}
+
+static uint64_t intervalTicks(const std::vector<ProfInterval> &intervals) {
+  uint64_t total = 0;
+
+  for (const auto &iv : intervals) {
+    if (iv.end > iv.begin) {
+      total += iv.end - iv.begin;
+    }
+  }
+
+  return total;
+}
+
+static std::vector<ProfInterval>
+subtractIntervals(std::vector<ProfInterval> base,
+                  std::vector<ProfInterval> cut) {
+  base = normalizeIntervals(base);
+  cut = normalizeIntervals(cut);
+
+  std::vector<ProfInterval> out;
+
+  size_t j = 0;
+
+  for (const auto &b : base) {
+    uint64_t cur = b.begin;
+
+    while (j < cut.size() && cut[j].end <= b.begin) {
+      ++j;
+    }
+
+    size_t k = j;
+
+    while (k < cut.size() && cut[k].begin < b.end) {
+      if (cut[k].begin > cur) {
+        ProfInterval keep;
+        keep.begin = cur;
+        keep.end = std::min(cut[k].begin, b.end);
+
+        if (keep.end > keep.begin) {
+          out.push_back(keep);
+        }
+      }
+
+      if (cut[k].end > cur) {
+        cur = std::min(cut[k].end, b.end);
+      }
+
+      if (cur >= b.end) {
+        break;
+      }
+
+      ++k;
+    }
+
+    if (cur < b.end) {
+      ProfInterval keep;
+      keep.begin = cur;
+      keep.end = b.end;
+      out.push_back(keep);
+    }
+  }
+
+  return out;
+}
+
+static uint64_t intervalSpanTicks(
+    const std::vector<ProfInterval> &intervals) {
+  uint64_t first = std::numeric_limits<uint64_t>::max();
+  uint64_t last = 0;
+
+  for (const auto &iv : intervals) {
+    if (iv.end <= iv.begin) {
+      continue;
+    }
+
+    if (iv.begin < first) {
+      first = iv.begin;
+    }
+
+    if (iv.end > last) {
+      last = iv.end;
+    }
+  }
+
+  if (first == std::numeric_limits<uint64_t>::max() || last <= first) {
+    return 0;
+  }
+
+  return last - first;
+}
+
+static LayerTicks buildActualLayerTicks(
+    const std::vector<ProfInterval>
+        intervals[SimpleSSD::Prof::L_COUNT]) {
+  auto hil = normalizeIntervals(intervals[SimpleSSD::Prof::L_HIL]);
+  auto icl = normalizeIntervals(intervals[SimpleSSD::Prof::L_ICL]);
+  auto ftl = normalizeIntervals(intervals[SimpleSSD::Prof::L_FTL]);
+  auto pal = normalizeIntervals(intervals[SimpleSSD::Prof::L_PAL]);
+
+  /*
+   * Exclusive actual latency attribution:
+   *
+   * PAL 優先歸給 PAL。
+   * FTL 扣掉 PAL。
+   * ICL 扣掉 FTL。
+   * HIL 扣掉 ICL。
+   *
+   * 每一層都先做 union，所以 parallel overlap 不會被重複計算。
+   */
+  auto ftl_excl = subtractIntervals(ftl, pal);
+  auto icl_excl = subtractIntervals(icl, ftl);
+  auto hil_excl = subtractIntervals(hil, icl);
+
+  LayerTicks out;
+  out.hil = intervalTicks(hil_excl);
+  out.icl = intervalTicks(icl_excl);
+  out.ftl = intervalTicks(ftl_excl);
+  out.pal = intervalTicks(pal);
+
+  return out;
 }
 
 static void recordSearchLayerSample(const SearchLayerSample &s) {
@@ -248,7 +448,12 @@ static void recordSearchLayerSample(const SearchLayerSample &s) {
   g_search_layer_stats.sum_payload_dma_ticks += s.payload_dma_ticks;
   g_search_layer_stats.sum_decode_ticks += s.ims_decode_ticks;
   g_search_layer_stats.sum_flash_wall_ticks += s.flash_wall_ticks;
-  g_search_layer_stats.sum_layer.add(s.layer);
+
+  g_search_layer_stats.sum_pal_active_ticks += s.pal_active_ticks;
+  g_search_layer_stats.sum_pal_span_ticks += s.pal_span_ticks;
+
+  g_search_layer_stats.sum_layer_work.add(s.layer_work);
+  g_search_layer_stats.sum_layer_actual.add(s.layer_actual);
 
   g_search_layer_stats.samples.push_back(s);
 }
@@ -271,67 +476,191 @@ static void dumpSearchLayerStatsAndReset() {
     return;
   }
 
-  MYDB_LOG("SEARCH_LAYER avg_cmd=%.3f avg_payload_dma=%.3f "
-           "avg_decode=%.3f avg_flash_wall=%.3f",
+  MYDB_LOG("SEARCH_LAYER avg_cmd=%.3f avg_payload_dma=%.3f"
+           " avg_decode=%.3f avg_flash_wall=%.3f"
+           " avg_PAL_active=%.3f avg_PAL_span=%.3f",
            static_cast<double>(g.sum_cmd_ticks) / g.total,
            static_cast<double>(g.sum_payload_dma_ticks) / g.total,
            static_cast<double>(g.sum_decode_ticks) / g.total,
            g.with_flash == 0
                ? 0.0
-               : static_cast<double>(g.sum_flash_wall_ticks) / g.with_flash);
+               : static_cast<double>(g.sum_flash_wall_ticks) / g.with_flash,
+           g.with_flash == 0
+               ? 0.0
+               : static_cast<double>(g.sum_pal_active_ticks) / g.with_flash,
+           g.with_flash == 0
+               ? 0.0
+               : static_cast<double>(g.sum_pal_span_ticks) / g.with_flash);
 
-  const uint64_t layer_sum = g.sum_layer.sum();
+  /*
+   * 這個才是你要拿去做 search command latency percentage 的主要結果。
+   *
+   * denominator = sum_cmd_ticks
+   * components  = DMA / decode / HIL_active / ICL_active / FTL_active / PAL_active / other
+   *
+   * HIL_active / ICL_active / FTL_active / PAL_active 都已經做過 interval union，
+   * 所以不會把 parallel read overlap 重複加總。
+   */
+  const uint64_t actual_layer_sum = g.sum_layer_actual.sum();
 
-  MYDB_LOG("SEARCH_LAYER sum_excl "
-           "HIL=%" PRIu64
-           " ICL=%" PRIu64
-           " FTL=%" PRIu64
-           " PAL=%" PRIu64
-           " ratio=%.2f/%.2f/%.2f/%.2f",
-           g.sum_layer.hil,
-           g.sum_layer.icl,
-           g.sum_layer.ftl,
-           g.sum_layer.pal,
-           pct_u64(g.sum_layer.hil, layer_sum),
-           pct_u64(g.sum_layer.icl, layer_sum),
-           pct_u64(g.sum_layer.ftl, layer_sum),
-           pct_u64(g.sum_layer.pal, layer_sum));
+  const uint64_t actual_known_sum =
+      g.sum_payload_dma_ticks +
+      g.sum_decode_ticks +
+      actual_layer_sum;
+
+  const uint64_t actual_other_sum =
+      sat_sub_u64(g.sum_cmd_ticks, actual_known_sum);
+
+  MYDB_LOG("SEARCH_LAYER actual_latency_breakdown"
+           " sum_cmd=%" PRIu64
+           " payload_dma=%" PRIu64
+           " decode=%" PRIu64
+           " HIL_active=%" PRIu64
+           " ICL_active=%" PRIu64
+           " FTL_active=%" PRIu64
+           " PAL_active=%" PRIu64
+           " other=%" PRIu64
+           " ratio_dma_decode_HIL_ICL_FTL_PAL_other=%.2f/%.2f/%.2f/%.2f/%.2f/%.2f/%.2f",
+           g.sum_cmd_ticks,
+           g.sum_payload_dma_ticks,
+           g.sum_decode_ticks,
+           g.sum_layer_actual.hil,
+           g.sum_layer_actual.icl,
+           g.sum_layer_actual.ftl,
+           g.sum_layer_actual.pal,
+           actual_other_sum,
+           pct_u64(g.sum_payload_dma_ticks, g.sum_cmd_ticks),
+           pct_u64(g.sum_decode_ticks, g.sum_cmd_ticks),
+           pct_u64(g.sum_layer_actual.hil, g.sum_cmd_ticks),
+           pct_u64(g.sum_layer_actual.icl, g.sum_cmd_ticks),
+           pct_u64(g.sum_layer_actual.ftl, g.sum_cmd_ticks),
+           pct_u64(g.sum_layer_actual.pal, g.sum_cmd_ticks),
+           pct_u64(actual_other_sum, g.sum_cmd_ticks));
+
+  /*
+   * 這個只是參考：flash phase span。
+   * flash_wall 是 first flash issue 到 last flash done 的 elapsed time。
+   */
+  const uint64_t wall_known_sum =
+      g.sum_payload_dma_ticks +
+      g.sum_decode_ticks +
+      g.sum_flash_wall_ticks;
+
+  const uint64_t wall_other_sum =
+      sat_sub_u64(g.sum_cmd_ticks, wall_known_sum);
+
+  MYDB_LOG("SEARCH_LAYER wall_breakdown"
+           " sum_cmd=%" PRIu64
+           " payload_dma=%" PRIu64
+           " decode=%" PRIu64
+           " flash_wall=%" PRIu64
+           " other=%" PRIu64
+           " ratio_dma_decode_flash_other=%.2f/%.2f/%.2f/%.2f",
+           g.sum_cmd_ticks,
+           g.sum_payload_dma_ticks,
+           g.sum_decode_ticks,
+           g.sum_flash_wall_ticks,
+           wall_other_sum,
+           pct_u64(g.sum_payload_dma_ticks, g.sum_cmd_ticks),
+           pct_u64(g.sum_decode_ticks, g.sum_cmd_ticks),
+           pct_u64(g.sum_flash_wall_ticks, g.sum_cmd_ticks),
+           pct_u64(wall_other_sum, g.sum_cmd_ticks));
+
+  /*
+   * 這個是 work-sum，會重複計算 parallel overlap。
+   * 不要拿這個當 latency percentage。
+   */
+  const uint64_t total_layer_work_sum = g.sum_layer_work.sum();
+
+  MYDB_LOG("SEARCH_LAYER work_breakdown"
+           " sum_work=%" PRIu64
+           " HIL_work=%" PRIu64
+           " ICL_work=%" PRIu64
+           " FTL_work=%" PRIu64
+           " PAL_work=%" PRIu64
+           " ratio_HIL_ICL_FTL_PAL_work=%.2f/%.2f/%.2f/%.2f",
+           total_layer_work_sum,
+           g.sum_layer_work.hil,
+           g.sum_layer_work.icl,
+           g.sum_layer_work.ftl,
+           g.sum_layer_work.pal,
+           pct_u64(g.sum_layer_work.hil, total_layer_work_sum),
+           pct_u64(g.sum_layer_work.icl, total_layer_work_sum),
+           pct_u64(g.sum_layer_work.ftl, total_layer_work_sum),
+           pct_u64(g.sum_layer_work.pal, total_layer_work_sum));
 
 #if DUMP_EACH_SEARCH_AT_CLOSE
   for (size_t i = 0; i < g.samples.size(); ++i) {
     const auto &s = g.samples[i];
-    const uint64_t sum = s.layer.sum();
 
-    MYDB_LOG("SEARCH_SAMPLE idx=%zu "
-             "cmd=%" PRIu64
+    const uint64_t sample_actual_layer_sum = s.layer_actual.sum();
+
+    const uint64_t sample_actual_known =
+        s.payload_dma_ticks +
+        s.ims_decode_ticks +
+        sample_actual_layer_sum;
+
+    const uint64_t sample_actual_other =
+        sat_sub_u64(s.cmd_ticks, sample_actual_known);
+
+    const uint64_t sample_flash_gap =
+        sat_sub_u64(s.flash_wall_ticks, sample_actual_layer_sum);
+
+    const uint64_t sample_work_sum = s.layer_work.sum();
+
+    MYDB_LOG("SEARCH_SAMPLE idx=%zu"
+             " cmd=%" PRIu64
              " payload_dma=%" PRIu64
              " decode=%" PRIu64
              " flash_wall=%" PRIu64
+             " flash_gap=%" PRIu64
              " nreads=%" PRIu64
              " rounds=%" PRIu64
-             " no_flash=%d failed=%d "
-             "HIL=%" PRIu64
-             " ICL=%" PRIu64
-             " FTL=%" PRIu64
-             " PAL=%" PRIu64
-             " ratio=%.2f/%.2f/%.2f/%.2f",
+             " no_flash=%d"
+             " failed=%d"
+             " HIL_active=%" PRIu64
+             " ICL_active=%" PRIu64
+             " FTL_active=%" PRIu64
+             " PAL_active=%" PRIu64
+             " PAL_span=%" PRIu64
+             " other=%" PRIu64
+             " HIL_work=%" PRIu64
+             " ICL_work=%" PRIu64
+             " FTL_work=%" PRIu64
+             " PAL_work=%" PRIu64
+             " ratio_actual_dma_decode_HIL_ICL_FTL_PAL_other=%.2f/%.2f/%.2f/%.2f/%.2f/%.2f/%.2f"
+             " ratio_work_HIL_ICL_FTL_PAL=%.2f/%.2f/%.2f/%.2f",
              i,
              s.cmd_ticks,
              s.payload_dma_ticks,
              s.ims_decode_ticks,
              s.flash_wall_ticks,
+             sample_flash_gap,
              s.nreads,
              s.rounds,
              static_cast<int>(s.no_flash),
              static_cast<int>(s.failed),
-             s.layer.hil,
-             s.layer.icl,
-             s.layer.ftl,
-             s.layer.pal,
-             pct_u64(s.layer.hil, sum),
-             pct_u64(s.layer.icl, sum),
-             pct_u64(s.layer.ftl, sum),
-             pct_u64(s.layer.pal, sum));
+             s.layer_actual.hil,
+             s.layer_actual.icl,
+             s.layer_actual.ftl,
+             s.layer_actual.pal,
+             s.pal_span_ticks,
+             sample_actual_other,
+             s.layer_work.hil,
+             s.layer_work.icl,
+             s.layer_work.ftl,
+             s.layer_work.pal,
+             pct_u64(s.payload_dma_ticks, s.cmd_ticks),
+             pct_u64(s.ims_decode_ticks, s.cmd_ticks),
+             pct_u64(s.layer_actual.hil, s.cmd_ticks),
+             pct_u64(s.layer_actual.icl, s.cmd_ticks),
+             pct_u64(s.layer_actual.ftl, s.cmd_ticks),
+             pct_u64(s.layer_actual.pal, s.cmd_ticks),
+             pct_u64(sample_actual_other, s.cmd_ticks),
+             pct_u64(s.layer_work.hil, sample_work_sum),
+             pct_u64(s.layer_work.icl, sample_work_sum),
+             pct_u64(s.layer_work.ftl, sample_work_sum),
+             pct_u64(s.layer_work.pal, sample_work_sum));
   }
 #endif
 
@@ -2576,6 +2905,7 @@ void Namespace::search_key(SQEntryWrapper &req, RequestFunction &func) {
                                   TYPE_COMMAND_SPECIFIC_STATUS,
                                   STATUS_COMMAND_FAILD);
         pContext->function(pContext->resp);
+
         delete pContext;
         return;
       }
@@ -2605,6 +2935,7 @@ void Namespace::search_key(SQEntryWrapper &req, RequestFunction &func) {
                                   TYPE_GENERIC_COMMAND_STATUS,
                                   STATUS_SUCCESS);
         pContext->function(pContext->resp);
+
         delete pContext;
         return;
       }
@@ -2648,12 +2979,15 @@ void Namespace::search_key(SQEntryWrapper &req, RequestFunction &func) {
         sample.cmd_ticks = tickAfterDma - pContext->beginAt;
         sample.payload_dma_ticks = payload_dma_ticks;
         sample.ims_decode_ticks = decode_ticks;
+        sample.nreads = 0;
+        sample.rounds = 0;
         recordSearchLayerSample(sample);
 
         pContext->resp.makeStatus(false, false,
                                   TYPE_GENERIC_COMMAND_STATUS,
                                   STATUS_SUCCESS);
         pContext->function(pContext->resp);
+
         delete pContext;
         return;
       }
@@ -2696,7 +3030,8 @@ void Namespace::search_key(SQEntryWrapper &req, RequestFunction &func) {
         auto holdIssueNext = weakIssueNext.lock();
 
         DMAFunction readDone =
-            [st, ch, weakIssueNext, holdIssueNext](uint64_t doneTick, void *) {
+            [st, ch, weakIssueNext, holdIssueNext](uint64_t doneTick,
+                                                   void *) {
               (void)holdIssueNext;
 
               st->outstanding[ch] = 0;
@@ -2719,30 +3054,88 @@ void Namespace::search_key(SQEntryWrapper &req, RequestFunction &func) {
                 sample.flash_wall_ticks = t_flash;
                 sample.nreads = st->total_reads;
                 sample.rounds = st->rounds;
-                sample.layer = st->layer;
+
+                /*
+                 * Work-sum：會 double count parallel overlap。
+                 */
+                sample.layer_work = st->layer_work;
+
+                /*
+                 * Actual：不重複計算 parallel overlap。
+                 */
+                sample.layer_actual =
+                    buildActualLayerTicks(st->layer_intervals);
+
+                sample.pal_active_ticks = sample.layer_actual.pal;
+                sample.pal_span_ticks =
+                    intervalSpanTicks(
+                        st->layer_intervals[SimpleSSD::Prof::L_PAL]);
+
+                const uint64_t actual_layer_sum =
+                    sample.layer_actual.sum();
+
+                const uint64_t flash_gap =
+                    sat_sub_u64(sample.flash_wall_ticks,
+                                actual_layer_sum);
+
+                const uint64_t actual_known =
+                    sample.payload_dma_ticks +
+                    sample.ims_decode_ticks +
+                    actual_layer_sum;
+
+                const uint64_t command_other =
+                    sat_sub_u64(sample.cmd_ticks, actual_known);
 
                 recordSearchLayerSample(sample);
 
-                const uint64_t layer_sum = st->layer.sum();
-
-               MYDB_LOG("SEARCH_KEY nreads=%zu rounds=%zu cmd=%" PRIu64
-                        " payload_dma=%" PRIu64
-                        " decode=%" PRIu64
-                        " flash_wall=%" PRIu64
-                        " HIL=%" PRIu64
-                        " ICL=%" PRIu64
-                        " FTL=%" PRIu64
-                        " PAL=%" PRIu64,
-                        st->total_reads,
-                        st->rounds,
-                        sample.cmd_ticks,
-                        sample.payload_dma_ticks,
-                        sample.ims_decode_ticks,
-                        sample.flash_wall_ticks,
-                        st->layer.hil,
-                        st->layer.icl,
-                        st->layer.ftl,
-                        st->layer.pal);
+                MYDB_LOG("SEARCH_KEY nreads=%zu rounds=%zu"
+                         " cmd=%" PRIu64
+                         " payload_dma=%" PRIu64
+                         " decode=%" PRIu64
+                         " flash_wall=%" PRIu64
+                         " flash_gap=%" PRIu64
+                         " HIL_active=%" PRIu64
+                         " ICL_active=%" PRIu64
+                         " FTL_active=%" PRIu64
+                         " PAL_active=%" PRIu64
+                         " PAL_span=%" PRIu64
+                         " other=%" PRIu64
+                         " HIL_work=%" PRIu64
+                         " ICL_work=%" PRIu64
+                         " FTL_work=%" PRIu64
+                         " PAL_work=%" PRIu64
+                         " ratio_actual_dma_decode_HIL_ICL_FTL_PAL_other=%.2f/%.2f/%.2f/%.2f/%.2f/%.2f/%.2f",
+                         st->total_reads,
+                         st->rounds,
+                         sample.cmd_ticks,
+                         sample.payload_dma_ticks,
+                         sample.ims_decode_ticks,
+                         sample.flash_wall_ticks,
+                         flash_gap,
+                         sample.layer_actual.hil,
+                         sample.layer_actual.icl,
+                         sample.layer_actual.ftl,
+                         sample.layer_actual.pal,
+                         sample.pal_span_ticks,
+                         command_other,
+                         sample.layer_work.hil,
+                         sample.layer_work.icl,
+                         sample.layer_work.ftl,
+                         sample.layer_work.pal,
+                         pct_u64(sample.payload_dma_ticks,
+                                 sample.cmd_ticks),
+                         pct_u64(sample.ims_decode_ticks,
+                                 sample.cmd_ticks),
+                         pct_u64(sample.layer_actual.hil,
+                                 sample.cmd_ticks),
+                         pct_u64(sample.layer_actual.icl,
+                                 sample.cmd_ticks),
+                         pct_u64(sample.layer_actual.ftl,
+                                 sample.cmd_ticks),
+                         pct_u64(sample.layer_actual.pal,
+                                 sample.cmd_ticks),
+                         pct_u64(command_other,
+                                 sample.cmd_ticks));
 
                 IOContext *io = st->io;
 
@@ -2765,10 +3158,25 @@ void Namespace::search_key(SQEntryWrapper &req, RequestFunction &func) {
             return;
           }
 
-          st->layer.hil += b.excl[SimpleSSD::Prof::L_HIL];
-          st->layer.icl += b.excl[SimpleSSD::Prof::L_ICL];
-          st->layer.ftl += b.excl[SimpleSSD::Prof::L_FTL];
-          st->layer.pal += b.excl[SimpleSSD::Prof::L_PAL];
+          /*
+           * Work-sum：保留舊的加總值，方便 debug。
+           * 不要拿這個當 latency percentage。
+           */
+          st->layer_work.hil += b.excl[SimpleSSD::Prof::L_HIL];
+          st->layer_work.icl += b.excl[SimpleSSD::Prof::L_ICL];
+          st->layer_work.ftl += b.excl[SimpleSSD::Prof::L_FTL];
+          st->layer_work.pal += b.excl[SimpleSSD::Prof::L_PAL];
+
+          /*
+           * Actual latency：收每層 interval。
+           * 最後用 union / subtraction 算不重疊時間。
+           */
+          for (int l = 0; l < SimpleSSD::Prof::L_COUNT; ++l) {
+            auto &dst = st->layer_intervals[l];
+            const auto &src = b.intervals[l];
+
+            dst.insert(dst.end(), src.begin(), src.end());
+          }
         };
 
         pParent->readIMSDirectFTL(this,

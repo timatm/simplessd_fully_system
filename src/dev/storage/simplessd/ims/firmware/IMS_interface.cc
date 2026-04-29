@@ -1190,6 +1190,23 @@ int IMS_interface::search_from_buffer(const uint8_t* data,
         return OPERATION_FAILURE;
     }
 
+    if (size >= 16) {
+        uint32_t magic =
+            static_cast<uint32_t>(data[0]) |
+            (static_cast<uint32_t>(data[1]) << 8) |
+            (static_cast<uint32_t>(data[2]) << 16) |
+            (static_cast<uint32_t>(data[3]) << 24);
+
+        pr_debug("SEARCH payload dump: size=%zu magic=0x%08x "
+                 "first16=%02x %02x %02x %02x %02x %02x %02x %02x "
+                 "%02x %02x %02x %02x %02x %02x %02x %02x",
+                 size, magic,
+                 data[0], data[1], data[2], data[3],
+                 data[4], data[5], data[6], data[7],
+                 data[8], data[9], data[10], data[11],
+                 data[12], data[13], data[14], data[15]);
+    }
+
     std::vector<uint32_t> ch_list(CHANNEL_NUM, 0);
     std::string buf(reinterpret_cast<const char*>(data), size);
 

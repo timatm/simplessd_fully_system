@@ -24,6 +24,7 @@
 #include <functional>
 #include "hil/nvme/abstract_subsystem.hh"
 
+#include "util/layer_prof.hh"
 namespace SimpleSSD {
 
 namespace HIL {

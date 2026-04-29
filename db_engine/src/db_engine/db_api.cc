@@ -2123,6 +2123,18 @@ Status API::search(std::string key ,std::string& value){
     }
     memcpy(buffer, encoded_package.data(), encoded_package.size());
 
+    const uint8_t *p = reinterpret_cast<const uint8_t *>(buffer);
+
+    uint32_t magic =
+        static_cast<uint32_t>(p[0]) |
+        (static_cast<uint32_t>(p[1]) << 8) |
+        (static_cast<uint32_t>(p[2]) << 16) |
+        (static_cast<uint32_t>(p[3]) << 24);
+
+    if (magic != 0x444b5053) {
+        pr_error("SEARCH payload bad magic: size=%zu magic=0x%08x ...",  encoded_package.size(), magic);
+    }
+
     const auto submit_begin = Clock::now();
     int err = nvme_->nvme_search(reinterpret_cast<char*>(buffer), encoded_package.size());
     submit_ns += ToNs(Clock::now() - submit_begin);
