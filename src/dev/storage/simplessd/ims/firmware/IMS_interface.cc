@@ -1030,65 +1030,6 @@ int IMS_interface::set_log_info(uint32_t *size){
     return OPERATION_SUCCESS;
 }
 
-int IMS_interface::search(std::vector<uint64_t> &pbn_list){
-    std::vector<uint32_t> ch_list(CHANNEL_NUM,0);
-    if(ch_list.size() > CHANNEL_NUM){
-        pr_error("Channel list size is error");
-        return OPERATION_FAILURE;
-    }
-    if (buffer_ == nullptr || buffer_valid_size_ == 0) {
-        pr_error("search: buffer_ is null or buffer_valid_size_ == 0");
-        return OPERATION_FAILURE;
-    }
-    size_t hostInfo_len = buffer_valid_size_;
-    std::string buf(buffer_, buffer_ + hostInfo_len);
-#if (SEARCH_PATTERN == 0)
-    SearchPackageD search_package;
-    if (!SearchPackageD::decode(buf, search_package)) {
-        pr_error("IMS search: decode SearchPackageD failed");
-        return  OPERATION_FAILURE;
-    }
-#elif (SEARCH_PATTERN == 1)
-    SearchPackageH search_package;
-    if (!SearchPackageH::decode(buf, search_package)) {
-        pr_error("IMS search: decode SearchPackageD failed");
-        return  OPERATION_FAILURE;
-    }
-#endif
-    for(auto& pattern : search_package.searchPatterns){
-        auto& sstable_ID = pattern.sstable_name;
-        uint64_t lbn = mappingTable_->getLBN(sstable_ID);
-        if(lbn == INVALIDLBN){
-            continue;
-        }
-        pbn_list.push_back(lbn);
-        auto ch = LBN2CH(lbn);
-        if (ch < 0 || ch >= CHANNEL_NUM) {
-            pr_error("IMS search: invalid channel %d for sstable %s", ch, sstable_ID.c_str());
-            continue;
-        }
-        ch_list[ch]++;
-    }
-    auto it = std::max_element(ch_list.begin(),ch_list.end());
-    
-    if (it != ch_list.end()) {
-        // pr_info("Search block num in parllel:%u",*it);
-        if(*it > 2){
-            pr_debug("This search run is exceed 2 ,is %d",*it);
-            for(auto& pattern : search_package.searchPatterns){
-                auto& sstable_ID = pattern.sstable_name;
-                uint64_t lbn = mappingTable_->getLBN(sstable_ID);
-                if(lbn == INVALIDLBN){
-                    continue;
-                }
-                pr_debug("Search SStable_ID:%s in CH[%d]",sstable_ID.c_str(),LBN2CH(lbn));
-            }
-        }
-        total_search_parallel_block_num += *it;
-    }
-    total_search_count++;
-    return OPERATION_SUCCESS;
-}
 
 int IMS_interface::simulate_compaction_io(std::vector<uint64_t> &lbn_list) {
     std::vector<uint32_t> ch_list(CHANNEL_NUM, 0);
@@ -1239,4 +1180,69 @@ int IMS_interface::trivial_move(){
     lsmtree->remove_sstable(node);
     lsmtree->insert_sstable(moved);
     return err;
+}
+
+int IMS_interface::search_from_buffer(const uint8_t* data,
+                                      size_t size,
+                                      std::vector<uint64_t>& pbn_list) {
+    if (!data || size == 0) {
+        pr_error("search_from_buffer: invalid payload");
+        return OPERATION_FAILURE;
+    }
+
+    std::vector<uint32_t> ch_list(CHANNEL_NUM, 0);
+    std::string buf(reinterpret_cast<const char*>(data), size);
+
+#if (SEARCH_PATTERN == 0)
+    SearchPackageD search_package;
+    if (!SearchPackageD::decode(buf, search_package)) {
+        pr_error("IMS search_from_buffer: decode SearchPackageD failed");
+        return OPERATION_FAILURE;
+    }
+#elif (SEARCH_PATTERN == 1)
+    SearchPackageH search_package;
+    if (!SearchPackageH::decode(buf, search_package)) {
+        pr_error("IMS search_from_buffer: decode SearchPackageH failed");
+        return OPERATION_FAILURE;
+    }
+#endif
+
+    for (auto& pattern : search_package.searchPatterns) {
+        auto& sstable_ID = pattern.sstable_name;
+        uint64_t lbn = mappingTable_->getLBN(sstable_ID);
+
+        if (lbn == INVALIDLBN) {
+            continue;
+        }
+
+        pbn_list.push_back(lbn);
+
+        int ch = LBN2CH(lbn);
+        if (ch < 0 || ch >= CHANNEL_NUM) {
+            pr_error("IMS search_from_buffer: invalid channel %d for sstable %s",
+                     ch, sstable_ID.c_str());
+            continue;
+        }
+
+        ch_list[ch]++;
+    }
+
+    auto it = std::max_element(ch_list.begin(), ch_list.end());
+    if (it != ch_list.end()) {
+        total_search_parallel_block_num += *it;
+    }
+
+    total_search_count++;
+    return OPERATION_SUCCESS;
+}
+
+int IMS_interface::search(std::vector<uint64_t> &pbn_list) {
+    std::lock_guard<std::mutex> lk(buf_mu_);
+
+    if (buffer_ == nullptr || buffer_valid_size_ == 0) {
+        pr_error("search: buffer_ is null or buffer_valid_size_ == 0");
+        return OPERATION_FAILURE;
+    }
+
+    return search_from_buffer(buffer_, buffer_valid_size_, pbn_list);
 }

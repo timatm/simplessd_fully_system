@@ -23,7 +23,7 @@
 #include "icl/generic_cache.hh"
 #include "util/algorithm.hh"
 #include "util/def.hh"
-
+#include "util/layer_prof.hh"
 namespace SimpleSSD{
 
 namespace ICL{
@@ -178,12 +178,19 @@ uint64_t ICL::getUsedPageCount(uint64_t lcaBegin, uint64_t lcaEnd) {
 }
 
 void ICL::readDirectFTL(Request &req, uint64_t &tick) {
+  const uint64_t iclBegin = tick;
+
   uint64_t beginAt    = tick;
   uint64_t finishedAt = tick;
+
   FTL::Parameter *param = pFTL->getInfo();
   uint32_t lineCountInSuperPage = param->ioUnitInPage;
 
   FTL::Request ftlReq(lineCountInSuperPage, req);
+
+  // 如果 FTL::Request 沒有自動複製 reqID，請手動加這行。
+  ftlReq.reqID = req.reqID;
+
   pFTL->read(ftlReq, finishedAt);
 
   debugprint(LOG_ICL,
@@ -192,11 +199,34 @@ void ICL::readDirectFTL(Request &req, uint64_t &tick) {
              req.range.slpn, req.range.nlp,
              beginAt, finishedAt, finishedAt - beginAt);
 
-  // tick = finishedAt;
-  // tick += applyLatency(CPU::ICL, CPU::READ);
-
   tick = finishedAt;
+
+  SimpleSSD::Prof::Add(req.reqID,
+                       SimpleSSD::Prof::L_ICL,
+                       iclBegin,
+                       tick);
 }
+
+// void ICL::readDirectFTL(Request &req, uint64_t &tick) {
+//   uint64_t beginAt    = tick;
+//   uint64_t finishedAt = tick;
+//   FTL::Parameter *param = pFTL->getInfo();
+//   uint32_t lineCountInSuperPage = param->ioUnitInPage;
+
+//   FTL::Request ftlReq(lineCountInSuperPage, req);
+//   pFTL->read(ftlReq, finishedAt);
+
+//   debugprint(LOG_ICL,
+//              "READ_DIRECT | LCA %" PRIu64 " + %" PRIu64
+//              " | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
+//              req.range.slpn, req.range.nlp,
+//              beginAt, finishedAt, finishedAt - beginAt);
+
+//   // tick = finishedAt;
+//   // tick += applyLatency(CPU::ICL, CPU::READ);
+
+//   tick = finishedAt;
+// }
 
 
 void ICL::getStatList(std::vector<Stats> &list, std::string prefix) {

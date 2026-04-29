@@ -21,6 +21,7 @@
 
 #include "ftl/page_mapping.hh"
 #include "ftl/block_mapping.hh"
+#include "util/layer_prof.hh"
 namespace SimpleSSD {
 
 namespace FTL {
@@ -70,12 +71,27 @@ FTL::~FTL() {
 }
 
 void FTL::read(Request &req, uint64_t &tick) {
+  const uint64_t ftlBegin = tick;
+
   debugprint(LOG_FTL, "READ  | LPN %" PRIu64, req.lpn);
 
   pFTL->read(req, tick);
 
   tick += applyLatency(CPU::FTL, CPU::READ);
+
+  SimpleSSD::Prof::Add(req.reqID,
+                       SimpleSSD::Prof::L_FTL,
+                       ftlBegin,
+                       tick);
 }
+
+// void FTL::read(Request &req, uint64_t &tick) {
+//   debugprint(LOG_FTL, "READ  | LPN %" PRIu64, req.lpn);
+
+//   pFTL->read(req, tick);
+
+//   tick += applyLatency(CPU::FTL, CPU::READ);
+// }
 
 void FTL::write(Request &req, uint64_t &tick) {
   debugprint(LOG_FTL, "WRITE | LPN %" PRIu64, req.lpn);

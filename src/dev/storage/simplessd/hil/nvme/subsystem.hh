@@ -21,6 +21,7 @@
 #define __HIL_NVME_SUBSYSTEM__
 
 #include "hil/hil.hh"
+#include <functional>
 #include "hil/nvme/abstract_subsystem.hh"
 
 namespace SimpleSSD {
@@ -76,7 +77,15 @@ class Subsystem : public AbstractSubsystem {
 
   void read(Namespace *, uint64_t, uint64_t, DMAFunction &, void *);
   void readIMS(Namespace *, uint64_t, uint64_t, DMAFunction &, void *);
-  void readIMSDirectFTL(Namespace *ns, uint64_t slpn, uint64_t nlpn,DMAFunction &func, void *context);
+  using LayerProfileDone =
+      std::function<void(const SimpleSSD::Prof::Breakdown &)>;
+
+  void readIMSDirectFTL(Namespace *ns,
+                        uint64_t slpn,
+                        uint64_t nlpn,
+                        DMAFunction &func,
+                        void *context,
+                        LayerProfileDone layerDone = nullptr);
   void readIMSDirectFTLBatch(Namespace *ns,
                            const std::vector<uint64_t> &lpnList,
                            DMAFunction &func, void *context);

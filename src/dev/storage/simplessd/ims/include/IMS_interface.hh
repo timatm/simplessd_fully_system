@@ -88,6 +88,9 @@ public:
     int open_DB(uint32_t *datalen);
     int search(std::vector<uint64_t> &pbn_list);
 
+    int search_from_buffer(const uint8_t* data,
+                                      size_t size,
+                                      std::vector<uint64_t>& pbn_list);
     int init_IMS();
     int close_IMS();
     int reset_IMS();

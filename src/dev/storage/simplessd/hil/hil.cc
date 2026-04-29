@@ -208,13 +208,11 @@ void HIL::readDirectFTL(Request &req) {
     auto pReq = (Request *)context;
     uint64_t tick = beginAt;
 
-    pReq->reqID = ++reqCount;
-
-    // debugprint(LOG_HIL,
-    //            "READ_DIRECT | REQ %7u | LCA %" PRIu64 " + %" PRIu64
-    //            " | BYTE %" PRIu64 " + %" PRIu64,
-    //            pReq->reqID, pReq->range.slpn, pReq->range.nlp,
-    //            pReq->offset, pReq->length);
+    if (pReq->reqID == 0) {
+      pReq->reqID = ++reqCount;
+    } else {
+      ++reqCount;  // 保留 profile id，但 request count 仍然前進
+    }
 
     ICL::Request reqInternal(*pReq);
     pICL->readDirectFTL(reqInternal, tick);
@@ -233,6 +231,37 @@ void HIL::readDirectFTL(Request &req) {
 
   execute(CPU::HIL, CPU::READ, doRead, new Request(req));
 }
+
+// void HIL::readDirectFTL(Request &req) {
+//   DMAFunction doRead = [this](uint64_t beginAt, void *context) {
+//     auto pReq = (Request *)context;
+//     uint64_t tick = beginAt;
+
+//     pReq->reqID = ++reqCount;
+
+//     // debugprint(LOG_HIL,
+//     //            "READ_DIRECT | REQ %7u | LCA %" PRIu64 " + %" PRIu64
+//     //            " | BYTE %" PRIu64 " + %" PRIu64,
+//     //            pReq->reqID, pReq->range.slpn, pReq->range.nlp,
+//     //            pReq->offset, pReq->length);
+
+//     ICL::Request reqInternal(*pReq);
+//     pICL->readDirectFTL(reqInternal, tick);
+
+//     stat.request[0]++;
+//     stat.iosize[0] += pReq->length;
+//     updateBusyTime(0, beginAt, tick);
+//     updateBusyTime(2, beginAt, tick);
+
+//     pReq->finishedAt = tick;
+//     completionQueue.push(*pReq);
+//     updateCompletion();
+
+//     delete pReq;
+//   };
+
+//   execute(CPU::HIL, CPU::READ, doRead, new Request(req));
+// }
 
 void HIL::readDirectFTLBatch(const std::vector<uint64_t> &lpnList, Request &req) {
   struct BatchContext {

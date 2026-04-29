@@ -23,6 +23,7 @@
 #include "ims/include/log.hh"
 #include "hil/nvme/subsystem.hh"
 #include "util/algorithm.hh"
+#include "util/layer_prof.hh"
 
 
 #include "ims/include/lbn_pool.hh"
@@ -128,21 +129,215 @@ static void dumpSearchFlashStatsAndReset() {
 //  1) measure flash-only latency T_flash = t_last_done - t_first_issue
 //  2) enforce "at most 1 outstanding read per channel" so the simulator behavior
 //     matches your rounds metric (max per-channel count).
-struct SearchKeyState {
-  IOContext *io = nullptr;
+struct LayerTicks {
+    uint64_t hil = 0;
+    uint64_t icl = 0;
+    uint64_t ftl = 0;
+    uint64_t pal = 0;
 
-  uint64_t t_flash_first_issue = 0;
-  uint64_t t_flash_last_done   = 0;
-  bool     flash_issued        = false;
+    void add(const LayerTicks& o) {
+        hil += o.hil;
+        icl += o.icl;
+        ftl += o.ftl;
+        pal += o.pal;
+    }
 
-  size_t total_reads = 0;
-  size_t completed   = 0;
-  size_t rounds      = 0;
-
-  std::vector<std::vector<uint64_t>> per_ch_lpn;  // per channel LPN list
-  std::vector<size_t> next_idx;                   // next index per channel
-  std::vector<uint8_t> outstanding;               // 0/1 per channel
+    uint64_t sum() const {
+        return hil + icl + ftl + pal;
+    }
 };
+
+struct SearchKeyState {
+    IOContext *io = nullptr;
+
+    uint64_t cmd_begin = 0;
+    uint64_t cmd_end = 0;
+
+    uint64_t payload_dma_ticks = 0;
+    uint64_t ims_decode_ticks = 0;
+
+    uint64_t t_flash_first_issue = 0;
+    uint64_t t_flash_last_done   = 0;
+    bool     flash_issued        = false;
+
+    size_t total_reads = 0;
+    size_t completed   = 0;
+    size_t rounds      = 0;
+
+    LayerTicks layer;
+
+    std::vector<std::vector<uint64_t>> per_ch_lpn;
+    std::vector<size_t> next_idx;
+    std::vector<uint8_t> outstanding;
+};
+
+#define DUMP_EACH_SEARCH_AT_CLOSE 1
+
+struct SearchLayerSample {
+  uint64_t cmd_ticks = 0;
+  uint64_t payload_dma_ticks = 0;
+  uint64_t ims_decode_ticks = 0;
+  uint64_t flash_wall_ticks = 0;
+
+  uint64_t nreads = 0;
+  uint64_t rounds = 0;
+
+  LayerTicks layer;
+
+  bool no_flash = false;
+  bool failed = false;
+};
+
+struct SearchLayerStats {
+  uint64_t total = 0;
+  uint64_t no_flash = 0;
+  uint64_t failed = 0;
+  uint64_t with_flash = 0;
+
+  uint64_t sum_cmd_ticks = 0;
+  uint64_t sum_payload_dma_ticks = 0;
+  uint64_t sum_decode_ticks = 0;
+  uint64_t sum_flash_wall_ticks = 0;
+
+  LayerTicks sum_layer;
+
+  std::vector<SearchLayerSample> samples;
+
+  void reset() {
+    total = 0;
+    no_flash = 0;
+    failed = 0;
+    with_flash = 0;
+
+    sum_cmd_ticks = 0;
+    sum_payload_dma_ticks = 0;
+    sum_decode_ticks = 0;
+    sum_flash_wall_ticks = 0;
+
+    sum_layer = LayerTicks{};
+    samples.clear();
+  }
+};
+
+static SearchLayerStats g_search_layer_stats;
+
+static double pct_u64(uint64_t v, uint64_t total) {
+  if (total == 0) {
+    return 0.0;
+  }
+
+  return 100.0 * static_cast<double>(v) / static_cast<double>(total);
+}
+
+static void recordSearchLayerSample(const SearchLayerSample &s) {
+  g_search_layer_stats.total++;
+
+  if (s.no_flash) {
+    g_search_layer_stats.no_flash++;
+  }
+
+  if (s.failed) {
+    g_search_layer_stats.failed++;
+  }
+
+  if (!s.no_flash && !s.failed) {
+    g_search_layer_stats.with_flash++;
+  }
+
+  g_search_layer_stats.sum_cmd_ticks += s.cmd_ticks;
+  g_search_layer_stats.sum_payload_dma_ticks += s.payload_dma_ticks;
+  g_search_layer_stats.sum_decode_ticks += s.ims_decode_ticks;
+  g_search_layer_stats.sum_flash_wall_ticks += s.flash_wall_ticks;
+  g_search_layer_stats.sum_layer.add(s.layer);
+
+  g_search_layer_stats.samples.push_back(s);
+}
+
+static void dumpSearchLayerStatsAndReset() {
+  const auto &g = g_search_layer_stats;
+
+  MYDB_LOG("SEARCH_LAYER total=%" PRIu64
+           " with_flash=%" PRIu64
+           " no_flash=%" PRIu64
+           " failed=%" PRIu64,
+           g.total,
+           g.with_flash,
+           g.no_flash,
+           g.failed);
+
+  if (g.total == 0) {
+    MYDB_LOG("SEARCH_LAYER no search samples");
+    g_search_layer_stats.reset();
+    return;
+  }
+
+  MYDB_LOG("SEARCH_LAYER avg_cmd=%.3f avg_payload_dma=%.3f "
+           "avg_decode=%.3f avg_flash_wall=%.3f",
+           static_cast<double>(g.sum_cmd_ticks) / g.total,
+           static_cast<double>(g.sum_payload_dma_ticks) / g.total,
+           static_cast<double>(g.sum_decode_ticks) / g.total,
+           g.with_flash == 0
+               ? 0.0
+               : static_cast<double>(g.sum_flash_wall_ticks) / g.with_flash);
+
+  const uint64_t layer_sum = g.sum_layer.sum();
+
+  MYDB_LOG("SEARCH_LAYER sum_excl "
+           "HIL=%" PRIu64
+           " ICL=%" PRIu64
+           " FTL=%" PRIu64
+           " PAL=%" PRIu64
+           " ratio=%.2f/%.2f/%.2f/%.2f",
+           g.sum_layer.hil,
+           g.sum_layer.icl,
+           g.sum_layer.ftl,
+           g.sum_layer.pal,
+           pct_u64(g.sum_layer.hil, layer_sum),
+           pct_u64(g.sum_layer.icl, layer_sum),
+           pct_u64(g.sum_layer.ftl, layer_sum),
+           pct_u64(g.sum_layer.pal, layer_sum));
+
+#if DUMP_EACH_SEARCH_AT_CLOSE
+  for (size_t i = 0; i < g.samples.size(); ++i) {
+    const auto &s = g.samples[i];
+    const uint64_t sum = s.layer.sum();
+
+    MYDB_LOG("SEARCH_SAMPLE idx=%zu "
+             "cmd=%" PRIu64
+             " payload_dma=%" PRIu64
+             " decode=%" PRIu64
+             " flash_wall=%" PRIu64
+             " nreads=%" PRIu64
+             " rounds=%" PRIu64
+             " no_flash=%d failed=%d "
+             "HIL=%" PRIu64
+             " ICL=%" PRIu64
+             " FTL=%" PRIu64
+             " PAL=%" PRIu64
+             " ratio=%.2f/%.2f/%.2f/%.2f",
+             i,
+             s.cmd_ticks,
+             s.payload_dma_ticks,
+             s.ims_decode_ticks,
+             s.flash_wall_ticks,
+             s.nreads,
+             s.rounds,
+             static_cast<int>(s.no_flash),
+             static_cast<int>(s.failed),
+             s.layer.hil,
+             s.layer.icl,
+             s.layer.ftl,
+             s.layer.pal,
+             pct_u64(s.layer.hil, sum),
+             pct_u64(s.layer.icl, sum),
+             pct_u64(s.layer.ftl, sum),
+             pct_u64(s.layer.pal, sum));
+  }
+#endif
+
+  g_search_layer_stats.reset();
+}
+
 
 Namespace::Namespace(Subsystem *p, ConfigData &c)
     : pParent(p),
@@ -171,6 +366,7 @@ Namespace::~Namespace() {
     pDisk = nullptr;
   }
 }
+
 void Namespace::submitCommand(SQEntryWrapper &req, RequestFunction &func) {
   CQEntryWrapper resp(req);
   bool response = false;
@@ -2253,8 +2449,8 @@ void Namespace::close_DB(SQEntryWrapper &req, RequestFunction &func) {
           debugprint(
               LOG_HIL_NVME,
               "Close DB is done");
-          // Dump SEARCH_KEY flash-only stats (avg/p95/p99/sum) at the end of the run
           dumpSearchFlashStatsAndReset();
+          dumpSearchLayerStatsAndReset();
           pContext->function(pContext->resp);
           delete pContext->dma;
           delete pContext;
@@ -2294,372 +2490,335 @@ void Namespace::close_DB(SQEntryWrapper &req, RequestFunction &func) {
 }
 
 
-// void Namespace::search_key(SQEntryWrapper &req, RequestFunction &func) {
-//   bool err = false;
-//   uint32_t numberOfSize = req.entry.dword12;
-//   CQEntryWrapper resp(req);
-
-//   if (!attached) {
-//     err = true;
-//     resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
-//                     STATUS_NAMESPACE_NOT_ATTACHED);
-//   }
-//   // if (nlb == 0) {
-//   //   err = true;
-//   //   warn("nvme_namespace: host tried to write 0 blocks");
-//   // }
-  
-//   if (!err) {
-//     DMAFunction doRead = [this](uint64_t tick, void *context) {
-//       DMAFunction dmaDone = [this](uint64_t tick, void *context) {
-//         IOContext *pContext = (IOContext *)context;
-
-//         pContext->beginAt++;
-
-//         if (pContext->beginAt == 2) {
-//           debugprint(
-//             LOG_IMS,
-//             "NVM     | search_key | CQ %u | SQ %u:%u | CID %u | NSID %-5d | "
-//             "LBN %ld | LPN %ld + %ld | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
-//             pContext->resp.cqID,
-//             pContext->resp.entry.dword2.sqID,
-//             pContext->resp.sqUID,
-//             pContext->resp.entry.dword3.commandID,
-//             nsid,
-//             pContext->lbn,
-//             pContext->lpn,
-//             pContext->nlpn,
-//             pContext->tick,
-//             tick,
-//             tick - pContext->tick);
-
-//           pContext->function(pContext->resp);
-//           pParent->writeIMS(this, pContext->lpn, pContext->nlpn, dmaDone, context);
-//           if (pContext->buffer) {
-//             // pDisk->writeBlock(pContext->lbn,pContext->buffer);
-
-//             free(pContext->buffer);
-//           }
-
-//           delete pContext->dma;
-//           delete pContext;
-//         }
-//       };
-
-//       IOContext *pContext = (IOContext *)context;
-
-//       pContext->tick = tick;
-//       pContext->beginAt = 0;
-
-//       if (pDisk) {
-//         pContext->buffer = (uint8_t *)calloc(pContext->nlb, 1);
-
-//         pContext->dma->read(0, (uint64_t)pContext->nlb, pContext->buffer,
-//                             dmaDone, context);
-//       }
-//       else {
-//         pContext->dma->read(0, (uint64_t)pContext->nlb, nullptr, dmaDone,
-//                             context);
-//       }
-//       // pParent->writeIMS(this, pContext->lpn, pContext->nlpn, dmaDone, context);
-//     };
-
-//     IOContext *pContext = new IOContext(func, resp);
-
-//     pContext->beginAt = getTick();
-//     pContext->nlb     = numberOfSize;
-//     // Using nlb to transfer the variable of my data size
-//     CPUContext *pCPU =
-//         new CPUContext(doRead, pContext, CPU::NVME__NAMESPACE, CPU::READ);
-
-//     if (req.useSGL) {
-//       pContext->dma =
-//           new SGL(cfgdata, cpuHandler, pCPU, req.entry.data1, req.entry.data2);
-//     }
-//     else {
-//       pContext->dma =
-//           new PRPList(cfgdata, cpuHandler, pCPU, req.entry.data1,
-//                       req.entry.data2, (uint64_t)numberOfSize);
-//     }
-//   }
-//   else {
-//     func(resp);
-//   }
-// }
-
-
-// void Namespace::search_key(SQEntryWrapper &req, RequestFunction &func) {
-//   bool err = false;
-
-//   CQEntryWrapper resp(req);
-
-//   // host 傳進來的 data size（你前面就有用 dword12 表示）
-//   uint32_t numberOfSize = req.entry.dword12;
-
-//   // 1. 基本檢查：Namespace 是否有 attach
-//   if (!attached) {
-//     err = true;
-//     resp.makeStatus(true, false, TYPE_COMMAND_SPECIFIC_STATUS,
-//                     STATUS_NAMESPACE_NOT_ATTACHED);
-//   }
-
-//   // 2. 如果前面就錯了，直接回 CQ
-//   if (err) {
-//     debugprint(LOG_IMS,
-//                "NVM     | SEARCH_KEY | Command failed (namespace not attached)");
-//     func(resp);
-//     return;
-//   }
-//   if (!err) {
-//     DMAFunction doRead = [this](uint64_t tick, void *context) {
-//       DMAFunction dmaDone = [this](uint64_t tick, void *context) {
-//         DMAFunction searchDone = [this](uint64_t tick, void *context) {
-//           IOContext *pContext = (IOContext *)context;
-
-//           pContext->resp.makeStatus(false, false,
-//                                     TYPE_GENERIC_COMMAND_STATUS,
-//                                     STATUS_SUCCESS);
-//           pContext->function(pContext->resp);
-
-//           if (pContext->buffer) {
-//             free(pContext->buffer);
-//             pContext->buffer = nullptr;
-//           }
-
-//           debugprint(LOG_IMS,
-//             "NVM     | Search_key  | CQ %u | SQ %u:%u | CID %u | NSID %-5d | %" PRIu64
-//             " - %" PRIu64 " (%" PRIu64 ")",
-//             pContext->resp.cqID, pContext->resp.entry.dword2.sqID,
-//             pContext->resp.sqUID, pContext->resp.entry.dword3.commandID,
-//             nsid, pContext->tick, tick, tick - pContext->tick);
-
-//           if (pContext->dma) {
-//             delete pContext->dma;
-//             pContext->dma = nullptr;
-//           }
-
-//           delete pContext;
-//         };
-
-//         IOContext *pContext = (IOContext *)context;
-//         std::vector<uint64_t> lbn_list;
-
-//         int ret = ims.search(lbn_list);
-//         bool searchErr = (ret == OPERATION_FAILURE);
-        
-//         if (searchErr) {
-//           debugprint(LOG_IMS,
-//                       "NVM     | SEARCH_KEY | ims.search() failed");
-//           pContext->resp.makeStatus(true, false,
-//                                     TYPE_COMMAND_SPECIFIC_STATUS,
-//                                     STATUS_COMMAND_FAILD);
-//           pContext->function(pContext->resp);
-//           // 清理 buffer / DMA / context
-//           if (pContext->buffer) {
-//             free(pContext->buffer);
-//             pContext->buffer = nullptr;
-//           }
-
-//           if (pContext->dma) {
-//             delete pContext->dma;
-//             pContext->dma = nullptr;
-//           }
-
-//           delete pContext;
-//         }
-//         else if(lbn_list.empty()){
-//           debugprint(LOG_IMS,
-//                       "NVM     | SEARCH_KEY | ims.search() lbn_list is empty");
-//           pContext->resp.makeStatus(false, false,
-//                                       TYPE_GENERIC_COMMAND_STATUS,
-//                                       STATUS_SUCCESS);
-//           pContext->function(pContext->resp);
-//           // 清理 buffer / DMA / context
-//           if (pContext->buffer) {
-//             free(pContext->buffer);
-//             pContext->buffer = nullptr;
-//           }
-
-//           if (pContext->dma) {
-//             delete pContext->dma;
-//             pContext->dma = nullptr;
-//           }
-
-//           delete pContext;
-//         } 
-//         else {
-//           std::vector<uint64_t> lpn_list;
-//           lpn_list.reserve(lbn_list.size());
-//           for (auto lbn : lbn_list) {
-//             lpn_list.push_back(LBN2LPN(lbn));
-//           }
-//           debugprint(LOG_IMS, "NVM     | SEARCH_KEY | ims.search() success (batch)");
-//           pParent->readIMSDirectFTLBatch(this, lpn_list, searchDone, pContext);
-//         }
-//       };
-
-//       IOContext *pContext = (IOContext *)context;
-
-//       pContext->tick = tick;
-//       pContext->beginAt = 0;
-
-//       if (pContext->nlb == 0) {
-//         dmaDone(tick, context);
-//         return;
-//       }
-
-//       pContext->buffer = (uint8_t *)calloc(pContext->nlb, sizeof(uint8_t));
-
-//       pContext->dma->read(0, (uint64_t)pContext->nlb, pContext->buffer,
-//                           dmaDone, context);
-//     };
-
-//     IOContext *pContext = new IOContext(func, resp);
-
-//     pContext->beginAt = getTick();
-//     pContext->nlb = numberOfSize;
-
-//     CPUContext *pCPU =
-//         new CPUContext(doRead, pContext, CPU::NVME__NAMESPACE, CPU::READ);
-
-//     if (req.useSGL) {
-//       pContext->dma =
-//           new SGL(cfgdata, cpuHandler, pCPU, req.entry.data1, req.entry.data2);
-//     } else {
-//       pContext->dma =
-//           new PRPList(cfgdata, cpuHandler, pCPU, req.entry.data1,
-//                       req.entry.data2, (uint64_t)numberOfSize);
-//     }
-//   }
-// }
-
 void Namespace::search_key(SQEntryWrapper &req, RequestFunction &func) {
   CQEntryWrapper resp(req);
+
   if (!attached) {
     resp.makeStatus(true, false,
                     TYPE_COMMAND_SPECIFIC_STATUS,
                     STATUS_NAMESPACE_NOT_ATTACHED);
-    debugprint(LOG_IMS,
-               "NVM     | SEARCH_KEY | Command failed (namespace not attached)");
     func(resp);
     return;
   }
 
-  DMAFunction doSearch = [this](uint64_t tick, void *context) {
+  const uint32_t payloadSize = req.entry.dword12;
+
+  if (payloadSize == 0) {
+    resp.makeStatus(true, false,
+                    TYPE_COMMAND_SPECIFIC_STATUS,
+                    STATUS_COMMAND_FAILD);
+    func(resp);
+    return;
+  }
+
+  debugprint(LOG_IMS,
+             "NVM     | SEARCH_KEY | payloadSize=%u data1=%" PRIx64
+             " data2=%" PRIx64,
+             payloadSize,
+             req.entry.data1,
+             req.entry.data2);
+
+  DMAFunction doReadPayload = [this](uint64_t tick, void *context) {
     IOContext *pContext = static_cast<IOContext *>(context);
+
     pContext->tick = tick;
 
-    std::vector<uint64_t> lbn_list;
-    int ret = ims.search(lbn_list);
+    if (pContext->beginAt == 0) {
+      pContext->beginAt = tick;
+    }
 
-    if (ret == OPERATION_FAILURE) {
-      debugprint(LOG_IMS,
-                 "NVM     | SEARCH_KEY | ims.search() failed");
+    pContext->buffer =
+        static_cast<uint8_t *>(calloc(pContext->nlb, sizeof(uint8_t)));
 
+    if (pContext->buffer == nullptr) {
       pContext->resp.makeStatus(true, false,
                                 TYPE_COMMAND_SPECIFIC_STATUS,
                                 STATUS_COMMAND_FAILD);
       pContext->function(pContext->resp);
+
+      delete pContext->dma;
       delete pContext;
       return;
     }
 
-    if (lbn_list.empty()) {
-      g_search_flash_stats.recordNoFlash();
+    DMAFunction payloadDone = [this](uint64_t tickAfterDma, void *context) {
+      IOContext *pContext = static_cast<IOContext *>(context);
 
-      debugprint(LOG_IMS,
-                 "NVM     | SEARCH_KEY | lbn_list is empty (no flash IO)");
+      const uint64_t payload_dma_ticks = tickAfterDma - pContext->tick;
 
-      pContext->resp.makeStatus(false, false,
-                                TYPE_GENERIC_COMMAND_STATUS,
-                                STATUS_SUCCESS);
-      pContext->function(pContext->resp);
-      delete pContext;
-      return;
-    }
+      std::vector<uint64_t> lbn_list;
 
-    auto st = std::make_shared<SearchKeyState>();
-    st->io = pContext;
-    st->total_reads = lbn_list.size();
+      const uint64_t decode_begin = tickAfterDma;
 
-    st->per_ch_lpn.assign(CHANNEL_NUM, {});
-    for (auto lbn : lbn_list) {
-      const int ch = LBN2CH(lbn);
-      st->per_ch_lpn[ch].push_back(LBN2LPN(lbn));
-    }
+      int ret = ims.search_from_buffer(pContext->buffer,
+                                        pContext->nlb,
+                                        lbn_list);
 
-    st->rounds = 0;
-    for (int ch = 0; ch < CHANNEL_NUM; ++ch) {
-      st->rounds = std::max(st->rounds, st->per_ch_lpn[ch].size());
-    }
+      const uint64_t decode_end = getTick();
+      const uint64_t decode_ticks =
+          decode_end >= decode_begin ? decode_end - decode_begin : 0;
 
-    st->next_idx.assign(CHANNEL_NUM, 0);
-    st->outstanding.assign(CHANNEL_NUM, 0);
-    using IssueFn = std::function<void(int, uint64_t)>;
-    auto issueNext = std::make_shared<IssueFn>();
-    std::weak_ptr<IssueFn> weakIssueNext(issueNext);
+      free(pContext->buffer);
+      pContext->buffer = nullptr;
 
-    *issueNext = [this, st, weakIssueNext](int ch, uint64_t nowTick) {
-      if (ch < 0 || ch >= CHANNEL_NUM) return;
+      delete pContext->dma;
+      pContext->dma = nullptr;
 
-      if (st->outstanding[ch]) return;
+      if (ret == OPERATION_FAILURE) {
+        SearchLayerSample sample;
+        sample.failed = true;
+        sample.cmd_ticks = tickAfterDma - pContext->beginAt;
+        sample.payload_dma_ticks = payload_dma_ticks;
+        sample.ims_decode_ticks = decode_ticks;
+        recordSearchLayerSample(sample);
 
-      const size_t idx = st->next_idx[ch];
-      if (idx >= st->per_ch_lpn[ch].size()) return;
-      st->outstanding[ch] = 1;
-      st->next_idx[ch] = idx + 1;
-
-      if (!st->flash_issued) {
-        st->flash_issued = true;
-        st->t_flash_first_issue = nowTick;
-        st->t_flash_last_done = nowTick;
+        pContext->resp.makeStatus(true, false,
+                                  TYPE_COMMAND_SPECIFIC_STATUS,
+                                  STATUS_COMMAND_FAILD);
+        pContext->function(pContext->resp);
+        delete pContext;
+        return;
       }
 
-      const uint64_t slpn = st->per_ch_lpn[ch][idx];
-      const uint64_t nlpn = 1;
+      if (lbn_list.empty()) {
+        g_search_flash_stats.recordNoFlash();
 
-      auto holdIssueNext = weakIssueNext.lock();
+        SearchLayerSample sample;
+        sample.no_flash = true;
+        sample.cmd_ticks = tickAfterDma - pContext->beginAt;
+        sample.payload_dma_ticks = payload_dma_ticks;
+        sample.ims_decode_ticks = decode_ticks;
+        sample.nreads = 0;
+        sample.rounds = 0;
+        recordSearchLayerSample(sample);
 
-      DMAFunction readDone =
-          [st, ch, weakIssueNext, holdIssueNext](uint64_t doneTick, void *) {
-            (void)holdIssueNext; 
-            st->outstanding[ch] = 0;
-            st->completed++;
-            st->t_flash_last_done = std::max(st->t_flash_last_done, doneTick);
+        debugprint(LOG_IMS,
+                   "NVM     | SEARCH_KEY | no flash IO | "
+                   "cmd=%" PRIu64
+                   " payload_dma=%" PRIu64
+                   " decode=%" PRIu64,
+                   sample.cmd_ticks,
+                   sample.payload_dma_ticks,
+                   sample.ims_decode_ticks);
 
-            if (st->completed == st->total_reads) {
-              const uint64_t t_flash =
-                  st->t_flash_last_done - st->t_flash_first_issue;
-
-              g_search_flash_stats.recordWithFlash(t_flash);
-
-              IOContext *io = st->io;
-              io->resp.makeStatus(false, false,
+        pContext->resp.makeStatus(false, false,
                                   TYPE_GENERIC_COMMAND_STATUS,
                                   STATUS_SUCCESS);
-              io->function(io->resp);
+        pContext->function(pContext->resp);
+        delete pContext;
+        return;
+      }
 
-              debugprint(LOG_IMS,
-                         "NVM     | Search_key  | nreads=%zu rounds=%zu | "
-                         "flash_only=%" PRIu64,
-                         st->total_reads, st->rounds, t_flash);
+      auto st = std::make_shared<SearchKeyState>();
 
-              delete io;
-              return;
-            }
-            if (auto fn = weakIssueNext.lock()) {
-              (*fn)(ch, doneTick);
-            }
-          };
-      pParent->readIMSDirectFTL(this, slpn, nlpn, readDone, nullptr);
+      st->io = pContext;
+      st->cmd_begin = pContext->beginAt;
+      st->payload_dma_ticks = payload_dma_ticks;
+      st->ims_decode_ticks = decode_ticks;
+
+      st->per_ch_lpn.assign(CHANNEL_NUM, {});
+
+      for (auto lbn : lbn_list) {
+        const int ch = LBN2CH(lbn);
+
+        if (ch < 0 || ch >= CHANNEL_NUM) {
+          debugprint(LOG_IMS,
+                     "NVM     | SEARCH_KEY | invalid ch=%d for lbn=%" PRIu64,
+                     ch,
+                     lbn);
+          continue;
+        }
+
+        st->per_ch_lpn[ch].push_back(LBN2LPN(lbn));
+      }
+
+      st->total_reads = 0;
+      st->rounds = 0;
+
+      for (int ch = 0; ch < CHANNEL_NUM; ++ch) {
+        st->total_reads += st->per_ch_lpn[ch].size();
+        st->rounds = std::max(st->rounds, st->per_ch_lpn[ch].size());
+      }
+
+      if (st->total_reads == 0) {
+        g_search_flash_stats.recordNoFlash();
+
+        SearchLayerSample sample;
+        sample.no_flash = true;
+        sample.cmd_ticks = tickAfterDma - pContext->beginAt;
+        sample.payload_dma_ticks = payload_dma_ticks;
+        sample.ims_decode_ticks = decode_ticks;
+        recordSearchLayerSample(sample);
+
+        pContext->resp.makeStatus(false, false,
+                                  TYPE_GENERIC_COMMAND_STATUS,
+                                  STATUS_SUCCESS);
+        pContext->function(pContext->resp);
+        delete pContext;
+        return;
+      }
+
+      st->next_idx.assign(CHANNEL_NUM, 0);
+      st->outstanding.assign(CHANNEL_NUM, 0);
+
+      using IssueFn = std::function<void(int, uint64_t)>;
+
+      auto issueNext = std::make_shared<IssueFn>();
+      std::weak_ptr<IssueFn> weakIssueNext(issueNext);
+
+      *issueNext = [this, st, weakIssueNext](int ch, uint64_t nowTick) {
+        if (ch < 0 || ch >= CHANNEL_NUM) {
+          return;
+        }
+
+        if (st->outstanding[ch]) {
+          return;
+        }
+
+        const size_t idx = st->next_idx[ch];
+
+        if (idx >= st->per_ch_lpn[ch].size()) {
+          return;
+        }
+
+        st->outstanding[ch] = 1;
+        st->next_idx[ch] = idx + 1;
+
+        if (!st->flash_issued) {
+          st->flash_issued = true;
+          st->t_flash_first_issue = nowTick;
+          st->t_flash_last_done = nowTick;
+        }
+
+        const uint64_t slpn = st->per_ch_lpn[ch][idx];
+        const uint64_t nlpn = 1;
+
+        auto holdIssueNext = weakIssueNext.lock();
+
+        DMAFunction readDone =
+            [st, ch, weakIssueNext, holdIssueNext](uint64_t doneTick, void *) {
+              (void)holdIssueNext;
+
+              st->outstanding[ch] = 0;
+              st->completed++;
+              st->t_flash_last_done =
+                  std::max(st->t_flash_last_done, doneTick);
+
+              if (st->completed == st->total_reads) {
+                const uint64_t t_flash =
+                    st->t_flash_last_done - st->t_flash_first_issue;
+
+                g_search_flash_stats.recordWithFlash(t_flash);
+
+                st->cmd_end = doneTick;
+
+                SearchLayerSample sample;
+                sample.cmd_ticks = st->cmd_end - st->cmd_begin;
+                sample.payload_dma_ticks = st->payload_dma_ticks;
+                sample.ims_decode_ticks = st->ims_decode_ticks;
+                sample.flash_wall_ticks = t_flash;
+                sample.nreads = st->total_reads;
+                sample.rounds = st->rounds;
+                sample.layer = st->layer;
+
+                recordSearchLayerSample(sample);
+
+                const uint64_t layer_sum = st->layer.sum();
+
+               MYDB_LOG("SEARCH_KEY nreads=%zu rounds=%zu cmd=%" PRIu64
+                        " payload_dma=%" PRIu64
+                        " decode=%" PRIu64
+                        " flash_wall=%" PRIu64
+                        " HIL=%" PRIu64
+                        " ICL=%" PRIu64
+                        " FTL=%" PRIu64
+                        " PAL=%" PRIu64,
+                        st->total_reads,
+                        st->rounds,
+                        sample.cmd_ticks,
+                        sample.payload_dma_ticks,
+                        sample.ims_decode_ticks,
+                        sample.flash_wall_ticks,
+                        st->layer.hil,
+                        st->layer.icl,
+                        st->layer.ftl,
+                        st->layer.pal);
+
+                IOContext *io = st->io;
+
+                io->resp.makeStatus(false, false,
+                                    TYPE_GENERIC_COMMAND_STATUS,
+                                    STATUS_SUCCESS);
+                io->function(io->resp);
+
+                delete io;
+                return;
+              }
+
+              if (auto fn = weakIssueNext.lock()) {
+                (*fn)(ch, doneTick);
+              }
+            };
+
+        auto layerDone = [st](const SimpleSSD::Prof::Breakdown &b) {
+          if (!b.valid) {
+            return;
+          }
+
+          st->layer.hil += b.excl[SimpleSSD::Prof::L_HIL];
+          st->layer.icl += b.excl[SimpleSSD::Prof::L_ICL];
+          st->layer.ftl += b.excl[SimpleSSD::Prof::L_FTL];
+          st->layer.pal += b.excl[SimpleSSD::Prof::L_PAL];
+        };
+
+        pParent->readIMSDirectFTL(this,
+                                  slpn,
+                                  nlpn,
+                                  readDone,
+                                  nullptr,
+                                  layerDone);
+      };
+
+      for (int ch = 0; ch < CHANNEL_NUM; ++ch) {
+        (*issueNext)(ch, tickAfterDma);
+      }
     };
-    for (int ch = 0; ch < CHANNEL_NUM; ++ch) {
-      (*issueNext)(ch, tick);
-    }
+
+    pContext->dma->read(0,
+                        static_cast<uint64_t>(pContext->nlb),
+                        pContext->buffer,
+                        payloadDone,
+                        context);
   };
 
   IOContext *pContext = new IOContext(func, resp);
-  execute(CPU::NVME__NAMESPACE, CPU::READ, doSearch, pContext);
+
+  pContext->nlb = payloadSize;
+  pContext->beginAt = getTick();
+
+  CPUContext *pCPU =
+      new CPUContext(doReadPayload,
+                     pContext,
+                     CPU::NVME__NAMESPACE,
+                     CPU::READ);
+
+  if (req.useSGL) {
+    pContext->dma =
+        new SGL(cfgdata,
+                cpuHandler,
+                pCPU,
+                req.entry.data1,
+                req.entry.data2);
+  }
+  else {
+    pContext->dma =
+        new PRPList(cfgdata,
+                    cpuHandler,
+                    pCPU,
+                    req.entry.data1,
+                    req.entry.data2,
+                    static_cast<uint64_t>(payloadSize));
+  }
 }
 
 void Namespace::erase_sstable(SQEntryWrapper &req, RequestFunction &func) {
@@ -2734,104 +2893,6 @@ void Namespace::erase_sstable(SQEntryWrapper &req, RequestFunction &func) {
 
   pParent->trimIMS(this, slpn, nlpn, doTrimDone, pContext);
 }
-
-// void Namespace::compaction_io(SQEntryWrapper &req, RequestFunction &func) {
-//   CQEntryWrapper resp(req);
-
-//   // 1. 檢查 namespace 是否 attached
-//   if (!attached) {
-//       resp.makeStatus(true, false,
-//                       TYPE_COMMAND_SPECIFIC_STATUS,
-//                       STATUS_NAMESPACE_NOT_ATTACHED);
-//       debugprint(LOG_IMS,
-//                   "NVM     | Compaction IO sim | Command failed (namespace not attached)");
-//       func(resp);
-//       return;
-//   }
-
-//   DMAFunction doRead = [this](uint64_t tick, void *context) {
-//     DMAFunction done = [this](uint64_t tick, void *context) {
-//       IOContext *pContext = static_cast<IOContext*>(context);
-//       pContext->beginAt++;
-
-//       if (pContext->beginAt == pContext->nlb) {
-//           pContext->resp.makeStatus(false, false,
-//                                     TYPE_GENERIC_COMMAND_STATUS,
-//                                     STATUS_SUCCESS);
-//           pContext->function(pContext->resp);
-
-//           if (pContext->buffer) {
-//               free(pContext->buffer);
-//               pContext->buffer = nullptr;
-//           }
-//           if (pContext->dma) {
-//               delete pContext->dma;
-//               pContext->dma = nullptr;
-//           }
-//           debugprint(
-//             LOG_IMS,
-//             "NVM     | Compaction IO sim  | CQ %u | SQ %u:%u | CID %u | NSID %-5d | %" PRIu64 " - %" PRIu64 " (%" PRIu64 ")",
-//             pContext->resp.cqID, pContext->resp.entry.dword2.sqID,
-//             pContext->resp.sqUID, pContext->resp.entry.dword3.commandID, nsid, pContext->tick, tick,
-//             tick - pContext->tick);
-//           delete pContext;
-//       }
-//     };
-    
-//     IOContext *pContext = (IOContext *)context;
-//     pContext->tick = tick;
-//     pContext->beginAt = 0;
-//     std::vector<uint64_t> lbn_list;
-//     int ret = ims.simulate_compaction_io(lbn_list);
-
-//     if (ret == OPERATION_FAILURE) {
-//         debugprint(LOG_IMS,
-//                   "NVM     | Compaction IO sim | ims.simulate_compaction_io() failed");
-//         pContext->resp.makeStatus(true, false,
-//                                   TYPE_COMMAND_SPECIFIC_STATUS,
-//                                   STATUS_COMMAND_FAILD);
-//         pContext->function(pContext->resp);
-//         delete pContext;
-//         return;   // 一定要 return
-//     }
-
-//     if (lbn_list.empty()) {
-//         debugprint(LOG_IMS,
-//                   "NVM     | Compaction IO sim | lbn_list is empty");
-//         pContext->resp.makeStatus(false, false,
-//                                   TYPE_GENERIC_COMMAND_STATUS,
-//                                   STATUS_SUCCESS);
-//         pContext->function(pContext->resp);
-//         if (pContext->dma) {
-//             delete pContext->dma;
-//             pContext->dma = nullptr;
-//         }
-//         delete pContext;
-//         return;   // 一定要 return
-//     }
-//     debugprint(LOG_IMS,
-//               "NVM     | Compaction IO sim | ims.simulate_compaction_io() success, nlb=%zu",
-//               lbn_list.size());
-//     int count = 1;
-//     for (auto lbn : lbn_list) {
-//       debugprint(LOG_IMS,
-//               "NVM     | Compaction IO sim | Read SStable in LBN:%llu in CH[%d] | Count / Total : %d/%zu ",
-//               lbn,LBN2CH(lbn),count,lbn_list.size());
-//       uint64_t slpn = LBN2LPN(lbn);
-//       uint64_t nlpn = IMS_PAGE_NUM;
-//       pParent->readIMS(this, slpn, nlpn, done, pContext);
-//       count++;
-//       // pParent->readIMSDirectFTL(this, slpn, nlpn, done, pContext);
-//     }
-//   };
-  
-//   IOContext *pContext = new IOContext(func, resp);
-
-//   pContext->beginAt = getTick();
-//   CPUContext *pCPU =
-//       new CPUContext(doRead, pContext, CPU::NVME__NAMESPACE, CPU::READ);
-
-// }
 
 
 void Namespace::compaction_io(SQEntryWrapper &req, RequestFunction &func) {

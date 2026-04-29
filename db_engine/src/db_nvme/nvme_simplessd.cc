@@ -664,37 +664,40 @@ int gem5Driver::nvme_read_ssKeyRange(std::string filename, char* buffer){
 }
 
 
-int gem5Driver::nvme_search(char* buffer,size_t size){
-    if(buffer == nullptr){
-        pr_error("nvme_search failed ,data buffer is nullptr");
+
+
+int gem5Driver::nvme_search(char* buffer, size_t size) {
+    if (buffer == nullptr) {
+        pr_error("nvme_search failed, data buffer is nullptr");
         return COMMAND_FAILED;
     }
-    int err = 0;
-    err = nvme_write_metadata(reinterpret_cast<char*>(buffer),size);
-    if(err == OPERATION_FAILURE){
-        pr_error("nvme_write_metadata fail in nvme_search");
-        return OPERATION_FAILURE;
-    }
-    nmc_config_t config_obj;
-    nmc_config_t *config = &config_obj;
-    init_nmc_config(config); 
 
-    // config->dry = true;
-    config->OPCODE = OPCODE_SEARCH;
-    config->data = reinterpret_cast<char*>(buffer);
-    config->data_len = size;
-    config->cdw12 = size;
-    err = pass_io_command(config);
-    if(err == STATUS_OPERATION_SUCCESS){
-        pr_debug("nvme_search success");
-        err = COMMAND_SUCCESS;
+    if (size == 0 || size > UINT32_MAX) {
+        pr_error("nvme_search failed, invalid payload size=%zu", size);
+        return COMMAND_FAILED;
     }
-    else{
-        pr_error("nvme close failed");
-        pr_error("error code: 0x%x", err);
-        err = COMMAND_FAILED;
+
+    nmc_config_t config_obj{};
+    nmc_config_t *config = &config_obj;
+    init_nmc_config(config);
+
+    config->OPCODE = OPCODE_SEARCH_KEY; 
+
+    config->data = buffer;
+    config->data_len = static_cast<uint32_t>(size);
+
+    config->cdw12 = static_cast<uint32_t>(size);
+
+    int err = pass_io_command(config);
+
+    if (err == STATUS_OPERATION_SUCCESS || err == 0) {
+        pr_debug("nvme_search success, payload size=%zu", size);
+        return COMMAND_SUCCESS;
     }
-    return err;
+
+    pr_error("nvme_search failed");
+    pr_error("error code: 0x%x", err);
+    return COMMAND_FAILED;
 }
 
 int gem5Driver::nvme_compaction_io(const CompactionIOSimMeta& meta) {

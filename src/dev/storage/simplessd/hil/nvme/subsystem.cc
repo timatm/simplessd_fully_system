@@ -469,26 +469,79 @@ void Subsystem::readIMS(Namespace *ns, uint64_t slpn, uint64_t nlpn,
   execute(CPU::NVME__SUBSYSTEM, CPU::CONVERT_UNIT, doRead, req);
 }
 
-void Subsystem::readIMSDirectFTL(Namespace *ns, uint64_t slpn, uint64_t nlpn,
-                                 DMAFunction &func, void *context) {
+void Subsystem::readIMSDirectFTL(
+    Namespace *ns,
+    uint64_t slpn,
+    uint64_t nlpn,
+    DMAFunction &func,
+    void *context,
+    LayerProfileDone layerDone) {
   (void)ns;
-  Request *req = new Request(func, context);
 
-  DMAFunction doRead = [this](uint64_t, void *context) {
-    auto req = (Request *)context;
-    // 關鍵：呼叫 HIL 的直通版本
-    pHIL->readDirectFTL(*req);
+  const uint64_t profId = SimpleSSD::Prof::NextID();
 
-    delete req;
-  };
+  SimpleSSD::Prof::BeginReq(profId, slpn, nlpn);
 
+  DMAFunction wrappedDone =
+      [func, profId, layerDone](uint64_t doneTick, void *ctx) mutable {
+        SimpleSSD::Prof::End(profId,
+                             SimpleSSD::Prof::L_HIL,
+                             doneTick);
+        auto b = SimpleSSD::Prof::TakeAndErase(profId);
+
+        if (layerDone && b.valid) {
+          layerDone(b);
+        }
+
+        func(doneTick, ctx);
+      };
+
+  Request *req = new Request(wrappedDone, context);
+
+  req->reqID = static_cast<uint32_t>(profId);
   req->range.slpn = slpn;
   req->range.nlp  = nlpn;
   req->offset     = 0;
   req->length     = nlpn * logicalPageSize;
 
-  execute(CPU::NVME__SUBSYSTEM, CPU::CONVERT_UNIT, doRead, req);
+  DMAFunction doRead = [this, profId](uint64_t tick, void *context) {
+    auto req = static_cast<Request *>(context);
+
+    SimpleSSD::Prof::Start(profId,
+                           SimpleSSD::Prof::L_HIL,
+                           tick);
+
+    pHIL->readDirectFTL(*req);
+
+    delete req;
+  };
+
+  execute(CPU::NVME__SUBSYSTEM,
+          CPU::CONVERT_UNIT,
+          doRead,
+          req);
 }
+
+// void Subsystem::readIMSDirectFTL(Namespace *ns, uint64_t slpn, uint64_t nlpn,
+//                                  DMAFunction &func, void *context) {
+//   (void)ns;
+//   Request *req = new Request(func, context);
+
+//   DMAFunction doRead = [this](uint64_t, void *context) {
+//     auto req = (Request *)context;
+//     // 關鍵：呼叫 HIL 的直通版本
+//     pHIL->readDirectFTL(*req);
+
+//     delete req;
+//   };
+
+//   req->range.slpn = slpn;
+//   req->range.nlp  = nlpn;
+//   req->offset     = 0;
+//   req->length     = nlpn * logicalPageSize;
+
+//   execute(CPU::NVME__SUBSYSTEM, CPU::CONVERT_UNIT, doRead, req);
+// }
 
 void Subsystem::readIMSDirectFTLBatch(Namespace *ns,
                                       const std::vector<uint64_t> &lpnList,

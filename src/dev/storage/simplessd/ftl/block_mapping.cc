@@ -25,6 +25,7 @@
 #include "util/algorithm.hh"
 #include "util/bitset.hh"
 #include "ims/include/def.hh"
+#include "util/layer_prof.hh"
 namespace SimpleSSD {
 
 namespace FTL {
@@ -666,7 +667,14 @@ void blockMapping::readInternal(Request &req, uint64_t &tick) {
     if (!bRandomTweak) {
       palRequest.ioFlag.set();
       beginAt = tick;
+      const uint64_t palBegin = beginAt;
       pPAL->read(palRequest, beginAt);
+      const uint64_t palEnd = beginAt;
+
+      SimpleSSD::Prof::Add(req.reqID,
+                          SimpleSSD::Prof::L_PAL,
+                          palBegin,
+                          palEnd);
       tick = beginAt;
     } else {
       for (uint32_t idx = 0; idx < bitsetSize; idx++) {
@@ -674,7 +682,14 @@ void blockMapping::readInternal(Request &req, uint64_t &tick) {
           palRequest.ioFlag.reset();
           palRequest.ioFlag.set(idx);
           beginAt = tick;
+          const uint64_t palBegin = beginAt;
           pPAL->read(palRequest, beginAt);
+          const uint64_t palEnd = beginAt;
+
+          SimpleSSD::Prof::Add(req.reqID,
+                              SimpleSSD::Prof::L_PAL,
+                              palBegin,
+                              palEnd);
           finishedAt = MAX(finishedAt, beginAt);
         }
       }
@@ -717,8 +732,14 @@ void blockMapping::readInternal(Request &req, uint64_t &tick) {
           beginAt = tick;
 
           block->second.read(palRequest.pageIndex, idx, beginAt);
+          const uint64_t palBegin = beginAt;
           pPAL->read(palRequest, beginAt);
+          const uint64_t palEnd = beginAt;
 
+          SimpleSSD::Prof::Add(req.reqID,
+                              SimpleSSD::Prof::L_PAL,
+                              palBegin,
+                              palEnd);
           finishedAt = MAX(finishedAt, beginAt);
         }
       }
